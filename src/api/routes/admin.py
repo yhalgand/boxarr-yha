@@ -11,6 +11,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ...core.radarr import RadarrService
+from ...core.boxoffice_provider import DEFAULT_PROVIDER, normalize_provider
+from ...core.boxoffice_storage import iter_weekly_page_paths
 from ...utils.config import settings
 from ...utils.logger import get_logger
 
@@ -49,11 +51,12 @@ class RepairProgress(BaseModel):
 
 
 @router.get("/check-missing-metadata", response_model=MissingMetadataCheck)
-async def check_missing_metadata():
+async def check_missing_metadata(provider: str = DEFAULT_PROVIDER):
     """Check for movies with missing TMDB metadata."""
     try:
-        weekly_pages_dir = Path(settings.boxarr_data_directory) / "weekly_pages"
-        if not weekly_pages_dir.exists():
+        provider = normalize_provider(provider)
+        json_files = iter_weekly_page_paths(settings.boxarr_data_directory, provider)
+        if not json_files:
             return MissingMetadataCheck(
                 has_issues=False,
                 total_weeks=0,
@@ -71,8 +74,6 @@ async def check_missing_metadata():
         total_movies = 0
         total_occurrences_missing = 0
         weeks_with_issues = set()
-
-        json_files = list(weekly_pages_dir.glob("*.json"))
 
         for json_file in json_files:
             try:
@@ -124,7 +125,7 @@ async def check_missing_metadata():
 
 
 @router.post("/repair-missing-metadata")
-async def repair_missing_metadata(request: RepairRequest):
+async def repair_missing_metadata(request: RepairRequest, provider: str = DEFAULT_PROVIDER):
     """Repair missing TMDB metadata for movies with streaming progress updates."""
 
     async def generate_progress() -> AsyncGenerator[str, None]:
@@ -133,8 +134,8 @@ async def repair_missing_metadata(request: RepairRequest):
                 yield f"data: {json.dumps({'error': 'Radarr not configured'})}\n\n"
                 return
 
+            provider_value = normalize_provider(provider)
             radarr_service = RadarrService()
-            weekly_pages_dir = Path(settings.boxarr_data_directory) / "weekly_pages"
 
             # Phase 1: Collect unique movies missing data
             yield f"data: {json.dumps({'stage': 'scanning', 'message': 'Scanning for movies with missing metadata...'})}\n\n"
@@ -143,7 +144,9 @@ async def repair_missing_metadata(request: RepairRequest):
                 {}
             )  # title -> {sample_data, weeks: []}
 
-            json_files = list(weekly_pages_dir.glob("*.json"))
+            json_files = iter_weekly_page_paths(
+                settings.boxarr_data_directory, provider_value
+            )
             for idx, json_file in enumerate(json_files, 1):
                 try:
                     with open(json_file) as f:
@@ -269,8 +272,17 @@ async def repair_missing_metadata(request: RepairRequest):
             total_weeks = len(weeks_to_update)
 
             for idx, week_key in enumerate(weeks_to_update, 1):
-                json_file = weekly_pages_dir / f"{week_key}.json"
+                json_file = next(
+                    (
+                        path
+                        for path in json_files
+                        if path.stem == week_key
+                    ),
+                    None,
+                )
                 try:
+                    if not json_file:
+                        continue
                     message = f"Updating week {week_key} ({idx}/{total_weeks})..."
                     yield f"data: {json.dumps({'stage': 'updating', 'progress': idx, 'total': total_weeks, 'message': message})}\n\n"
 
@@ -291,6 +303,9 @@ async def repair_missing_metadata(request: RepairRequest):
 
                     if updated:
                         # Save the updated file
+                        if json_file.parent.name != provider_value:
+                            # Keep legacy flat files read-only.
+                            continue
                         with open(json_file, "w") as f:
                             json.dump(data, f, indent=2, default=str)
                         updated_weeks += 1

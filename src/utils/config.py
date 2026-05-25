@@ -502,6 +502,18 @@ class Settings(BaseSettings):
         (self.boxarr_data_directory / "history").mkdir(parents=True, exist_ok=True)
         (self.boxarr_data_directory / "logs").mkdir(parents=True, exist_ok=True)
         (self.boxarr_data_directory / "weekly_pages").mkdir(parents=True, exist_ok=True)
+        (self.boxarr_data_directory / "weekly_pages" / "mojo_us").mkdir(
+            parents=True, exist_ok=True
+        )
+        (self.boxarr_data_directory / "weekly_pages" / "jpboxoffice_fr").mkdir(
+            parents=True, exist_ok=True
+        )
+        (self.boxarr_data_directory / "history" / "mojo_us").mkdir(
+            parents=True, exist_ok=True
+        )
+        (self.boxarr_data_directory / "history" / "jpboxoffice_fr").mkdir(
+            parents=True, exist_ok=True
+        )
 
     def to_dict(self, include_sensitive: bool = False) -> Dict:
         """Export settings as dictionary."""

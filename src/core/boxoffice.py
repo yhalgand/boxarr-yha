@@ -1,14 +1,21 @@
-"""Box Office Mojo scraper for fetching weekly box office data."""
+"""Box office providers and compatibility service facade."""
+
+from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional
 
 import httpx
 from bs4 import BeautifulSoup
 
 from ..utils.logger import get_logger
+from .boxoffice_provider import (
+    DEFAULT_PROVIDER,
+    BoxOfficeProvider,
+    normalize_provider,
+)
 from .exceptions import BoxOfficeError
 
 logger = get_logger(__name__)
@@ -32,112 +39,47 @@ class BoxOfficeMovie:
         return asdict(self)
 
 
-class BoxOfficeService:
-    """Service for fetching box office data from Box Office Mojo."""
+class MojoUSProvider(BoxOfficeProvider):
+    """Box Office Mojo US provider."""
 
+    provider_key = "mojo_us"
     BASE_URL = "https://www.boxofficemojo.com"
     USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
     def __init__(self, http_client: Optional[httpx.Client] = None):
-        """
-        Initialize Box Office service.
-
-        Args:
-            http_client: Optional HTTP client for testing
-        """
-        self.client = http_client or httpx.Client(
-            headers={"User-Agent": self.USER_AGENT}, timeout=30.0, follow_redirects=True
+        super().__init__(
+            http_client
+            or httpx.Client(
+                headers={"User-Agent": self.USER_AGENT},
+                timeout=30.0,
+                follow_redirects=True,
+            )
         )
 
-    def __enter__(self):
-        """Context manager entry."""
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit - close HTTP client."""
-        self.close()
-
     def close(self) -> None:
-        """Close HTTP client."""
         if self.client:
             self.client.close()
 
-    def get_weekend_dates(
-        self, date: Optional[datetime] = None
-    ) -> Tuple[datetime, datetime, int, int]:
-        """
-        Calculate the most recent weekend dates (Friday-Sunday).
-
-        Args:
-            date: Reference date (defaults to today)
-
-        Returns:
-            Tuple of (friday_date, sunday_date, year, week_number)
-        """
-        if date is None:
-            date = datetime.now()
-
-        today = date.date()
-        weekday = today.weekday()  # Monday=0 ... Sunday=6
-        days_since_friday = (weekday - 4) % 7
-
-        # If today is Friday, Saturday, or Sunday, the weekend is NOT complete yet
-        # (Box Office Mojo publishes data on Monday), so go back to previous weekend
-        if weekday in (4, 5, 6):
-            days_since_friday += 7
-
-        friday = datetime.combine(
-            today - timedelta(days=days_since_friday), datetime.min.time()
-        )
-        sunday = friday + timedelta(days=2)
-
-        # Get ISO week number
-        year, week, _ = friday.isocalendar()
-
-        return friday, sunday, year, week
-
     def parse_money_value(self, text: str) -> Optional[float]:
-        """
-        Parse monetary value from string.
-
-        Args:
-            text: String containing monetary value (e.g., "$1,234,567")
-
-        Returns:
-            Float value or None if parsing fails
-        """
+        """Parse a monetary value from a string."""
         if not text or not isinstance(text, str):
             return None
 
         try:
-            # Remove currency symbols, commas, and spaces
-            # Keep only digits and the first decimal point
             clean_text = re.sub(r"[$,\s]", "", text)
-
-            # Handle multiple decimal points by keeping only first
             parts = clean_text.split(".")
             if len(parts) > 2:
                 clean_text = parts[0] + "." + "".join(parts[1:])
-
             return float(clean_text) if clean_text and clean_text != "." else None
         except ValueError:
             return None
 
     def parse_integer_value(self, text: str) -> Optional[int]:
-        """
-        Parse integer value from string.
-
-        Args:
-            text: String containing integer value
-
-        Returns:
-            Integer value or None if parsing fails
-        """
+        """Parse an integer value from a string."""
         if not text:
             return None
 
         try:
-            # Remove commas and non-digit characters except minus
             clean_text = re.sub(r"[^\d-]", "", text)
             return int(clean_text) if clean_text else None
         except (ValueError, AttributeError):
@@ -149,20 +91,7 @@ class BoxOfficeService:
         week: Optional[int] = None,
         limit: int = 10,
     ) -> List[BoxOfficeMovie]:
-        """
-        Fetch box office data for a specific weekend.
-
-        Args:
-            year: Year (defaults to current year)
-            week: ISO week number (defaults to most recent weekend)
-
-        Returns:
-            List of BoxOfficeMovie objects
-
-        Raises:
-            BoxOfficeError: If fetching or parsing fails
-        """
-        # Calculate weekend if not specified
+        """Fetch box office data from Box Office Mojo US."""
         if year is None or week is None:
             _, _, year, week = self.get_weekend_dates()
 
@@ -186,39 +115,22 @@ class BoxOfficeService:
     def parse_box_office_html(
         self, html: str, limit: int = 10
     ) -> List[BoxOfficeMovie]:  # noqa: C901
-        """
-        Parse box office data from HTML.
-
-        Args:
-            html: HTML content from Box Office Mojo
-
-        Returns:
-            List of BoxOfficeMovie objects
-
-        Raises:
-            BoxOfficeError: If parsing fails
-        """
+        """Parse a Box Office Mojo HTML page."""
         try:
             soup = BeautifulSoup(html, "html.parser")
             movies: List[BoxOfficeMovie] = []
 
-            # Find the main table
             table = soup.find("table", class_="a-bordered")
             if not table:
-                # Try alternative parsing method for different page structure
                 return self._parse_alternative_format(html, limit=limit)
 
-            # Parse table rows
-            rows = (
-                table.find_all("tr")[1:] if hasattr(table, "find_all") else []
-            )  # Skip header row
+            rows = table.find_all("tr")[1:] if hasattr(table, "find_all") else []
 
             for idx, row in enumerate(rows[:limit], start=1):
                 cells = row.find_all("td")
                 if len(cells) < 3:
                     continue
 
-                # Extract movie title - Box Office Mojo structure has title in cell[2]
                 title_cell = cells[2] if len(cells) > 2 else None
                 if not title_cell:
                     continue
@@ -230,30 +142,20 @@ class BoxOfficeService:
                 href = str(title_link.get("href", ""))
                 release_url = href if href.startswith("/release/") else None
 
-                # Skip if title looks like a studio name
                 if self._is_studio_name(title):
                     continue
 
-                # Extract financial data - adjusted for new cell positions
                 weekend_gross = None
                 total_gross = None
                 weeks_released = None
                 theater_count = None
 
-                # Weekend gross is now in cell[3] (was cell[2])
                 if len(cells) >= 4:
-                    weekend_gross = self.parse_money_value(
-                        cells[3].get_text(strip=True)
-                    )
-                # Theater count is now in cell[6] (was cell[5])
+                    weekend_gross = self.parse_money_value(cells[3].get_text(strip=True))
                 if len(cells) >= 7:
-                    theater_count = self.parse_integer_value(
-                        cells[6].get_text(strip=True)
-                    )
-                # Total gross is now in cell[7] (was cell[6])
+                    theater_count = self.parse_integer_value(cells[6].get_text(strip=True))
                 if len(cells) >= 8:
                     total_gross = self.parse_money_value(cells[7].get_text(strip=True))
-                # Weeks released is now in cell[9] (was cell[8])
                 if len(cells) >= 10:
                     weeks_released = self.parse_integer_value(
                         cells[9].get_text(strip=True)
@@ -269,7 +171,6 @@ class BoxOfficeService:
                     release_url=release_url,
                 )
                 movies.append(movie)
-
                 logger.debug(f"Parsed movie: {movie}")
 
             if not movies:
@@ -277,7 +178,6 @@ class BoxOfficeService:
 
             logger.info(f"Successfully parsed {len(movies)} movies from box office")
             return movies
-
         except Exception as e:
             logger.error(f"Failed to parse box office HTML: {e}")
             raise BoxOfficeError(f"Failed to parse box office data: {e}") from e
@@ -285,16 +185,7 @@ class BoxOfficeService:
     def _parse_alternative_format(
         self, html: str, limit: int = 10
     ) -> List[BoxOfficeMovie]:
-        """
-        Parse box office data using regex pattern (fallback method).
-
-        Args:
-            html: HTML content
-
-        Returns:
-            List of BoxOfficeMovie objects
-        """
-        # Pattern from original implementation - capture release URL and title
+        """Fallback parser for alternate Box Office Mojo page layouts."""
         pattern = r'(/release/rl\d+/)[^"]*">([^<]+)</a>'
         matches = re.findall(pattern, html)
 
@@ -302,7 +193,6 @@ class BoxOfficeService:
         rank = 1
 
         for release_url, title in matches:
-            # Skip studio names
             if self._is_studio_name(title):
                 continue
 
@@ -320,15 +210,7 @@ class BoxOfficeService:
         return movies
 
     def extract_imdb_id(self, release_url: str) -> Optional[str]:
-        """
-        Fetch a Box Office Mojo release page and extract the IMDb ID.
-
-        Args:
-            release_url: Relative URL like "/release/rl1359839233/"
-
-        Returns:
-            IMDb ID (e.g., "tt27047903") or None
-        """
+        """Fetch a release page and extract the IMDb ID."""
         try:
             url = f"{self.BASE_URL}{release_url}"
             response = self.client.get(url)
@@ -344,12 +226,7 @@ class BoxOfficeService:
         return result
 
     def enrich_with_imdb_ids(self, movies: List["BoxOfficeMovie"]) -> None:
-        """
-        Enrich movies with IMDb IDs by fetching their release pages.
-
-        Args:
-            movies: List of BoxOfficeMovie objects to enrich in-place
-        """
+        """Enrich movies in-place with IMDb IDs."""
         count = 0
         for movie in movies:
             if not movie.release_url:
@@ -361,15 +238,7 @@ class BoxOfficeService:
         logger.info(f"Enriched {count}/{len(movies)} movies with IMDb IDs")
 
     def _is_studio_name(self, text: str) -> bool:
-        """
-        Check if text appears to be a studio/distributor name.
-
-        Args:
-            text: Text to check
-
-        Returns:
-            True if text looks like a studio name
-        """
+        """Check whether a title looks like a studio name."""
         studio_keywords = [
             "Pictures",
             "Studios",
@@ -382,46 +251,74 @@ class BoxOfficeService:
         ]
         return any(keyword.lower() in text.lower() for keyword in studio_keywords)
 
+
+class JPBoxOfficeFRProvider(BoxOfficeProvider):
+    """Stub provider for a future French box office source."""
+
+    provider_key = "jpboxoffice_fr"
+
+    def fetch_weekend_box_office(
+        self,
+        year: Optional[int] = None,
+        week: Optional[int] = None,
+        limit: int = 10,
+    ) -> List[BoxOfficeMovie]:
+        raise BoxOfficeError(
+            "Provider 'jpboxoffice_fr' is not implemented yet"
+        )
+
+
+def create_provider(provider: Optional[str] = None, http_client=None) -> BoxOfficeProvider:
+    """Create a concrete provider instance from a provider id."""
+    normalized = normalize_provider(provider)
+    if normalized == "mojo_us":
+        return MojoUSProvider(http_client=http_client)
+    if normalized == "jpboxoffice_fr":
+        return JPBoxOfficeFRProvider(http_client=http_client)
+
+    raise BoxOfficeError(f"Unsupported provider '{provider}'")
+
+
+class BoxOfficeService(BoxOfficeProvider):
+    """Compatibility facade that delegates to a concrete provider."""
+
+    def __init__(
+        self,
+        http_client: Optional[httpx.Client] = None,
+        provider: str = DEFAULT_PROVIDER,
+    ):
+        if isinstance(http_client, str) and provider == DEFAULT_PROVIDER:
+            provider = http_client
+            http_client = None
+
+        self.provider_key = normalize_provider(provider)
+        self._provider = create_provider(self.provider_key, http_client=http_client)
+        super().__init__(getattr(self._provider, "client", None))
+
+    def close(self) -> None:
+        close = getattr(self._provider, "close", None)
+        if callable(close):
+            close()
+
+    def __getattr__(self, item):
+        """Delegate provider-specific helpers to the concrete provider."""
+        return getattr(self._provider, item)
+
+    def get_weekend_dates(self, date: Optional[datetime] = None):
+        return self._provider.get_weekend_dates(date)
+
+    def fetch_weekend_box_office(
+        self,
+        year: Optional[int] = None,
+        week: Optional[int] = None,
+        limit: int = 10,
+    ) -> List[BoxOfficeMovie]:
+        return self._provider.fetch_weekend_box_office(year, week, limit=limit)
+
     def get_current_week_movies(self, limit: int = 10) -> List[BoxOfficeMovie]:
-        """
-        Get current week's box office movies.
-        Actually fetches the previous week's data since box office data
-        is only available after the weekend ends.
-
-        Args:
-            limit: Maximum number of movies to fetch
-
-        Returns:
-            List of BoxOfficeMovie objects
-        """
-        # get_weekend_dates() returns the most recent complete weekend
-        _, _, year, week = self.get_weekend_dates()
-        return self.fetch_weekend_box_office(year, week, limit=limit)
+        return self._provider.get_current_week_movies(limit=limit)
 
     def get_historical_movies(
         self, weeks_back: int = 1
     ) -> Dict[str, List[BoxOfficeMovie]]:
-        """
-        Get historical box office data for multiple weeks.
-
-        Args:
-            weeks_back: Number of weeks to fetch
-
-        Returns:
-            Dictionary mapping week string to movie list
-        """
-        history = {}
-
-        for i in range(weeks_back):
-            date = datetime.now() - timedelta(weeks=i)
-            _, _, year, week = self.get_weekend_dates(date)
-            week_key = f"{year}W{week:02d}"
-
-            try:
-                movies = self.fetch_weekend_box_office(year, week)
-                history[week_key] = movies
-            except BoxOfficeError as e:
-                logger.warning(f"Failed to fetch week {week_key}: {e}")
-                continue
-
-        return history
+        return self._provider.get_historical_movies(weeks_back=weeks_back)

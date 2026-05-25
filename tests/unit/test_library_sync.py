@@ -58,11 +58,12 @@ def test_refresh_weekly_data_from_radarr_updates_stale_entries(tmp_path, monkeyp
     weekly_pages_dir = tmp_path / "weekly_pages"
     weekly_pages_dir.mkdir()
 
-    week_file = weekly_pages_dir / "2024W10.json"
-    with open(week_file, "w") as f:
+    legacy_week_file = weekly_pages_dir / "2024W10.json"
+    with open(legacy_week_file, "w") as f:
         json.dump(
             {
                 "generated_at": "2026-04-05T10:00:00",
+                "provider": "mojo_us",
                 "year": 2024,
                 "week": 10,
                 "matched_movies": 1,
@@ -156,7 +157,11 @@ def test_refresh_weekly_data_from_radarr_updates_stale_entries(tmp_path, monkeyp
         "movies_linked": 1,
     }
 
-    with open(week_file) as f:
+    provider_week_file = weekly_pages_dir / "mojo_us" / "2024W10.json"
+    assert provider_week_file.exists()
+    assert legacy_week_file.exists()
+
+    with open(provider_week_file) as f:
         refreshed = json.load(f)
 
     downloaded = refreshed["movies"][0]
@@ -173,3 +178,4 @@ def test_refresh_weekly_data_from_radarr_updates_stale_entries(tmp_path, monkeyp
 
     assert refreshed["matched_movies"] == 2
     assert "status_refreshed_at" in refreshed
+    assert refreshed["provider"] == "mojo_us"

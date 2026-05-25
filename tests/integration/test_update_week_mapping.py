@@ -107,6 +107,9 @@ class _FakeRadarrService:
 
 
 class _FakeBoxOfficeService:
+    def __init__(self, *_, **__):
+        pass
+
     def fetch_weekend_box_office(self, year: int, week: int, limit: int = 10):
         # Single item to keep logic simple
         return [BoxOfficeMovie(rank=1, title="Scary Movie")]  # Horror via TMDB stub
@@ -132,13 +135,33 @@ def test_update_week_respects_genre_mapping(tmp_path, monkeypatch):
     _FakeRadarrService.added_calls.clear()
 
     # Use any valid-ish year/week; BoxOfficeService is faked anyway
-    resp = client.post("/api/scheduler/update-week", json={"year": 2024, "week": 10})
+    resp = client.post(
+        "/api/scheduler/update-week",
+        json={"year": 2024, "week": 10},
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["success"] is True
+    assert data["provider"] == "mojo_us"
     assert data["movies_found"] == 1
     assert data["movies_added"] == 1
 
     # Assert mapping chose the Horror folder
     assert _FakeRadarrService.added_calls, "No add_movie calls captured"
     assert _FakeRadarrService.added_calls[0]["root_folder"] == "/movies/horror"
+
+
+def test_update_week_rejects_invalid_provider(tmp_path, monkeypatch):
+    config_path = _seed_config(tmp_path)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/scheduler/update-week",
+        json={"year": 2024, "week": 10, "provider": "bogus"},
+    )
+    assert resp.status_code == 400
+    assert "Unsupported provider" in resp.json()["detail"]

@@ -1,6 +1,6 @@
 """Core business logic for Boxarr."""
 
-from .boxoffice import BoxOfficeMovie, BoxOfficeService
+from .boxoffice import BoxOfficeMovie, BoxOfficeService, JPBoxOfficeFRProvider, MojoUSProvider
 from .exceptions import (
     BoxarrException,
     BoxOfficeError,
@@ -19,6 +19,8 @@ from .scheduler import BoxarrScheduler
 __all__ = [
     # Services
     "BoxOfficeService",
+    "MojoUSProvider",
+    "JPBoxOfficeFRProvider",
     "RadarrService",
     "MovieMatcher",
     "BoxarrScheduler",

@@ -7,6 +7,12 @@ from typing import Any, Dict, Optional
 
 from ..utils.config import settings
 from ..utils.logger import get_logger
+from .boxoffice_provider import DEFAULT_PROVIDER, normalize_provider
+from .boxoffice_storage import (
+    iter_weekly_page_paths,
+    provider_weekly_page_path,
+    provider_weekly_pages_dir,
+)
 from .models import MovieStatus
 from .radarr import (
     RadarrMovie,
@@ -76,12 +82,13 @@ def refresh_weekly_data_from_radarr(
     radarr_service: Optional[RadarrService] = None,
     data_directory: Optional[Path] = None,
     ignore_cache: bool = False,
+    provider: str = DEFAULT_PROVIDER,
 ) -> Dict[str, int]:
     """Refresh stored weekly JSON files with current Radarr status/details."""
-    weekly_pages_dir = (
-        data_directory or settings.boxarr_data_directory
-    ) / "weekly_pages"
-    if not weekly_pages_dir.exists():
+    base_directory = data_directory or settings.boxarr_data_directory
+    provider = normalize_provider(provider)
+    weekly_paths = iter_weekly_page_paths(base_directory, provider)
+    if not weekly_paths:
         return {
             "weeks_scanned": 0,
             "weeks_updated": 0,
@@ -110,10 +117,7 @@ def refresh_weekly_data_from_radarr(
     movies_refreshed = 0
     movies_linked = 0
 
-    for json_file in sorted(weekly_pages_dir.glob("*.json")):
-        if json_file.name == "current.json":
-            continue
-
+    for json_file in weekly_paths:
         weeks_scanned += 1
 
         try:
@@ -160,7 +164,13 @@ def refresh_weekly_data_from_radarr(
                 1 for movie in data.get("movies", []) if movie.get("radarr_id")
             )
             data["status_refreshed_at"] = datetime.now().isoformat()
-            with open(json_file, "w") as f:
+            data["provider"] = normalize_provider(data.get("provider") or provider)
+            target_file = json_file
+            if provider == DEFAULT_PROVIDER and json_file.parent == base_directory / "weekly_pages":
+                target_file = provider_weekly_page_path(
+                    base_directory, provider, data["year"], data["week"]
+                )
+            with open(target_file, "w") as f:
                 json.dump(data, f, indent=2, default=str)
             weeks_updated += 1
 

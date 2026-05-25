@@ -5,6 +5,47 @@
 
 // Get base path from injected variable (set in base.html)
 const BASE_PATH = window.BOXARR_BASE_PATH || '';
+const DEFAULT_MARKET = window.BOXARR_MARKET || 'US';
+const DEFAULT_PROVIDER = window.BOXARR_PROVIDER || 'mojo_us';
+
+function providerForMarket(market) {
+    return String(market || 'US').toUpperCase() === 'FR' ? 'jpboxoffice_fr' : 'mojo_us';
+}
+
+function marketForProvider(provider) {
+    return String(provider || 'mojo_us').toLowerCase() === 'jpboxoffice_fr' ? 'FR' : 'US';
+}
+
+function getCurrentMarket() {
+    return localStorage.getItem('boxarr-market') || DEFAULT_MARKET;
+}
+
+function getCurrentProvider() {
+    return providerForMarket(getCurrentMarket());
+}
+
+function setMarketPreference(market) {
+    const normalizedMarket = String(market || 'US').toUpperCase() === 'FR' ? 'FR' : 'US';
+    localStorage.setItem('boxarr-market', normalizedMarket);
+    window.BOXARR_MARKET = normalizedMarket;
+    window.BOXARR_PROVIDER = providerForMarket(normalizedMarket);
+
+    const url = new URL(window.location.href);
+    url.searchParams.set('market', normalizedMarket);
+    window.location.href = url.toString();
+}
+
+function apiUrlWithProvider(endpoint, provider = getCurrentProvider()) {
+    const url = new URL(apiUrl(endpoint), window.location.origin);
+    url.searchParams.set('provider', provider);
+    return url.toString();
+}
+
+function pageUrlWithMarket(path) {
+    const url = new URL(makeUrl(path), window.location.origin);
+    url.searchParams.set('market', getCurrentMarket());
+    return url.toString();
+}
 
 // URL helper functions
 function makeUrl(path) {
@@ -183,7 +224,7 @@ function updateGenreMode() {
 }
 
 function refreshSchedulerStatus() {
-    fetch(apiUrl('/scheduler/status'))
+    fetch(apiUrlWithProvider('/scheduler/status'))
         .then(response => response.json())
         .then(data => {
             // Update service status
@@ -267,7 +308,7 @@ function triggerScheduler() {
     btn.disabled = true;
     btn.textContent = 'Triggering...';
     
-    fetch(apiUrl('/scheduler/trigger'), { method: 'POST' })
+    fetch(apiUrlWithProvider('/scheduler/trigger'), { method: 'POST' })
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -456,7 +497,7 @@ function reloadScheduler() {
         
         addLogEntry('Starting box office update...');
         
-        fetch(apiUrl('/scheduler/trigger'), { method: 'POST' })
+        fetch(apiUrlWithProvider('/scheduler/trigger'), { method: 'POST' })
             .then(response => {
                 addLogEntry('Received response from server');
                 return response.json();
@@ -572,12 +613,13 @@ function reloadScheduler() {
         
         addLogEntry(`Starting historical data fetch for ${selectedHistoricalWeekText}`);
         
-        fetch(apiUrl('/scheduler/update-week'), {
+        fetch(apiUrlWithProvider('/scheduler/update-week'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 year: parseInt(year), 
-                week: parseInt(week)
+                week: parseInt(week),
+                provider: getCurrentProvider(),
             })
         })
         .then(response => {
@@ -671,12 +713,13 @@ function reloadScheduler() {
         
         addLogEntry(`Starting historical data fetch for Week ${week}, ${year}`);
         
-        fetch(apiUrl('/scheduler/update-week'), {
+        fetch(apiUrlWithProvider('/scheduler/update-week'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 year: parseInt(year), 
-                week: parseInt(week)
+                week: parseInt(week),
+                provider: getCurrentProvider(),
             })
         })
         .then(response => {
@@ -692,7 +735,7 @@ function reloadScheduler() {
                 if (progressMessage) progressMessage.textContent = '✅ Historical week updated successfully!';
                 addLogEntry('Update completed!', 'success');
                 if (progressFooter) progressFooter.style.display = 'block';
-                setTimeout(() => window.location.href = makeUrl(`/${year}W${String(week).padStart(2, '0')}`), 2000);
+                setTimeout(() => window.location.href = pageUrlWithMarket(`/${year}W${String(week).padStart(2, '0')}`), 2000);
             } else {
                 const errorMsg = data.message || data.error || 'Unknown error occurred';
                 if (progressMessage) progressMessage.textContent = '❌ Update failed';
@@ -747,7 +790,7 @@ function reloadScheduler() {
         const urlParams = new URLSearchParams(window.location.search);
         urlParams.set('per_page', newSize);
         urlParams.set('page', '1'); // Reset to first page when changing page size
-        window.location.href = makeUrl(`/dashboard?${urlParams.toString()}`);
+        window.location.href = pageUrlWithMarket(`/dashboard?${urlParams.toString()}`);
     };
 
     // ==========================================
@@ -1399,7 +1442,7 @@ function reloadScheduler() {
             if (data.success) {
                 showMessage('✓ Configuration saved successfully! Redirecting...', 'success');
                 setTimeout(() => {
-                    window.location.href = makeUrl('/dashboard');
+                    window.location.href = pageUrlWithMarket('/dashboard');
                 }, 1500);
             } else {
                 showMessage('Failed to save: ' + (data.error || 'Unknown error'), 'error');
@@ -1437,6 +1480,24 @@ function reloadScheduler() {
     // ==========================================
 
     document.addEventListener('DOMContentLoaded', function() {
+        const storedMarket = localStorage.getItem('boxarr-market');
+        if (!storedMarket) {
+            localStorage.setItem('boxarr-market', DEFAULT_MARKET);
+        } else if (storedMarket !== getCurrentMarket()) {
+            const currentUrl = new URL(window.location.href);
+            currentUrl.searchParams.set('market', storedMarket);
+            window.location.replace(currentUrl.toString());
+            return;
+        }
+
+        const marketSelector = document.getElementById('marketSelector');
+        if (marketSelector) {
+            marketSelector.value = getCurrentMarket();
+        }
+
+        window.BOXARR_MARKET = getCurrentMarket();
+        window.BOXARR_PROVIDER = getCurrentProvider();
+
         // Check connection status
         checkConnection();
         setInterval(checkConnection, 30000);
@@ -1707,6 +1768,113 @@ function reloadScheduler() {
         } finally {
             buttonEl.disabled = false;
         }
+    };
+
+    function resetBoxarrBatchState(prefix) {
+        window[`${prefix}Results`] = [];
+        window[`${prefix}Failures`] = [];
+    }
+
+    async function runBoxarrUpdate(year, week, provider, prefix) {
+        const response = await fetch(apiUrlWithProvider('/scheduler/update-week', provider), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                year: parseInt(year),
+                week: parseInt(week),
+                provider,
+            }),
+        });
+
+        const data = await response.json();
+        const entry = { year: parseInt(year), week: parseInt(week), provider, ...data };
+
+        if (!response.ok || !data.success) {
+            window[`${prefix}Failures`].push(entry);
+            return entry;
+        }
+
+        window[`${prefix}Results`].push(entry);
+        return entry;
+    }
+
+    window.boxarrWeek = async function (year, week, provider = getCurrentProvider()) {
+        const normalizedProvider = String(provider || getCurrentProvider()).toLowerCase();
+        resetBoxarrBatchState('boxarrWeek');
+        return runBoxarrUpdate(year, week, normalizedProvider, 'boxarrWeek');
+    };
+
+    window.boxarrTest = async function (items, delayMs = 500, provider = getCurrentProvider()) {
+        const normalizedProvider = String(provider || getCurrentProvider()).toLowerCase();
+        resetBoxarrBatchState('boxarrTest');
+        for (const item of items || []) {
+            const [year, week] = item;
+            await runBoxarrUpdate(year, week, normalizedProvider, 'boxarrTest');
+            if (delayMs > 0) {
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+        }
+        return {
+            results: window.boxarrTestResults,
+            failures: window.boxarrTestFailures,
+        };
+    };
+
+    window.boxarrWeeksForYear = async function (year, weeks, delayMs = 500, provider = getCurrentProvider()) {
+        const normalizedProvider = String(provider || getCurrentProvider()).toLowerCase();
+        resetBoxarrBatchState('boxarrWeeksForYear');
+        for (const week of weeks || []) {
+            await runBoxarrUpdate(year, week, normalizedProvider, 'boxarrWeeksForYear');
+            if (delayMs > 0) {
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+        }
+        return {
+            results: window.boxarrWeeksForYearResults,
+            failures: window.boxarrWeeksForYearFailures,
+        };
+    };
+
+    window.boxarrOneYear = async function (year, delayMs = 500, provider = getCurrentProvider()) {
+        const normalizedProvider = String(provider || getCurrentProvider()).toLowerCase();
+        const weeks = Array.from({ length: 53 }, (_, idx) => idx + 1);
+        resetBoxarrBatchState('boxarrOneYear');
+        for (const week of weeks) {
+            await runBoxarrUpdate(year, week, normalizedProvider, 'boxarrOneYear');
+            if (delayMs > 0) {
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+        }
+        return {
+            results: window.boxarrOneYearResults,
+            failures: window.boxarrOneYearFailures,
+        };
+    };
+
+    window.boxarrYearsRange = async function (
+        startYear,
+        endYear,
+        delayMs = 500,
+        startWeek = 1,
+        endWeek = 53,
+        provider = getCurrentProvider()
+    ) {
+        const normalizedProvider = String(provider || getCurrentProvider()).toLowerCase();
+        resetBoxarrBatchState('boxarrYearsRange');
+        for (let year = startYear; year <= endYear; year++) {
+            const firstWeek = year === startYear ? startWeek : 1;
+            const lastWeek = year === endYear ? endWeek : 53;
+            for (let week = firstWeek; week <= lastWeek; week++) {
+                await runBoxarrUpdate(year, week, normalizedProvider, 'boxarrYearsRange');
+                if (delayMs > 0) {
+                    await new Promise(resolve => setTimeout(resolve, delayMs));
+                }
+            }
+        }
+        return {
+            results: window.boxarrYearsRangeResults,
+            failures: window.boxarrYearsRangeFailures,
+        };
     };
 
 })();

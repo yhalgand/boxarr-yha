@@ -15,6 +15,13 @@ from apscheduler.triggers.cron import CronTrigger
 
 from ..utils.config import settings
 from ..utils.logger import get_logger
+from .boxoffice_provider import DEFAULT_PROVIDER, normalize_provider
+from .boxoffice_storage import (
+    iter_history_paths,
+    provider_history_dir,
+    provider_history_file_path,
+    provider_history_latest_file_path,
+)
 from .auto_add import auto_add_missing_movies
 from .boxoffice import BoxOfficeService
 from .exceptions import SchedulerError
@@ -130,7 +137,10 @@ class BoxarrScheduler:
         logger.info("Scheduler stopped")
 
     async def update_box_office(  # noqa: C901
-        self, year: Optional[int] = None, week: Optional[int] = None
+        self,
+        year: Optional[int] = None,
+        week: Optional[int] = None,
+        provider: str = DEFAULT_PROVIDER,
     ) -> Dict[str, Any]:
         """
         Main job to update box office data.
@@ -142,16 +152,23 @@ class BoxarrScheduler:
         Returns:
             Update results dictionary
         """
+        provider = normalize_provider(provider)
         if year and week:
-            logger.info(f"Starting box office update for {year} Week {week:02d}")
+            logger.info(
+                f"Starting box office update for {year} Week {week:02d} (provider={provider})"
+            )
         else:
-            logger.info("Starting scheduled box office update for previous week")
+            logger.info(
+                f"Starting scheduled box office update for previous week (provider={provider})"
+            )
         start_time = datetime.now()
 
         try:
             # Initialize services if needed
-            if not self.boxoffice_service:
-                self.boxoffice_service = BoxOfficeService()
+            if not self.boxoffice_service or getattr(
+                self.boxoffice_service, "provider_key", DEFAULT_PROVIDER
+            ) != provider:
+                self.boxoffice_service = BoxOfficeService(provider=provider)
             if not self.radarr_service:
                 self.radarr_service = RadarrService()
 
@@ -164,7 +181,7 @@ class BoxarrScheduler:
             else:
                 # get_weekend_dates() returns the most recent complete weekend
                 _, _, actual_year, actual_week = (
-                    self.boxoffice_service.get_weekend_dates()
+                self.boxoffice_service.get_weekend_dates()
                 )
 
             # Fetch box office movies
@@ -228,7 +245,9 @@ class BoxarrScheduler:
                 friday, sunday, _, _ = self.boxoffice_service.get_weekend_dates()
 
             # Generate JSON data file
-            page_generator = WeeklyDataGenerator(self.radarr_service)
+            page_generator = WeeklyDataGenerator(
+                self.radarr_service, provider=provider
+            )
             data_path = await self._run_in_executor(
                 page_generator.generate_weekly_data,
                 match_results,
@@ -242,6 +261,7 @@ class BoxarrScheduler:
                     refresh_weekly_data_from_radarr,
                     radarr_service=self.radarr_service,
                     ignore_cache=True,
+                    provider=provider,
                 )
             )
             logger.info(
@@ -256,9 +276,10 @@ class BoxarrScheduler:
             results["data_path"] = str(data_path)
             results["added_movies"] = added_movies
             results["status_refresh"] = refresh_results
+            results["provider"] = provider
 
             # Save to history
-            await self._save_to_history(results, actual_year, actual_week)
+            await self._save_to_history(results, actual_year, actual_week, provider)
 
             duration = (datetime.now() - start_time).total_seconds()
             logger.info(
@@ -349,7 +370,7 @@ class BoxarrScheduler:
             return "Pending"
 
     async def _save_to_history(
-        self, results: Dict[str, Any], year: int, week: int
+        self, results: Dict[str, Any], year: int, week: int, provider: str
     ) -> None:
         """
         Save results to history.
@@ -360,21 +381,21 @@ class BoxarrScheduler:
             week: ISO week number of the processed week
         """
         try:
-            history_dir = settings.get_history_path()
-            # Ensure history directory exists before writing
-            history_dir.mkdir(parents=True, exist_ok=True)
+            provider = normalize_provider(provider)
+            base_dir = settings.boxarr_data_directory
+            history_dir = provider_history_dir(base_dir, provider, create=True)
 
-            # Generate filename using the actual processed week
             now = datetime.now()
-            filename = f"{year}W{week:02d}_{now.strftime('%Y%m%d_%H%M%S')}.json"
 
             # Save to file
-            history_file = history_dir / filename
+            history_file = provider_history_file_path(
+                base_dir, provider, year, week, now.strftime("%Y%m%d_%H%M%S")
+            )
             with open(history_file, "w") as f:
                 json.dump(results, f, indent=2, default=str)
 
             # Also save as latest
-            latest_file = history_dir / f"{year}W{week:02d}_latest.json"
+            latest_file = provider_history_latest_file_path(base_dir, provider, year, week)
             with open(latest_file, "w") as f:
                 json.dump(results, f, indent=2, default=str)
 
@@ -501,7 +522,9 @@ class BoxarrScheduler:
         else:
             logger.warning("Scheduler is not running")
 
-    async def get_history(self, limit: int = 10) -> List[Dict[str, Any]]:
+    async def get_history(
+        self, limit: int = 10, provider: str = DEFAULT_PROVIDER
+    ) -> List[Dict[str, Any]]:
         """
         Get historical update results.
 
@@ -511,8 +534,16 @@ class BoxarrScheduler:
         Returns:
             List of historical results
         """
-        history_dir = settings.get_history_path()
-        history_files = sorted(history_dir.glob("*_latest.json"), reverse=True)[:limit]
+        provider = normalize_provider(provider)
+        history_files = iter_history_paths(settings.boxarr_data_directory, provider)
+        history_files = sorted(
+            [
+            path
+            for path in history_files
+            if path.name.endswith("_latest.json")
+            ],
+            reverse=True,
+        )[:limit]
 
         results = []
         for file in history_files:

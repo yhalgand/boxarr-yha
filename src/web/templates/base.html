@@ -83,6 +83,31 @@
             align-items: center;
             gap: 1rem;
         }
+
+        .market-switcher {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.75rem;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+        }
+
+        .market-switcher label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        .market-switcher select {
+            border: none;
+            background: transparent;
+            color: var(--text-primary);
+            font-weight: 600;
+            outline: none;
+            cursor: pointer;
+        }
         
         .nav-link {
             padding: 0.5rem 1rem;
@@ -207,6 +232,8 @@
     <script>
         // Inject base path for JavaScript usage
         window.BOXARR_BASE_PATH = "{{ request.scope.get('root_path', '') }}";
+        window.BOXARR_MARKET = "{{ market|default('US') }}";
+        window.BOXARR_PROVIDER = "{{ provider|default('mojo_us') }}";
     </script>
     <nav class="navbar">
         <div class="navbar-container">
@@ -219,9 +246,16 @@
                 </a>
             </div>
             <div class="navbar-menu">
-                <a href="{{ request.scope.get('root_path', '') }}/overview" class="nav-link {% if request.path.endswith('/overview') %}active{% endif %}">Movies</a>
-                <a href="{{ request.scope.get('root_path', '') }}/weeks" class="nav-link {% if request.path.endswith('/dashboard') or request.path.endswith('/weeks') %}active{% endif %}">Weeks</a>
-                <a href="{{ request.scope.get('root_path', '') }}/setup" class="nav-link {% if request.path.endswith('/setup') %}active{% endif %}">Settings</a>
+                <div class="market-switcher">
+                    <label for="marketSelector">Market</label>
+                    <select id="marketSelector" onchange="setMarketPreference(this.value)">
+                        <option value="US" {% if market == 'US' %}selected{% endif %}>US</option>
+                        <option value="FR" {% if market == 'FR' %}selected{% endif %}>FR</option>
+                    </select>
+                </div>
+                <a href="{{ request.scope.get('root_path', '') }}/overview?market={{ market }}" class="nav-link {% if request.path.endswith('/overview') %}active{% endif %}">Movies</a>
+                <a href="{{ request.scope.get('root_path', '') }}/weeks?market={{ market }}" class="nav-link {% if request.path.endswith('/dashboard') or request.path.endswith('/weeks') %}active{% endif %}">Weeks</a>
+                <a href="{{ request.scope.get('root_path', '') }}/setup?market={{ market }}" class="nav-link {% if request.path.endswith('/setup') %}active{% endif %}">Settings</a>
                 <!-- <a href="/docs" class="nav-link" target="_blank">API Docs</a> -->
                 <div class="theme-toggle" id="themeToggle">
                     <button class="theme-toggle-btn" data-theme="light" onclick="themeManager.setTheme('light')" title="Light mode">

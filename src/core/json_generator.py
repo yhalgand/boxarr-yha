@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from ..utils.config import settings
 from ..utils.logger import get_logger
+from .boxoffice_provider import DEFAULT_PROVIDER, normalize_provider
+from .boxoffice_storage import provider_weekly_page_path, provider_weekly_pages_dir
 from .matcher import MatchResult
 from .models import MovieStatus
 from .radarr import RadarrService
@@ -17,15 +19,23 @@ logger = get_logger(__name__)
 class WeeklyDataGenerator:
     """Generates JSON data files for weekly box office data."""
 
-    def __init__(self, radarr_service: Optional[RadarrService] = None):
+    def __init__(
+        self,
+        radarr_service: Optional[RadarrService] = None,
+        provider: str = DEFAULT_PROVIDER,
+    ):
         """
         Initialize data generator.
 
         Args:
             radarr_service: Optional Radarr service instance
+            provider: Provider identifier
         """
         self.radarr_service = radarr_service
-        self.output_dir = settings.boxarr_data_directory / "weekly_pages"
+        self.provider = normalize_provider(provider)
+        self.output_dir = provider_weekly_pages_dir(
+            settings.boxarr_data_directory, self.provider, create=True
+        )
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def generate_weekly_data(
@@ -218,6 +228,7 @@ class WeeklyDataGenerator:
         # Save metadata with full movie data
         metadata = {
             "generated_at": datetime.now().isoformat(),
+            "provider": self.provider,
             "year": year,
             "week": week,
             "friday": friday.isoformat(),
@@ -230,7 +241,9 @@ class WeeklyDataGenerator:
         }
 
         # Save JSON file
-        metadata_path = self.output_dir / f"{year}W{week:02d}.json"
+        metadata_path = provider_weekly_page_path(
+            settings.boxarr_data_directory, self.provider, year, week
+        )
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=2)
 

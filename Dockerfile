@@ -34,7 +34,7 @@ EXPOSE 8888
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:8888/api/health || exit 1
+    CMD sh -c 'curl -f http://localhost:${BOXARR_PORT:-8888}/api/health || exit 1'
 
 # Run application
 CMD ["python", "-m", "src.main"]

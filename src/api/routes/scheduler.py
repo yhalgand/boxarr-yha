@@ -9,6 +9,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ...core.scheduler import BoxarrScheduler
+from ...core.boxoffice_provider import DEFAULT_PROVIDER, normalize_provider
+from ...core.boxoffice_storage import (
+    iter_history_paths,
+)
+from ...core.exceptions import BoxOfficeError
 from ...utils.config import settings
 from ...utils.logger import get_logger
 
@@ -43,11 +48,12 @@ class TriggerResponse(BaseModel):
 
 
 @router.post("/trigger", response_model=TriggerResponse)
-async def trigger_update():
+async def trigger_update(provider: str = DEFAULT_PROVIDER):
     """Manually trigger box office update."""
     try:
+        provider = normalize_provider(provider)
         scheduler = get_scheduler()
-        result = await scheduler.update_box_office()
+        result = await scheduler.update_box_office(provider=provider)
 
         # Handle added_movies which is a list
         added_movies = result.get("added_movies", [])
@@ -61,6 +67,9 @@ async def trigger_update():
             ),  # Fixed: was "total_movies" but scheduler returns "total_count"
             movies_added=movies_added_count,
         )
+    except ValueError as e:
+        logger.error(f"Invalid provider for trigger update: {e}")
+        return TriggerResponse(success=False, message=str(e))
     except Exception as e:
         logger.error(f"Error triggering update: {e}")
         return TriggerResponse(
@@ -104,9 +113,10 @@ async def reload_scheduler():
 
 
 @router.get("/status")
-async def get_scheduler_status():
+async def get_scheduler_status(provider: str = DEFAULT_PROVIDER):
     """Get current scheduler status and configuration."""
     try:
+        provider = normalize_provider(provider)
         scheduler = get_scheduler()
 
         # Get job information
@@ -147,9 +157,13 @@ async def get_scheduler_status():
         # Get last run info from history
         last_run_info = None
         try:
-            history_dir = Path(settings.boxarr_data_directory) / "history"
-            if history_dir.exists():
-                history_files = sorted(history_dir.glob("*_latest.json"), reverse=True)
+            history_files = [
+                path
+                for path in iter_history_paths(settings.boxarr_data_directory, provider)
+                if path.name.endswith("_latest.json")
+            ]
+            if history_files:
+                history_files = sorted(history_files, reverse=True)
                 if history_files:
                     with open(history_files[0]) as f:
                         data = json.load(f)
@@ -179,6 +193,14 @@ async def get_scheduler_status():
             "last_run": last_run_info,
             "jobs": job_info,
             "auto_add_enabled": settings.boxarr_features_auto_add,
+            "provider": provider,
+        }
+    except ValueError as e:
+        logger.error(f"Invalid provider for scheduler status: {e}")
+        return {
+            "enabled": settings.boxarr_scheduler_enabled,
+            "running": False,
+            "error": str(e),
         }
     except Exception as e:
         logger.error(f"Error getting scheduler status: {e}")
@@ -190,15 +212,19 @@ async def get_scheduler_status():
 
 
 @router.get("/history")
-async def get_scheduler_history():
+async def get_scheduler_history(provider: str = DEFAULT_PROVIDER):
     """Get scheduler run history."""
     try:
-        history_dir = Path(settings.boxarr_data_directory) / "history"
-        if not history_dir.exists():
+        provider = normalize_provider(provider)
+        history_files = [
+            path
+            for path in iter_history_paths(settings.boxarr_data_directory, provider)
+        ]
+        if not history_files:
             return {"runs": []}
 
         # Get all history files
-        history_files = sorted(history_dir.glob("*.json"), reverse=True)[:20]
+        history_files = sorted(history_files, reverse=True)[:20]
 
         runs = []
         for file_path in history_files:
@@ -255,6 +281,7 @@ class UpdateWeekRequest(BaseModel):
 
     year: int
     week: int
+    provider: str = DEFAULT_PROVIDER
 
 
 @router.post("/update-week")
@@ -262,9 +289,10 @@ async def update_specific_week(request: UpdateWeekRequest):  # noqa: C901
     """Update box office for a specific historical week."""
     year = request.year
     week = request.week
+    provider = normalize_provider(request.provider)
     try:
         # Validate inputs
-        if year < 2000 or year > datetime.now().year:
+        if year < 1982 or year > datetime.now().year:
             raise HTTPException(status_code=400, detail="Invalid year")
         if week < 1 or week > 53:
             raise HTTPException(status_code=400, detail="Invalid week number")
@@ -278,7 +306,7 @@ async def update_specific_week(request: UpdateWeekRequest):  # noqa: C901
         )
 
         # Get box office data
-        boxoffice_service = BoxOfficeService()
+        boxoffice_service = BoxOfficeService(provider=provider)
         limit = settings.boxarr_features_box_office_limit
         box_office_movies = boxoffice_service.fetch_weekend_box_office(
             year, week, limit=limit
@@ -333,7 +361,8 @@ async def update_specific_week(request: UpdateWeekRequest):  # noqa: C901
 
         # Generate data file
         generator = WeeklyDataGenerator(
-            radarr_service=radarr_service if settings.radarr_api_key else None
+            radarr_service=radarr_service if settings.radarr_api_key else None,
+            provider=provider,
         )
         generator.generate_weekly_data(
             match_results,
@@ -347,7 +376,13 @@ async def update_specific_week(request: UpdateWeekRequest):  # noqa: C901
             "message": f"Updated week {year}W{week:02d}",
             "movies_found": len(box_office_movies),
             "movies_added": added_count,
+            "provider": provider,
         }
+    except ValueError as e:
+        logger.error(f"Invalid provider for update-week: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except BoxOfficeError as e:
+        raise HTTPException(status_code=501, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:

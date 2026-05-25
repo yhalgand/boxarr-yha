@@ -11,6 +11,16 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from ... import __version__
+from ...core.boxoffice_provider import (
+    DEFAULT_PROVIDER,
+    market_from_provider,
+    normalize_provider,
+    provider_from_market,
+)
+from ...core.boxoffice_storage import (
+    iter_weekly_page_paths,
+    resolve_weekly_page_path,
+)
 from ...core.ignore_list import IgnoreList
 from ...core.models import MovieStatus
 from ...utils.config import settings
@@ -49,9 +59,26 @@ def get_template_context(request: Request, **kwargs) -> dict:
         "request": request,
         "version": __version__,
         "theme": theme_str,
+        "market": kwargs.get("market", "US"),
+        "provider": kwargs.get("provider", DEFAULT_PROVIDER),
     }
     context.update(kwargs)
     return context
+
+
+def _selected_provider(request: Request) -> str:
+    """Read the selected provider from query params, defaulting to US."""
+    market_or_provider = request.query_params.get("market") or request.query_params.get(
+        "provider"
+    )
+    try:
+        return provider_from_market(market_or_provider)
+    except ValueError:
+        return DEFAULT_PROVIDER
+
+
+def _selected_market(request: Request) -> str:
+    return market_from_provider(_selected_provider(request))
 
 
 class WeekInfo(BaseModel):
@@ -99,20 +126,18 @@ async def settings_redirect(request: Request):
     return RedirectResponse(url=f"{base}/setup")
 
 
-async def aggregate_all_movies() -> List[dict]:
+async def aggregate_all_movies(provider: str = DEFAULT_PROVIDER) -> List[dict]:
     """Aggregate all movies from all weekly JSON files, handling duplicates."""
-    weekly_pages_dir = Path(settings.boxarr_data_directory) / "weekly_pages"
-    if not weekly_pages_dir.exists():
+    provider = normalize_provider(provider)
+    weekly_files = iter_weekly_page_paths(settings.boxarr_data_directory, provider)
+    if not weekly_files:
         return []
 
     # Dictionary to store unique movies with their appearance weeks
     movies_by_key: Dict[str, dict] = {}
 
     # Process all JSON files
-    for json_file in sorted(weekly_pages_dir.glob("*.json")):
-        if json_file.name == "current.json":
-            continue
-
+    for json_file in weekly_files:
         try:
             with open(json_file) as f:
                 metadata = json.load(f)
@@ -165,6 +190,9 @@ async def movie_overview_page(request: Request):
         return RedirectResponse(url=f"{base}/setup")
 
     # Get query parameters for filtering
+    provider = _selected_provider(request)
+    market = market_from_provider(provider)
+
     page = int(request.query_params.get("page", 1))
     per_page = int(request.query_params.get("per_page", 50))
     status_filter = request.query_params.get("status", "all")
@@ -176,7 +204,7 @@ async def movie_overview_page(request: Request):
         per_page = 50
 
     # Aggregate movies from all weeks
-    all_movies = await aggregate_all_movies()
+    all_movies = await aggregate_all_movies(provider)
 
     # Avoid synchronous full Radarr fetch here; hydrate via AJAX on the client
 
@@ -274,7 +302,7 @@ async def movie_overview_page(request: Request):
     }
 
     # Get recent weeks for quick navigation
-    recent_weeks = await get_available_weeks()
+    recent_weeks = await get_available_weeks(provider)
     recent_weeks = recent_weeks[:5]  # Show last 5 weeks
 
     return templates.TemplateResponse(
@@ -295,6 +323,8 @@ async def movie_overview_page(request: Request):
             year_filter=year_filter,
             available_years=all_years,
             search_query=search_query,
+            market=market,
+            provider=provider,
             # Features
             auto_add=settings.boxarr_features_auto_add,
             quality_upgrade=settings.boxarr_features_quality_upgrade,
@@ -314,6 +344,9 @@ async def dashboard_page(request: Request):
         return RedirectResponse(url=f"{base}/setup")
 
     # Get query parameters for pagination and filtering
+    provider = _selected_provider(request)
+    market = market_from_provider(provider)
+
     page = int(request.query_params.get("page", 1))
     per_page = int(request.query_params.get("per_page", 10))
     year_filter_str = request.query_params.get("year", None)
@@ -323,7 +356,7 @@ async def dashboard_page(request: Request):
         per_page = 10
 
     # Get all available weeks
-    all_weeks = await get_available_weeks()
+    all_weeks = await get_available_weeks(provider)
 
     # Apply year filter if specified
     year_filter: Optional[int] = None
@@ -441,6 +474,8 @@ async def dashboard_page(request: Request):
             recent_weeks=recent_weeks,
             older_weeks=older_weeks,
             total_weeks=total_weeks,
+            market=market,
+            provider=provider,
             radarr_configured=bool(settings.radarr_api_key),
             scheduler_enabled=settings.boxarr_scheduler_enabled,
             auto_add=settings.boxarr_features_auto_add,
@@ -465,6 +500,8 @@ async def dashboard_page(request: Request):
 @router.get("/setup", response_class=HTMLResponse)
 async def setup_page(request: Request):
     """Serve the setup page."""
+    provider = _selected_provider(request)
+    market = market_from_provider(provider)
     # Parse current cron for display
     cron = settings.boxarr_scheduler_cron
     import re
@@ -498,6 +535,8 @@ async def setup_page(request: Request):
         "setup.html",
         get_template_context(
             request,
+            market=market,
+            provider=provider,
             radarr_configured=bool(settings.radarr_api_key),
             is_configured=bool(settings.radarr_api_key),
             # Current settings for prefilling
@@ -555,13 +594,12 @@ async def serve_weekly_page(request: Request, year: int, week: int):
     """Serve a specific week's page using template with dynamic data."""
     from datetime import date, datetime, timedelta
 
-    from ...core.radarr import RadarrService
+    provider = _selected_provider(request)
+    market = market_from_provider(provider)
 
     # Check for JSON data file
-    json_file = (
-        Path(settings.boxarr_data_directory)
-        / "weekly_pages"
-        / f"{year}W{week:02d}.json"
+    json_file = resolve_weekly_page_path(
+        settings.boxarr_data_directory, provider, year, week
     )
 
     if not json_file.exists():
@@ -585,43 +623,24 @@ async def serve_weekly_page(request: Request, year: int, week: int):
     friday = monday + timedelta(days=4)
     sunday = monday + timedelta(days=6)
 
-    # Determine prev/next weeks
+    available_weeks = await get_available_weeks(provider)
+    current_idx = next(
+        (
+            idx
+            for idx, item in enumerate(available_weeks)
+            if item.year == year and item.week == week
+        ),
+        None,
+    )
     prev_week = None
     next_week = None
-
-    # Check for previous week
-    prev_week_num = week - 1
-    prev_year = year
-    if prev_week_num < 1:
-        prev_year = year - 1
-        # Get last week of previous year
-        last_day = date(prev_year, 12, 31)
-        prev_week_num = last_day.isocalendar()[1]
-
-    prev_json = (
-        Path(settings.boxarr_data_directory)
-        / "weekly_pages"
-        / f"{prev_year}W{prev_week_num:02d}.json"
-    )
-    if prev_json.exists():
-        prev_week = {"year": prev_year, "week": prev_week_num}
-
-    # Check for next week
-    next_week_num = week + 1
-    next_year = year
-    # Check if next week is in next year
-    last_week_of_year = date(year, 12, 31).isocalendar()[1]
-    if next_week_num > last_week_of_year:
-        next_year = year + 1
-        next_week_num = 1
-
-    next_json = (
-        Path(settings.boxarr_data_directory)
-        / "weekly_pages"
-        / f"{next_year}W{next_week_num:02d}.json"
-    )
-    if next_json.exists():
-        next_week = {"year": next_year, "week": next_week_num}
+    if current_idx is not None:
+        if current_idx + 1 < len(available_weeks):
+            prev_candidate = available_weeks[current_idx + 1]
+            prev_week = {"year": prev_candidate.year, "week": prev_candidate.week}
+        if current_idx - 1 >= 0:
+            next_candidate = available_weeks[current_idx - 1]
+            next_week = {"year": next_candidate.year, "week": next_candidate.week}
 
     # Convert generated_at string to datetime if present
     generated_at = None
@@ -649,36 +668,42 @@ async def serve_weekly_page(request: Request, year: int, week: int):
                 "movies": movies,
                 "generated_at": generated_at,
             },
+            market=market,
+            provider=provider,
             auto_add=settings.boxarr_features_auto_add,
             scheduler_enabled=settings.boxarr_scheduler_enabled,
-            previous_week=f"{prev_year}W{prev_week_num:02d}" if prev_week else None,
-            next_week=f"{next_year}W{next_week_num:02d}" if next_week else None,
+            previous_week=f"{prev_week['year']}W{prev_week['week']:02d}" if prev_week else None,
+            next_week=f"{next_week['year']}W{next_week['week']:02d}" if next_week else None,
             ignored_tmdb_ids=ignored_tmdb_ids,
         ),
     )
 
 
 @router.get("/api/weeks")
-async def get_weeks():
+async def get_weeks(request: Request):
     """Get list of all available weeks with metadata."""
-    return await get_available_weeks()
+    return await get_available_weeks(_selected_provider(request))
 
 
 @router.delete("/api/weeks/{year}/W{week}/delete")
-async def delete_week(year: int, week: int):
+async def delete_week(request: Request, year: int, week: int):
     """Delete a specific week's data files."""
     try:
-        weekly_pages_dir = Path(settings.boxarr_data_directory) / "weekly_pages"
-        html_file = weekly_pages_dir / f"{year}W{week:02d}.html"
-        json_file = weekly_pages_dir / f"{year}W{week:02d}.json"
+        provider = _selected_provider(request)
+        json_file = resolve_weekly_page_path(
+            settings.boxarr_data_directory, provider, year, week
+        )
+        html_file = None
 
         deleted_files = []
-        if html_file.exists():
-            html_file.unlink()
-            deleted_files.append("HTML")
         if json_file.exists():
+            if json_file.parent.name != provider:
+                return {"success": False, "message": "Legacy flat files are read-only"}
             json_file.unlink()
             deleted_files.append("JSON")
+        if html_file and html_file.exists():
+            html_file.unlink()
+            deleted_files.append("HTML")
 
         if deleted_files:
             logger.info(
@@ -697,7 +722,7 @@ async def get_widget(request: Request):
     """Get embeddable widget HTML."""
     try:
         # Get current week data
-        widget_data = await get_widget_data()
+        widget_data = await get_widget_data(_selected_provider(request))
 
         # Build the base URL with correct scheme, host, and base path
         # request.base_url already includes the root_path from FastAPI
@@ -720,22 +745,20 @@ async def get_widget(request: Request):
 
 
 @router.get("/api/widget/json", response_model=WidgetData)
-async def get_widget_json():
+async def get_widget_json(request: Request):
     """Get widget data as JSON."""
-    return await get_widget_data()
+    return await get_widget_data(_selected_provider(request))
 
 
-async def get_available_weeks() -> List[WeekInfo]:
+async def get_available_weeks(provider: str = DEFAULT_PROVIDER) -> List[WeekInfo]:
     """Get all available weeks with metadata."""
-    weekly_pages_dir = Path(settings.boxarr_data_directory) / "weekly_pages"
-    if not weekly_pages_dir.exists():
+    provider = normalize_provider(provider)
+    weekly_files = iter_weekly_page_paths(settings.boxarr_data_directory, provider)
+    if not weekly_files:
         return []
 
     weeks = []
-    for json_file in sorted(weekly_pages_dir.glob("*.json"), reverse=True):
-        if json_file.name == "current.json":
-            continue
-
+    for json_file in weekly_files:
         try:
             with open(json_file) as f:
                 metadata = json.load(f)
@@ -789,12 +812,10 @@ async def get_available_weeks() -> List[WeekInfo]:
     return weeks
 
 
-async def get_widget_data() -> WidgetData:
+async def get_widget_data(provider: str = DEFAULT_PROVIDER) -> WidgetData:
     """Get current week widget data."""
-    weekly_pages_dir = Path(settings.boxarr_data_directory) / "weekly_pages"
-
-    # Find most recent week
-    json_files = sorted(weekly_pages_dir.glob("*.json"), reverse=True)
+    provider = normalize_provider(provider)
+    json_files = iter_weekly_page_paths(settings.boxarr_data_directory, provider)
     if not json_files:
         return WidgetData(
             current_week=0,

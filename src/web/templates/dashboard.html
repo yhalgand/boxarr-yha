@@ -686,7 +686,7 @@
             </button>
             
             {% if recent_weeks %}
-            <a href="{{ request.scope.get('root_path', '') }}/{{ recent_weeks[0].year }}W{{ '%02d'|format(recent_weeks[0].week) }}" class="action-btn primary">
+            <a href="{{ request.scope.get('root_path', '') }}/{{ recent_weeks[0].year }}W{{ '%02d'|format(recent_weeks[0].week) }}?market={{ market }}" class="action-btn primary">
                 <span class="btn-icon">👁️</span> View Last Week
             </a>
             {% endif %}
@@ -756,7 +756,7 @@
                     </div>
                     
                     <div class="report-actions">
-                        <a href="{{ request.scope.get('root_path', '') }}/{{ week.year }}W{{ '%02d'|format(week.week) }}" class="report-btn view">View</a>
+                        <a href="{{ request.scope.get('root_path', '') }}/{{ week.year }}W{{ '%02d'|format(week.week) }}?market={{ market }}" class="report-btn view">View</a>
                         <button class="report-btn delete" onclick="deleteWeek('{{ week.year }}', '{{ '%02d'|format(week.week) }}')">Delete</button>
                     </div>
                 </div>
@@ -1162,10 +1162,11 @@ class RangeProcessor {
             this.updateProgress(i, `Processing ${weekStr}...`);
             
             try {
+                const provider = getCurrentProvider ? getCurrentProvider() : (window.BOXARR_PROVIDER || 'mojo_us');
                 const response = await fetch(apiUrl('/scheduler/update-week'), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({year, week})
+                    body: JSON.stringify({year, week, provider})
                 });
                 
                 const data = await response.json();
@@ -1517,7 +1518,8 @@ function updateCurrentWeek() {
     showProgress('Updating Last Week');
     addToProgressLog('Starting update for last week...');
     
-    fetch(apiUrl('/scheduler/trigger'), {
+    const provider = getCurrentProvider ? getCurrentProvider() : (window.BOXARR_PROVIDER || 'mojo_us');
+    fetch(apiUrl(`/scheduler/trigger?provider=${encodeURIComponent(provider)}`), {
         method: 'POST',
         headers: {'Content-Type': 'application/json'}
     })
@@ -1555,10 +1557,11 @@ function updateHistoricalWeek() {
     showProgress(`Updating Week ${week}, ${year}`);
     addToProgressLog(`Starting update for Week ${week}, ${year}...`);
     
+    const provider = getCurrentProvider ? getCurrentProvider() : (window.BOXARR_PROVIDER || 'mojo_us');
     fetch(apiUrl('/scheduler/update-week'), {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({year: parseInt(year), week: parseInt(week)})
+        body: JSON.stringify({year: parseInt(year), week: parseInt(week), provider})
     })
     .then(response => {
         if (!response.ok) {
@@ -1624,7 +1627,8 @@ async function deleteWeek(year, week) {
 // Check for missing metadata
 async function checkMissingMetadata() {
     try {
-        const response = await fetch(apiUrl('/admin/check-missing-metadata'));
+        const provider = getCurrentProvider ? getCurrentProvider() : (window.BOXARR_PROVIDER || 'mojo_us');
+        const response = await fetch(apiUrl(`/admin/check-missing-metadata?provider=${encodeURIComponent(provider)}`));
         const data = await response.json();
         
         if (data.has_issues) {
@@ -1653,7 +1657,8 @@ async function fixMissingData() {
     addToProgressLog('Starting metadata repair process...');
     
     try {
-        const response = await fetch(apiUrl('/admin/repair-missing-metadata'), {
+        const provider = getCurrentProvider ? getCurrentProvider() : (window.BOXARR_PROVIDER || 'mojo_us');
+        const response = await fetch(apiUrl(`/admin/repair-missing-metadata?provider=${encodeURIComponent(provider)}`), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({

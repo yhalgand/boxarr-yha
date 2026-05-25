@@ -383,10 +383,12 @@
 
         try {
             const rootPath = '{{ request.scope.get("root_path", "") }}';
-            const response = await fetch(`${rootPath}/api/scheduler/update-week`, {
+            const market = window.BOXARR_MARKET || localStorage.getItem('boxarr-market') || 'US';
+            const provider = window.BOXARR_PROVIDER || (market === 'FR' ? 'jpboxoffice_fr' : 'mojo_us');
+            const response = await fetch(`${rootPath}/api/scheduler/update-week?provider=${encodeURIComponent(provider)}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ year, week }),
+                body: JSON.stringify({ year, week, provider }),
             });
 
             const data = await response.json();
@@ -459,13 +461,13 @@
         <!-- Navigation Controls -->
         <div class="nav-controls">
             {% if previous_week %}
-            <a href="{{ request.scope.get('root_path', '') }}/{{ previous_week }}" class="nav-btn">← Previous</a>
+            <a href="{{ request.scope.get('root_path', '') }}/{{ previous_week }}?market={{ market }}" class="nav-btn">← Previous</a>
             {% endif %}
 
-            <a href="{{ request.scope.get('root_path', '') }}/weeks" class="nav-btn">📊 Weeks</a>
+            <a href="{{ request.scope.get('root_path', '') }}/weeks?market={{ market }}" class="nav-btn">📊 Weeks</a>
 
             {% if next_week %}
-            <a href="{{ request.scope.get('root_path', '') }}/{{ next_week }}" class="nav-btn">Next →</a>
+            <a href="{{ request.scope.get('root_path', '') }}/{{ next_week }}?market={{ market }}" class="nav-btn">Next →</a>
             {% endif %}
 
             <button class="nav-btn" id="regenerate-btn" onclick="regenerateWeek({{ week_data.year }}, {{ week_data.week }})">
