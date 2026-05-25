@@ -5,6 +5,7 @@ genre-based root folder mapping as the main scheduler/manual add paths.
 """
 
 from pathlib import Path
+import json
 
 import yaml
 from fastapi.testclient import TestClient
@@ -112,7 +113,16 @@ class _FakeBoxOfficeService:
 
     def fetch_weekend_box_office(self, year: int, week: int, limit: int = 10):
         # Single item to keep logic simple
-        return [BoxOfficeMovie(rank=1, title="Scary Movie")]  # Horror via TMDB stub
+        return [
+            BoxOfficeMovie(
+                rank=1,
+                title="Scary Movie",
+                weekend_gross=123456,
+                total_gross=654321,
+                weeks_released=2,
+                theater_count=789,
+            )
+        ]  # Horror via TMDB stub
 
 
 def test_update_week_respects_genre_mapping(tmp_path, monkeypatch):
@@ -168,10 +178,16 @@ def test_update_week_rejects_invalid_provider(tmp_path, monkeypatch):
     assert "Unsupported market" in resp.json()["detail"]
 
 
-def test_update_week_fr_returns_not_implemented(tmp_path, monkeypatch):
+def test_update_week_fr_uses_provider_wiring(tmp_path, monkeypatch):
     config_path = _seed_config(tmp_path)
     monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
     Settings.reload_from_file(config_path)
+
+    import src.core.boxoffice as core_boxoffice
+    import src.core.radarr as core_radarr
+
+    monkeypatch.setattr(core_radarr, "RadarrService", _FakeRadarrService)
+    monkeypatch.setattr(core_boxoffice, "BoxOfficeService", _FakeBoxOfficeService)
 
     app = create_app()
     client = TestClient(app)
@@ -180,5 +196,17 @@ def test_update_week_fr_returns_not_implemented(tmp_path, monkeypatch):
         "/api/scheduler/update-week",
         json={"year": 2024, "week": 10, "market": "fr"},
     )
-    assert resp.status_code == 501
-    assert "not implemented yet" in resp.json()["detail"]
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+    assert data["market"] == "fr"
+    assert data["provider"] == "jpboxoffice_fr"
+
+    output_file = tmp_path / "weekly_pages" / "fr" / "2024W10.json"
+    assert output_file.exists()
+    payload = json.loads(output_file.read_text())
+    assert payload["market"] == "fr"
+    assert payload["provider"] == "jpboxoffice_fr"
+    assert payload["movies"][0]["weeks_released"] == 2
+    assert payload["movies"][0]["weeks_in_release"] == 2
+    assert payload["movies"][0]["theater_count"] == 789

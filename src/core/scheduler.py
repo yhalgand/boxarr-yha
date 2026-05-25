@@ -18,6 +18,7 @@ from ..utils.logger import get_logger
 from .boxoffice_provider import (
     DEFAULT_MARKET,
     DEFAULT_PROVIDER,
+    MARKET_DEFINITIONS,
     market_for_provider,
     normalize_market,
     normalize_provider,
@@ -290,6 +291,10 @@ class BoxarrScheduler:
             results["status_refresh"] = refresh_results
             results["market"] = market
             results["provider"] = provider
+            results["source"] = MARKET_DEFINITIONS.get(market, {}).get(
+                "source", "boxofficemojo"
+            )
+            results["units"] = MARKET_DEFINITIONS.get(market, {}).get("units", "usd")
 
             # Save to history
             await self._save_to_history(results, actual_year, actual_week, market, provider)

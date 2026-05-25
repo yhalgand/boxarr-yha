@@ -61,6 +61,11 @@ def test_market_paths_and_legacy_fallback(tmp_path):
     assert provider_week == tmp_path / "weekly_pages" / "us" / "2024W10.json"
     assert provider_history == tmp_path / "history" / "us" / "2024W10_latest.json"
 
+    fr_week = resolve_weekly_page_path(tmp_path, "fr", 2024, 10)
+    fr_history = resolve_history_latest_path(tmp_path, "fr", 2024, 10)
+    assert fr_week == tmp_path / "weekly_pages" / "fr" / "2024W10.json"
+    assert fr_history == tmp_path / "history" / "fr" / "2024W10_latest.json"
+
 
 def test_iterators_prefer_market_files_and_keep_legacy_us(tmp_path):
     provider_week = tmp_path / "weekly_pages" / "us" / "2024W10.json"
@@ -89,11 +94,22 @@ def test_iterators_prefer_market_files_and_keep_legacy_us(tmp_path):
     assert len([p for p in history_paths if p.stem == "2024W10_latest"]) == 1
 
 
-def test_fr_provider_is_stubbed_cleanly():
+def test_iterators_do_not_fall_back_to_legacy_for_fr(tmp_path):
+    legacy_week = tmp_path / "weekly_pages" / "2024W10.json"
+    legacy_week.parent.mkdir(parents=True)
+    legacy_week.write_text("{}")
+
+    legacy_history = tmp_path / "history" / "2024W10_latest.json"
+    legacy_history.parent.mkdir(parents=True)
+    legacy_history.write_text("{}")
+
+    weekly_paths = iter_weekly_page_paths(tmp_path, "fr")
+    history_paths = iter_history_paths(tmp_path, "fr")
+
+    assert legacy_week not in weekly_paths
+    assert legacy_history not in history_paths
+
+
+def test_fr_provider_is_real_provider_class():
     provider = create_provider("jpboxoffice_fr")
     assert isinstance(provider, JPBoxOfficeFRProvider)
-
-    with pytest.raises(BoxOfficeError) as excinfo:
-        provider.fetch_weekend_box_office(2024, 10)
-
-    assert "not implemented yet" in str(excinfo.value)

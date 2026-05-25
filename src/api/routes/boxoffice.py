@@ -33,6 +33,7 @@ class BoxOfficeMovieResponse(BaseModel):
     weekend_gross: Optional[float] = None
     total_gross: Optional[float] = None
     weeks_in_release: Optional[int] = None
+    theater_count: Optional[int] = None
     is_new_release: bool = False
     radarr_id: Optional[int] = None
     radarr_status: Optional[str] = None
@@ -75,6 +76,7 @@ async def get_current_box_office(
                         weekend_gross=movie.weekend_gross,
                         total_gross=movie.total_gross,
                         weeks_in_release=movie.weeks_released,
+                        theater_count=movie.theater_count,
                         is_new_release=(
                             movie.weeks_released == 1 if movie.weeks_released else False
                         ),
@@ -105,6 +107,7 @@ async def get_current_box_office(
                     weekend_gross=movie.weekend_gross,
                     total_gross=movie.total_gross,
                     weeks_in_release=movie.weeks_released,
+                    theater_count=movie.theater_count,
                     is_new_release=(
                         movie.weeks_released == 1 if movie.weeks_released else False
                     ),
@@ -152,6 +155,11 @@ async def get_historical_box_office(
                 "title": movie.title,
                 "weekend_gross": movie.weekend_gross,
                 "total_gross": movie.total_gross,
+                "weeks_in_release": movie.weeks_released,
+                "theater_count": movie.theater_count,
+                "is_new_release": (
+                    movie.weeks_released == 1 if movie.weeks_released else False
+                ),
             }
             for movie in movies
         ]

@@ -15,6 +15,7 @@ from ... import __version__
 from ...core.boxoffice_provider import (
     DEFAULT_MARKET,
     DEFAULT_PROVIDER,
+    MARKET_DEFINITIONS,
     market_for_provider,
     market_from_provider,
     market_label,
@@ -67,6 +68,10 @@ def get_template_context(request: Request, **kwargs) -> dict:
         "market": kwargs.get("market", DEFAULT_MARKET),
         "provider": kwargs.get("provider")
         or provider_for_market(kwargs.get("market", DEFAULT_MARKET)),
+        "market_definition": MARKET_DEFINITIONS.get(
+            normalize_market(kwargs.get("market", DEFAULT_MARKET)),
+            MARKET_DEFINITIONS[DEFAULT_MARKET],
+        ),
     }
     context.update(kwargs)
     return context
@@ -627,7 +632,7 @@ async def serve_weekly_page(request: Request, year: int, week: int):
 
     # Check for JSON data file
     json_file = resolve_weekly_page_path(
-        settings.boxarr_data_directory, provider, year, week
+        settings.boxarr_data_directory, market, year, week
     )
 
     if not json_file.exists():

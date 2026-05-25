@@ -10,6 +10,7 @@ from ..utils.logger import get_logger
 from .boxoffice_provider import (
     DEFAULT_MARKET,
     DEFAULT_PROVIDER,
+    MARKET_DEFINITIONS,
     market_for_provider,
     normalize_market,
     normalize_provider,
@@ -119,6 +120,11 @@ class WeeklyDataGenerator:
                 "title": result.box_office_movie.title,
                 "weekend_gross": result.box_office_movie.weekend_gross,
                 "total_gross": result.box_office_movie.total_gross,
+                # Internal field is weeks_released; API response uses weeks_in_release.
+                # Keep both aliases in storage for compatibility while FR uses admissions.
+                "weeks_released": result.box_office_movie.weeks_released,
+                "weeks_in_release": result.box_office_movie.weeks_released,
+                "theater_count": result.box_office_movie.theater_count,
                 "radarr_id": None,
                 "radarr_title": None,
                 "status": "Not in Radarr",
@@ -135,6 +141,11 @@ class WeeklyDataGenerator:
                 "imdb_id": None,
                 "tmdb_id": None,
                 "original_language": None,
+                "is_new_release": (
+                    result.box_office_movie.weeks_released == 1
+                    if result.box_office_movie.weeks_released is not None
+                    else False
+                ),
             }
 
             if result.is_matched and result.radarr_movie:
@@ -241,6 +252,8 @@ class WeeklyDataGenerator:
             "generated_at": datetime.now().isoformat(),
             "market": self.market,
             "provider": self.provider,
+            "source": MARKET_DEFINITIONS.get(self.market, {}).get("source", "boxofficemojo"),
+            "units": MARKET_DEFINITIONS.get(self.market, {}).get("units", "usd"),
             "year": year,
             "week": week,
             "friday": friday.isoformat(),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -31,7 +32,11 @@ class BoxOfficeMovie:
 
     rank: int
     title: str
+    # For mojo_us this is weekend gross in USD.
+    # For jpboxoffice_fr this is weekend admissions/entries.
     weekend_gross: Optional[float] = None
+    # For mojo_us this is cumulative USD gross.
+    # For jpboxoffice_fr this is cumulative admissions/entries.
     total_gross: Optional[float] = None
     weeks_released: Optional[int] = None
     theater_count: Optional[int] = None
@@ -257,9 +262,388 @@ class MojoUSProvider(BoxOfficeProvider):
 
 
 class JPBoxOfficeFRProvider(BoxOfficeProvider):
-    """Stub provider for a future French box office source."""
+    """JPBoxOffice France provider.
+
+    The logical model reuses ``weekend_gross`` and ``total_gross`` for
+    compatibility with the rest of Boxarr, but for ``market=fr`` those values
+    represent admissions/entries rather than USD revenue.
+    """
 
     provider_key = "jpboxoffice_fr"
+    BASE_URL = "https://www.jpbox-office.com"
+    USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36 Boxarr/1.7.0"
+    )
+    REQUEST_TIMEOUT = 30.0
+    DEBUG_DUMP_ENABLED = str(
+        __import__("os").environ.get("BOXARR_JPBOXOFFICE_DEBUG_DUMP", "")
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    DEBUG_DUMP_DIR = Path(__import__("os").environ.get("BOXARR_JPBOXOFFICE_DEBUG_DIR", "/tmp"))
+
+    def __init__(self, http_client: Optional[httpx.Client] = None):
+        super().__init__(
+            http_client
+            or httpx.Client(
+                headers={"User-Agent": self.USER_AGENT},
+                timeout=self.REQUEST_TIMEOUT,
+                follow_redirects=True,
+            )
+        )
+
+    def close(self) -> None:
+        if self.client:
+            self.client.close()
+
+    def _fetch_html(self, url: str) -> str:
+        logger.info(f"Fetching JPBoxOffice data from: {url}")
+        try:
+            response = self.client.get(url)
+            response.raise_for_status()
+            html = response.text
+            if self.DEBUG_DUMP_ENABLED:
+                self._dump_debug_html(url, html)
+            return html
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to fetch JPBoxOffice data: {e}")
+            raise BoxOfficeError(f"Failed to fetch JPBoxOffice data: {e}") from e
+        except Exception as e:
+            logger.error(f"Failed to fetch JPBoxOffice data: {e}")
+            raise BoxOfficeError(f"Failed to fetch JPBoxOffice data: {e}") from e
+
+    def _dump_debug_html(self, url: str, html: str) -> None:
+        try:
+            self.DEBUG_DUMP_DIR.mkdir(parents=True, exist_ok=True)
+            safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", url)
+            path = self.DEBUG_DUMP_DIR / f"jpboxoffice_{safe_name}.html"
+            path.write_text(html, encoding="utf-8", errors="ignore")
+            logger.debug(f"Dumped JPBoxOffice HTML to {path}")
+        except Exception as e:
+            logger.debug(f"Failed to dump JPBoxOffice HTML for debug: {e}")
+
+    def _year_listing_url(self, year: int) -> str:
+        return f"{self.BASE_URL}/v9_hebdomadaire.php?view=2&year={year}"
+
+    def _resolve_weekly_page_url(self, year: int, week: int) -> str:
+        """Resolve the weekly page URL via the annual listing page."""
+        listing_html = self._fetch_html(self._year_listing_url(year))
+        soup = BeautifulSoup(listing_html, "html.parser")
+
+        candidate_href = None
+        week_text = str(week)
+
+        for anchor in soup.find_all("a", href=True):
+            href = str(anchor.get("href", ""))
+            if "v9_tophebdo.php" not in href:
+                continue
+
+            text = anchor.get_text(" ", strip=True)
+            if text == week_text:
+                candidate_href = href
+                break
+
+            row = anchor.find_parent("tr")
+            if row:
+                row_text = " ".join(row.stripped_strings)
+                if re.search(rf"\bSemaine\s+{week}\b", row_text, re.IGNORECASE):
+                    candidate_href = href
+                    break
+                if re.search(rf"\b{week}\b", row_text) and "Janvier" in row_text:
+                    candidate_href = href
+
+        if not candidate_href:
+            raise BoxOfficeError(
+                f"Could not resolve JPBoxOffice weekly page for {year}W{week:02d}"
+            )
+
+        if candidate_href.startswith("http"):
+            return candidate_href
+        return f"{self.BASE_URL}/{candidate_href.lstrip('/')}"
+
+    def _normalize_space(self, text: str) -> str:
+        return re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip()
+
+    def _extract_numeric_tokens(self, text: str) -> List[str]:
+        text = text.replace("\xa0", " ")
+        return re.findall(
+            r"\([+-]?\d+\)|[+-]?\d+(?:[.,]\d+)?%|\d{1,3}(?:[ .]\d{3})+|\d+|N",
+            text,
+        )
+
+    def _parse_int(self, token: Optional[str], first_only: bool = False) -> Optional[int]:
+        if not token:
+            return None
+        source = token
+        if first_only:
+            match = re.search(r"-?\d[\d\s.,]*", token)
+            if not match:
+                return None
+            source = match.group(0)
+        cleaned = re.sub(r"[^\d-]", "", source)
+        if not cleaned:
+            return None
+        try:
+            return int(cleaned)
+        except ValueError:
+            return None
+
+    def _parse_number(self, token: Optional[str], first_only: bool = False) -> Optional[float]:
+        value = self._parse_int(token, first_only=first_only)
+        if value is not None:
+            return float(value)
+        if not token:
+            return None
+        if first_only:
+            match = re.search(r"-?\d[\d\s.,]*", token)
+            if not match:
+                return None
+            token = match.group(0)
+        cleaned = token.replace("%", "").replace(" ", "").replace("\xa0", "")
+        cleaned = cleaned.replace(".", "").replace(",", ".")
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+
+    def _is_title_line(self, line: str) -> bool:
+        if not line:
+            return False
+        if line in {"Image", "Entrées Hebdomadaires 2026"}:
+            return False
+        if line.startswith("(") and line.endswith(")"):
+            return False
+        if re.fullmatch(r"[+-]?\d+", line):
+            return False
+        if "%" in line:
+            return False
+        return not re.search(r"\b(France|Etats-Unis|Royaume-Uni|Espagne|Allemagne|Italie|Brésil|Iran|Japon)\b", line)
+
+    def _find_title(self, block_lines: List[str]) -> Optional[str]:
+        for line in block_lines:
+            if self._is_title_line(line) and re.search(r"[A-Za-zÀ-ÿ]", line):
+                return self._normalize_space(line)
+        return None
+
+    def _title_key(self, title: str) -> str:
+        return re.sub(r"[^\w\s]", "", title.lower()).strip()
+
+    def _parse_metrics_from_block(self, block_lines: List[str]) -> Optional[Dict[str, Optional[float]]]:
+        metric_start = None
+        for idx, line in enumerate(block_lines):
+            if "/" in line and re.search(r"\d", line):
+                metric_start = idx
+                break
+        if metric_start is None:
+            return None
+
+        metric_text = self._normalize_space(" ".join(block_lines[metric_start:]))
+        runtime_match = re.search(r"\b\d+h\d+\b", metric_text)
+        if not runtime_match:
+            return None
+
+        tail = metric_text[runtime_match.end() :].strip()
+        tokens = self._extract_numeric_tokens(tail)
+        if len(tokens) < 3:
+            return None
+
+        stats: Dict[str, Optional[float]] = {
+            "weeks_released": None,
+            "weekend_gross": None,
+            "theater_count": None,
+            "total_gross": None,
+        }
+
+        index = 0
+        weeks_token = tokens[index]
+        index += 1
+        if weeks_token == "N":
+            stats["weeks_released"] = 1
+        else:
+            weeks = self._parse_int(weeks_token)
+            stats["weeks_released"] = weeks
+
+        if index < len(tokens):
+            stats["weekend_gross"] = self._parse_number(tokens[index])
+            index += 1
+
+        if index < len(tokens) and tokens[index].endswith("%"):
+            index += 1
+
+        if index < len(tokens) and re.fullmatch(r"\d+", tokens[index]):
+            stats["theater_count"] = self._parse_int(tokens[index])
+            index += 1
+
+        if index < len(tokens) and tokens[index].startswith("("):
+            index += 1
+
+        if index < len(tokens) and re.fullmatch(r"\d+", tokens[index]):
+            # Average per copy, not currently stored but consumed to reach total.
+            index += 1
+
+        if index < len(tokens):
+            stats["total_gross"] = self._parse_number(tokens[index])
+
+        return stats
+
+    def _parse_block(
+        self,
+        rank: int,
+        block_lines: List[str],
+        limit: int,
+        release_urls: Optional[Dict[str, str]] = None,
+    ) -> Optional[BoxOfficeMovie]:
+        if rank > limit:
+            return None
+
+        title = self._find_title(block_lines)
+        if not title:
+            return None
+
+        metrics = self._parse_metrics_from_block(block_lines)
+        if not metrics or metrics["weekend_gross"] is None or metrics["total_gross"] is None:
+            logger.debug(f"Skipping row without parseable metrics for title={title}: {block_lines}")
+            return None
+
+        is_new_release = metrics["weeks_released"] == 1
+        release_url = None
+        if release_urls:
+            release_url = release_urls.get(self._title_key(title))
+
+        return BoxOfficeMovie(
+            rank=rank,
+            title=title,
+            weekend_gross=metrics["weekend_gross"],
+            total_gross=metrics["total_gross"],
+            weeks_released=metrics["weeks_released"],
+            theater_count=metrics["theater_count"],
+            release_url=release_url,
+        )
+
+    def _parse_weekly_page(self, html: str, limit: int = 10) -> List[BoxOfficeMovie]:
+        soup = BeautifulSoup(html, "html.parser")
+        release_urls: Dict[str, str] = {}
+        for anchor in soup.find_all("a", href=True):
+            href = str(anchor.get("href", ""))
+            if "fichfilm.php" not in href:
+                continue
+            title_text = self._normalize_space(anchor.get_text(" ", strip=True))
+            if title_text:
+                release_urls[self._title_key(title_text)] = href if href.startswith("/") else f"/{href.lstrip('/')}"
+        tables = soup.find_all("table")
+        logger.debug(
+            "JPBoxOffice live parse: %s tables, %s release links",
+            len(tables),
+            len(release_urls),
+        )
+
+        target_table = None
+        target_rows: List = []
+        target_score = 0
+        for table in tables:
+            rows = table.find_all("tr")
+            ranked_rows = []
+            for row in rows:
+                title_cell = row.find("td", class_=re.compile(r"col_poster_titre"))
+                rank_cell = row.find("td", class_=re.compile(r"col_poster_compteur"))
+                value_cells = row.find_all(
+                    "td", class_=re.compile(r"col_poster_contenu_majeur")
+                )
+                if title_cell and rank_cell and len(value_cells) >= 6:
+                    ranked_rows.append(row)
+
+            if len(ranked_rows) > target_score:
+                target_score = len(ranked_rows)
+                target_table = table
+                target_rows = ranked_rows
+
+        if not target_table or not target_rows:
+            # Fall back to the text-only parser only if the live table shape changes.
+            raise BoxOfficeError("No JPBoxOffice rankings table found")
+
+        logger.debug(
+            "JPBoxOffice selected table: %s rows with ranking data", len(target_rows)
+        )
+
+        movies: List[BoxOfficeMovie] = []
+        ignored_rows = []
+        detected_ranks: List[int] = []
+        for row in target_rows[:limit]:
+            rank_cell = row.find("td", class_=re.compile(r"col_poster_compteur"))
+            title_cell = row.find("td", class_=re.compile(r"col_poster_titre"))
+            value_cells = row.find_all("td", class_=re.compile(r"col_poster_contenu_majeur"))
+
+            if not rank_cell or not title_cell or len(value_cells) < 6:
+                ignored_rows.append(("missing_cells", row.get_text(" ", strip=True)[:200]))
+                continue
+
+            rank_div = rank_cell.find("div", class_=re.compile(r"compteur"))
+            rank_text = rank_div.get_text(" ", strip=True) if rank_div else rank_cell.get_text(" ", strip=True)
+            rank = self._parse_int(rank_text, first_only=True)
+            if rank is None:
+                ignored_rows.append(("bad_rank", rank_cell.get_text(" ", strip=True)))
+                continue
+
+            title_link = title_cell.find("a", href=True)
+            if not title_link:
+                ignored_rows.append(("missing_title_link", title_cell.get_text(" ", strip=True)))
+                continue
+
+            title = self._normalize_space(title_link.get_text(" ", strip=True))
+            release_url = str(title_link.get("href", ""))
+            if release_url and not release_url.startswith("/"):
+                release_url = f"/{release_url.lstrip('/')}"
+            release_url = release_urls.get(self._title_key(title), release_url)
+
+            weeks_released = self._parse_int(value_cells[0].get_text(" ", strip=True), first_only=True)
+            weekend_gross = self._parse_number(value_cells[1].get_text(" ", strip=True), first_only=True)
+            theater_count = self._parse_int(value_cells[3].get_text(" ", strip=True), first_only=True)
+            total_gross = self._parse_number(value_cells[5].get_text(" ", strip=True), first_only=True)
+
+            if weekend_gross is None or total_gross is None:
+                ignored_rows.append(
+                    (
+                        "missing_metrics",
+                        f"rank={rank} title={title} cells={[cell.get_text(' ', strip=True) for cell in value_cells]}",
+                    )
+                )
+                continue
+
+            is_new_release = "N" in rank_cell.get_text(" ", strip=True) or weeks_released == 1
+            if weeks_released is None and is_new_release:
+                weeks_released = 1
+
+            movie = BoxOfficeMovie(
+                rank=rank,
+                title=title,
+                weekend_gross=weekend_gross,
+                total_gross=total_gross,
+                weeks_released=weeks_released,
+                theater_count=theater_count,
+                release_url=release_url,
+            )
+            movies.append(movie)
+            detected_ranks.append(rank)
+            logger.debug(
+                "Parsed JPBoxOffice row: rank=%s title=%s weeks=%s weekly=%s total=%s copies=%s new=%s",
+                rank,
+                title,
+                weeks_released,
+                weekend_gross,
+                total_gross,
+                theater_count,
+                is_new_release,
+            )
+
+        if not movies:
+            raise BoxOfficeError("No movies found in JPBoxOffice data")
+
+        logger.debug("JPBoxOffice detected ranks: %s", detected_ranks)
+        if ignored_rows:
+            logger.debug("JPBoxOffice ignored rows: %s", ignored_rows)
+
+        movies.sort(key=lambda movie: movie.rank)
+        logger.info("Successfully parsed %s movies from JPBoxOffice", len(movies))
+        return movies
 
     def fetch_weekend_box_office(
         self,
@@ -267,9 +651,14 @@ class JPBoxOfficeFRProvider(BoxOfficeProvider):
         week: Optional[int] = None,
         limit: int = 10,
     ) -> List[BoxOfficeMovie]:
-        raise BoxOfficeError(
-            "Provider 'jpboxoffice_fr' is not implemented yet"
-        )
+        if year is None or week is None:
+            _, _, year, week = self.get_weekend_dates()
+
+        weekly_url = self._resolve_weekly_page_url(year, week)
+        html = self._fetch_html(weekly_url)
+        movies = self._parse_weekly_page(html, limit=limit)
+        self.enrich_with_imdb_ids(movies)
+        return movies
 
 
 def create_provider(provider: Optional[str] = None, http_client=None) -> BoxOfficeProvider:

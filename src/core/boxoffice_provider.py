@@ -16,10 +16,14 @@ MARKET_DEFINITIONS: Dict[str, Dict[str, str]] = {
     "us": {
         "label": "US Box Office",
         "provider": "mojo_us",
+        "source": "boxofficemojo",
+        "units": "usd",
     },
     "fr": {
         "label": "France Box Office",
         "provider": "jpboxoffice_fr",
+        "source": "jpboxoffice",
+        "units": "admissions",
     },
 }
 MARKET_TO_PROVIDER: Dict[str, str] = {
@@ -150,6 +154,43 @@ class BoxOfficeProvider(ABC):
                 continue
 
         return history
+
+    def extract_imdb_id(self, release_url: str) -> Optional[str]:
+        """Fetch a release page and extract an IMDb ID when possible."""
+        base_url = getattr(self, "BASE_URL", "")
+        client = getattr(self, "client", None)
+        if not base_url or not client or not release_url:
+            return None
+
+        try:
+            url = f"{base_url}{release_url}"
+            response = client.get(url)
+            response.raise_for_status()
+        except Exception:
+            return None
+
+        import re
+
+        imdb_match = re.search(r"pro\.imdb\.com/title/(tt\d+)/", response.text)
+        return imdb_match.group(1) if imdb_match else None
+
+    def enrich_with_imdb_ids(self, movies) -> None:
+        """Enrich movies in-place with IMDb IDs when the provider exposes release URLs."""
+        count = 0
+        for movie in movies:
+            release_url = getattr(movie, "release_url", None)
+            if not release_url:
+                continue
+
+            imdb_id = self.extract_imdb_id(release_url)
+            if imdb_id:
+                movie.imdb_id = imdb_id
+                count += 1
+
+        if movies:
+            from ..utils.logger import get_logger
+
+            get_logger(__name__).info(f"Enriched {count}/{len(movies)} movies with IMDb IDs")
 
     @abstractmethod
     def fetch_weekend_box_office(self, year=None, week=None, limit: int = 10):

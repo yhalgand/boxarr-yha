@@ -420,6 +420,12 @@
         <div class="week-info">
             {{ week_data.friday.strftime('%B %d') }} - {{ week_data.sunday.strftime('%B %d, %Y') }}
         </div>
+
+        {% if market == 'fr' %}
+        <div style="margin: 1rem 0; padding: 0.75rem 1rem; background: rgba(29, 156, 247, 0.08); border: 1px solid rgba(29, 156, 247, 0.25); border-radius: 8px; font-size: 0.9rem; color: var(--text-primary);">
+            France Box Office uses admissions/entries, not USD gross.
+        </div>
+        {% endif %}
         
         <!-- Status Indicator -->
         <div style="margin: 1rem 0; padding: 0.75rem; background: rgba(var(--primary-rgb), 0.05); border-radius: 8px; border: 1px solid rgba(var(--primary-rgb), 0.2); font-size: 0.9rem;">
@@ -502,7 +508,11 @@
                     {% if movie.year %}<span>{{ movie.year }}</span>{% endif %}
                     {% if movie.genres %}<span>{{ movie.genres }}</span>{% endif %}
                     {% if movie.weekend_gross %}
+                    {% if market == 'fr' %}
+                    <span>Admissions: {{ "{:,.0f}".format(movie.weekend_gross) }}</span>
+                    {% else %}
                     <span>Weekend: ${{ "{:,.0f}".format(movie.weekend_gross) }}</span>
+                    {% endif %}
                     {% endif %}
                 </div>
                 

@@ -606,6 +606,12 @@
         matching "{{ search_query }}"
         {% endif %}
     </div>
+
+    {% if market == 'fr' %}
+    <div style="margin: 0 0 1rem; padding: 0.75rem 1rem; background: rgba(29, 156, 247, 0.08); border: 1px solid rgba(29, 156, 247, 0.25); border-radius: 8px; font-size: 0.9rem; color: var(--text-primary); text-align: center;">
+        France Box Office uses admissions/entries, not USD gross.
+    </div>
+    {% endif %}
     
     <!-- Movies Grid -->
     <div class="movies-grid">
@@ -646,7 +652,11 @@
                     {% if movie.year %}<span>{{ movie.year }}</span>{% endif %}
                     {% if movie.genres %}<span>{{ movie.genres }}</span>{% endif %}
                     {% if movie.best_weekend_gross %}
+                    {% if market == 'fr' %}
+                    <span>Best admissions: {{ "{:,.0f}".format(movie.best_weekend_gross) }}</span>
+                    {% else %}
                     <span>Best: ${{ "{:,.0f}".format(movie.best_weekend_gross) }}</span>
+                    {% endif %}
                     {% endif %}
                     {% if movie.weeks|length > 1 %}
                     <span>{{ movie.weeks|length }} weeks in top 10</span>
