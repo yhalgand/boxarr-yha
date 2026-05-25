@@ -1,6 +1,7 @@
 """Box office data routes."""
 
 from datetime import datetime
+import json
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -15,6 +16,7 @@ from ...core.boxoffice_provider import (
     normalize_provider,
     provider_for_market,
 )
+from ...core.boxoffice_storage import resolve_weekly_page_path
 from ...core.exceptions import BoxOfficeError
 from ...core.matcher import MovieMatcher
 from ...core.radarr import RadarrService
@@ -39,6 +41,60 @@ class BoxOfficeMovieResponse(BaseModel):
     radarr_status: Optional[str] = None
     radarr_has_file: bool = False
     match_confidence: float = 0.0
+
+
+def _build_history_movie_response(
+    stored_movie: dict,
+    radarr_movies_by_id: Optional[dict] = None,
+    radarr_movies_by_tmdb: Optional[dict] = None,
+) -> dict:
+    """Return a historical movie payload without dropping stored metadata."""
+    result = dict(stored_movie)
+
+    radarr_id = result.get("radarr_id")
+    tmdb_id = result.get("tmdb_id")
+
+    radarr_movie = None
+    if radarr_id and radarr_movies_by_id:
+        radarr_movie = radarr_movies_by_id.get(radarr_id)
+    if not radarr_movie and tmdb_id and radarr_movies_by_tmdb:
+        radarr_movie = radarr_movies_by_tmdb.get(tmdb_id)
+
+    if radarr_movie:
+        result["radarr_id"] = radarr_movie.id
+        result["radarr_title"] = radarr_movie.title
+        result["radarr_status"] = (
+            radarr_movie.status.value if radarr_movie.status else result.get("radarr_status")
+        )
+        result["radarr_has_file"] = radarr_movie.hasFile
+        result["radarr_has_file"] = bool(result["radarr_has_file"])
+        result["match_confidence"] = result.get("match_confidence", 0.0)
+        result["has_file"] = radarr_movie.hasFile
+        result["status"] = (
+            "Downloaded"
+            if radarr_movie.hasFile
+            else "Missing"
+            if radarr_movie.status and radarr_movie.status.value == "released"
+            else result.get("status")
+        )
+    else:
+        # Preserve legacy JSON aliases when the file predates the radarr_* fields.
+        if result.get("radarr_status") is None and result.get("status") is not None:
+            result["radarr_status"] = result.get("status")
+        if result.get("radarr_has_file") is None and result.get("has_file") is not None:
+            result["radarr_has_file"] = bool(result.get("has_file"))
+        if result.get("match_confidence") is None:
+            result["match_confidence"] = 0.0
+        if "radarr_has_file" in result:
+            result["radarr_has_file"] = bool(result["radarr_has_file"])
+
+    # Keep aliases in sync for consumers that expect either name.
+    if "weeks_in_release" not in result and result.get("weeks_released") is not None:
+        result["weeks_in_release"] = result.get("weeks_released")
+    if "weeks_released" not in result and result.get("weeks_in_release") is not None:
+        result["weeks_released"] = result.get("weeks_in_release")
+
+    return result
 
 
 @router.get("/current", response_model=List[BoxOfficeMovieResponse])
@@ -144,11 +200,45 @@ async def get_historical_box_office(
         if week < 1 or week > 53:
             raise HTTPException(status_code=400, detail="Invalid week number")
 
-        # Get historical data
+        stored_path = resolve_weekly_page_path(settings.boxarr_data_directory, market, year, week)
+        if stored_path.exists():
+            with open(stored_path) as f:
+                stored_payload = json.load(f) or {}
+            stored_movies = stored_payload.get("movies", []) or []
+
+            radarr_movies_by_id = {}
+            radarr_movies_by_tmdb = {}
+            if settings.radarr_api_key:
+                try:
+                    radarr_service = RadarrService()
+                    radarr_movies = radarr_service.get_all_movies()
+                    radarr_movies_by_id = {
+                        movie.id: movie for movie in radarr_movies if movie.id is not None
+                    }
+                    radarr_movies_by_tmdb = {
+                        movie.tmdbId: movie
+                        for movie in radarr_movies
+                        if movie.tmdbId is not None
+                    }
+                except Exception as exc:
+                    logger.warning(
+                        "Could not refresh historical box office status from Radarr: %s",
+                        exc,
+                    )
+
+            movies = [
+                _build_history_movie_response(
+                    movie,
+                    radarr_movies_by_id=radarr_movies_by_id,
+                    radarr_movies_by_tmdb=radarr_movies_by_tmdb,
+                )
+                for movie in stored_movies
+            ]
+            return movies
+
+        # Fallback to live provider only if no stored file exists.
         boxoffice_service = BoxOfficeService(market=market)
         movies = boxoffice_service.fetch_weekend_box_office(year, week)
-
-        # Return simplified data
         return [
             {
                 "rank": movie.rank,
@@ -156,7 +246,12 @@ async def get_historical_box_office(
                 "weekend_gross": movie.weekend_gross,
                 "total_gross": movie.total_gross,
                 "weeks_in_release": movie.weeks_released,
+                "weeks_released": movie.weeks_released,
                 "theater_count": movie.theater_count,
+                "radarr_id": None,
+                "radarr_status": None,
+                "radarr_has_file": False,
+                "match_confidence": 0.0,
                 "is_new_release": (
                     movie.weeks_released == 1 if movie.weeks_released else False
                 ),
