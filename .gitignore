@@ -270,3 +270,5 @@ security-report.html
 
 # Docker build context
 .dockerignore.tmp
+
+tests/fixtures/live_debug/
