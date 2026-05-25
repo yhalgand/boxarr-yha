@@ -54,10 +54,13 @@ class RadarrMovie:
     qualityProfileId: Optional[int] = None
     rootFolderPath: Optional[str] = None
     movieFile: Optional[Dict] = None
+    path: Optional[str] = None
+    size_on_disk: Optional[int] = None
     images: List[Dict] = field(default_factory=list)
     genres: List[str] = field(default_factory=list)
     runtime: Optional[int] = None
     original_language: Optional[str] = None
+    tags: List[int] = field(default_factory=list)
     _raw_data: Optional[Dict] = field(default=None, repr=False)
 
     @property
@@ -522,7 +525,7 @@ class RadarrService:
         movie.qualityProfileId = quality_profile_id
         return self.update_movie(movie)
 
-    def delete_movie(self, movie_id: int, delete_files: bool = False) -> None:
+    def delete_movie(self, movie_id: int, delete_files: bool = False) -> httpx.Response:
         """
         Delete movie from Radarr.
 
@@ -531,8 +534,9 @@ class RadarrService:
             delete_files: Whether to delete files
         """
         params = {"deleteFiles": str(delete_files).lower()}
-        self._make_request("DELETE", f"/api/v3/movie/{movie_id}", params=params)
+        response = self._make_request("DELETE", f"/api/v3/movie/{movie_id}", params=params)
         logger.info(f"Deleted movie {movie_id} from Radarr")
+        return response
 
     def get_quality_profiles(self, ignore_cache: bool = False) -> List[QualityProfile]:
         """
@@ -643,6 +647,32 @@ class RadarrService:
             qualityProfileId=data.get("qualityProfileId"),
             rootFolderPath=data.get("rootFolderPath"),
             movieFile=data.get("movieFile"),
+            path=(
+                data.get("path")
+                if isinstance(data.get("path"), str)
+                else (
+                    data.get("movieFile", {}).get("path")
+                    if isinstance(data.get("movieFile"), dict)
+                    and isinstance(data.get("movieFile", {}).get("path"), str)
+                    else None
+                )
+            ),
+            size_on_disk=(
+                data.get("sizeOnDisk")
+                if isinstance(data.get("sizeOnDisk"), int)
+                else (
+                    data.get("movieFile", {}).get("sizeOnDisk")
+                    if isinstance(data.get("movieFile"), dict)
+                    and isinstance(data.get("movieFile", {}).get("sizeOnDisk"), int)
+                    else (
+                        int(data.get("movieFile", {}).get("sizeOnDisk"))
+                        if isinstance(data.get("movieFile"), dict)
+                        and isinstance(data.get("movieFile", {}).get("sizeOnDisk"), str)
+                        and str(data.get("movieFile", {}).get("sizeOnDisk")).isdigit()
+                        else None
+                    )
+                )
+            ),
             images=data.get("images", []),
             genres=data.get("genres", []),
             runtime=data.get("runtime"),
@@ -651,6 +681,11 @@ class RadarrService:
                 if isinstance(data.get("originalLanguage"), dict)
                 else None
             ),
+            tags=[
+                int(tag)
+                for tag in data.get("tags", [])
+                if isinstance(tag, (int, str)) and str(tag).isdigit()
+            ],
             _raw_data=data,  # Store the complete raw data
         )
 

@@ -130,6 +130,16 @@
     box-shadow: var(--shadow-lg);
 }
 
+.action-btn.cleanup {
+    background: linear-gradient(135deg, #d97706, #ea580c);
+    color: white;
+    border: none;
+}
+
+.action-btn.cleanup:hover {
+    box-shadow: var(--shadow-lg);
+}
+
 .section-title {
     font-size: 1.25rem;
     font-weight: 600;
@@ -247,6 +257,123 @@
 .report-btn.delete:hover {
     background: var(--error-color);
     color: white;
+}
+
+.cleanup-warning {
+    background: rgba(249, 115, 22, 0.08);
+    border: 1px solid rgba(249, 115, 22, 0.25);
+    border-radius: 10px;
+    padding: 1rem;
+    color: var(--text-primary);
+}
+
+.cleanup-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.cleanup-field label {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.35rem;
+}
+
+.cleanup-field input,
+.cleanup-field select {
+    width: 100%;
+    padding: 0.6rem 0.8rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-color);
+    color: var(--text-primary);
+}
+
+.cleanup-results {
+    margin-top: 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--card-bg);
+}
+
+.cleanup-results-empty {
+    padding: 1rem;
+    color: var(--text-secondary);
+}
+
+.cleanup-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-color);
+}
+
+.cleanup-summary .summary-pill {
+    padding: 0.35rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+}
+
+.cleanup-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.cleanup-table th,
+.cleanup-table td {
+    padding: 0.7rem 0.8rem;
+    border-bottom: 1px solid var(--border-color);
+    text-align: left;
+    vertical-align: top;
+    font-size: 0.9rem;
+}
+
+.cleanup-table th {
+    background: var(--bg-color);
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.cleanup-table tr:last-child td {
+    border-bottom: none;
+}
+
+.cleanup-reason {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.cleanup-path {
+    color: var(--text-primary);
+    font-family: monospace;
+    font-size: 0.82rem;
+    word-break: break-all;
+}
+
+.cleanup-confirm {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.cleanup-confirm input {
+    flex: 1;
+    min-width: 220px;
+    padding: 0.7rem 0.85rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-color);
+    color: var(--text-primary);
 }
 
 .older-weeks {
@@ -684,6 +811,12 @@
                 <span class="btn-icon">🔧</span> 
                 <span id="fixMissingDataText">Fix Missing Data</span>
             </button>
+
+            <button class="action-btn cleanup"
+                    onclick="showCleanupModal()"
+                    title="Preview or remove Boxarr-added movies that are no longer eligible under a lower Maximum Movies to Add limit">
+                <span class="btn-icon">🧹</span> Cleanup Boxarr-added movies
+            </button>
             
             {% if recent_weeks %}
             <a href="{{ request.scope.get('root_path', '') }}/{{ recent_weeks[0].year }}W{{ '%02d'|format(recent_weeks[0].week) }}?market={{ market }}" class="action-btn primary">
@@ -1072,6 +1205,78 @@
         </div>
     </div>
 </div>
+
+<!-- Add-Limit Cleanup Modal -->
+<div id="cleanupModal" class="modal">
+    <div class="modal-content" style="max-width: 1100px;">
+        <div class="modal-header">
+            <h3>Cleanup Boxarr-added movies</h3>
+            <button class="modal-close" onclick="closeCleanupModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="cleanup-warning">
+                <strong>This will delete movies from Radarr and delete files.</strong>
+                <div style="margin-top: 0.5rem; color: var(--text-secondary);">
+                    Run a dry-run first. The execute button stays disabled until a dry-run has completed and you type <strong>DELETE</strong>.
+                </div>
+            </div>
+
+            <div class="cleanup-grid">
+                <div class="cleanup-field">
+                    <label for="cleanupMarket">Market</label>
+                    <select id="cleanupMarket">
+                        <option value="us" {% if market == 'us' %}selected{% endif %}>US</option>
+                        <option value="fr" {% if market == 'fr' %}selected{% endif %}>FR</option>
+                        <option value="all">All markets</option>
+                    </select>
+                </div>
+                <div class="cleanup-field">
+                    <label for="cleanupLimit">Target Maximum Movies to Add</label>
+                    <input id="cleanupLimit" type="number" min="1" max="30" value="{{ auto_add_limit }}">
+                </div>
+                <div class="cleanup-field">
+                    <label for="cleanupYearFrom">Year from</label>
+                    <input id="cleanupYearFrom" type="number" min="1982" placeholder="optional">
+                </div>
+                <div class="cleanup-field">
+                    <label for="cleanupWeekFrom">Week from</label>
+                    <input id="cleanupWeekFrom" type="number" min="1" max="53" placeholder="optional">
+                </div>
+                <div class="cleanup-field">
+                    <label for="cleanupYearTo">Year to</label>
+                    <input id="cleanupYearTo" type="number" min="1982" placeholder="optional">
+                </div>
+                <div class="cleanup-field">
+                    <label for="cleanupWeekTo">Week to</label>
+                    <input id="cleanupWeekTo" type="number" min="1" max="53" placeholder="optional">
+                </div>
+                <div class="cleanup-field">
+                    <label for="cleanupProtectTag">Protect tag</label>
+                    <input id="cleanupProtectTag" type="text" value="boxarr-keep" maxlength="40">
+                </div>
+                <div class="cleanup-field">
+                    <label>Delete files</label>
+                    <input type="text" value="Always true for execute" disabled>
+                </div>
+            </div>
+
+            <div class="cleanup-confirm">
+                <input id="cleanupConfirmText" type="text" placeholder="Type DELETE to enable execution" autocomplete="off">
+                <button class="action-btn secondary" type="button" onclick="runCleanupDryRun()">Dry-run</button>
+                <button id="cleanupExecuteBtn" class="action-btn cleanup" type="button" onclick="executeCleanup()" disabled>Execute</button>
+            </div>
+
+            <div id="cleanupResults" class="cleanup-results" style="margin-top: 1.25rem;">
+                <div class="cleanup-results-empty">Run a dry-run to preview the candidate list.</div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="action-btn secondary" onclick="closeCleanupModal()">Close</button>
+            <button class="action-btn secondary" onclick="runCleanupDryRun()">Dry-run</button>
+            <button id="cleanupExecuteBtnFooter" class="action-btn cleanup" onclick="executeCleanup()" disabled>Execute</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -1455,6 +1660,35 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Check for missing metadata on page load
     checkMissingMetadata();
+
+    const cleanupInputs = [
+        'cleanupMarket',
+        'cleanupLimit',
+        'cleanupYearFrom',
+        'cleanupWeekFrom',
+        'cleanupYearTo',
+        'cleanupWeekTo',
+        'cleanupProtectTag',
+    ];
+    cleanupInputs.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('change', cleanupResetState);
+            el.addEventListener('input', cleanupResetState);
+        }
+    });
+
+    const cleanupConfirm = document.getElementById('cleanupConfirmText');
+    if (cleanupConfirm) {
+        cleanupConfirm.addEventListener('input', () => {
+            if (cleanupDryRunData) {
+                cleanupButtonSetEnabled(
+                    cleanupConfirmSatisfied() &&
+                    (cleanupDryRunData.candidates || []).some(item => item.safe_to_delete)
+                );
+            }
+        });
+    }
 });
 
 // Main update handler
@@ -1737,6 +1971,350 @@ async function fixMissingData() {
         console.error('Error fixing metadata:', error);
         addToProgressLog(`Error: ${error.message}`, 'error');
         showError(`Error fixing metadata: ${error.message}`);
+    }
+}
+
+let cleanupDryRunData = null;
+let cleanupLastPayload = null;
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatBytes(bytes) {
+    const value = Number(bytes || 0);
+    if (!value) {
+        return '0 B';
+    }
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let idx = 0;
+    let current = value;
+    while (current >= 1024 && idx < units.length - 1) {
+        current /= 1024;
+        idx += 1;
+    }
+    return `${current.toFixed(current >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+function formatMaybeBytes(bytes) {
+    if (bytes === null || bytes === undefined || bytes === '') {
+        return 'n/a';
+    }
+    return formatBytes(bytes);
+}
+
+function formatCleanupWeeks(weeksFound) {
+    if (!Array.isArray(weeksFound) || !weeksFound.length) {
+        return 'n/a';
+    }
+    return weeksFound.map(week => {
+        const market = week.market ? `${week.market} ` : '';
+        const year = week.year ?? '';
+        const weekLabel = week.week !== undefined && week.week !== null
+            ? `W${String(week.week).padStart(2, '0')}`
+            : '';
+        return `${market}${year}${weekLabel}`.trim();
+    }).join(', ');
+}
+
+function formatCleanupTags(item) {
+    const tagNames = Array.isArray(item.tag_names) ? item.tag_names.filter(Boolean) : [];
+    const tagIds = Array.isArray(item.tags) ? item.tags.filter(tag => tag !== null && tag !== undefined) : [];
+
+    if (tagNames.length) {
+        return tagNames.map((name, index) => {
+            const tagId = tagIds[index];
+            return tagId !== undefined ? `${name} (#${tagId})` : name;
+        }).join(', ');
+    }
+    if (tagIds.length) {
+        return tagIds.map(tag => `#${tag}`).join(', ');
+    }
+    return 'n/a';
+}
+
+function cleanupButtonSetEnabled(enabled) {
+    const executeButtons = [
+        document.getElementById('cleanupExecuteBtn'),
+        document.getElementById('cleanupExecuteBtnFooter'),
+    ];
+    executeButtons.forEach(btn => {
+        if (btn) {
+            btn.disabled = !enabled;
+        }
+    });
+}
+
+function cleanupConfirmSatisfied() {
+    const confirmInput = document.getElementById('cleanupConfirmText');
+    return (confirmInput?.value || '').trim().toUpperCase() === 'DELETE';
+}
+
+function cleanupPayloadFromForm() {
+    const market = document.getElementById('cleanupMarket')?.value || 'us';
+    const payload = {
+        market,
+        target_add_limit: parseInt(document.getElementById('cleanupLimit')?.value || '3', 10),
+        year_from: document.getElementById('cleanupYearFrom')?.value
+            ? parseInt(document.getElementById('cleanupYearFrom').value, 10)
+            : null,
+        week_from: document.getElementById('cleanupWeekFrom')?.value
+            ? parseInt(document.getElementById('cleanupWeekFrom').value, 10)
+            : null,
+        year_to: document.getElementById('cleanupYearTo')?.value
+            ? parseInt(document.getElementById('cleanupYearTo').value, 10)
+            : null,
+        week_to: document.getElementById('cleanupWeekTo')?.value
+            ? parseInt(document.getElementById('cleanupWeekTo').value, 10)
+            : null,
+        delete_files: true,
+        require_boxarr_tag: true,
+        protect_tag: (document.getElementById('cleanupProtectTag')?.value || 'boxarr-keep').trim() || 'boxarr-keep',
+    };
+    return payload;
+}
+
+function cleanupResetState() {
+    cleanupDryRunData = null;
+    cleanupLastPayload = null;
+    cleanupButtonSetEnabled(false);
+    const results = document.getElementById('cleanupResults');
+    if (results) {
+        results.innerHTML = '<div class="cleanup-results-empty">Run a dry-run to preview the candidate list.</div>';
+    }
+}
+
+function showCleanupModal() {
+    cleanupResetState();
+    const modal = document.getElementById('cleanupModal');
+    if (modal) {
+        const marketSelect = document.getElementById('cleanupMarket');
+        if (marketSelect && typeof getCurrentMarket === 'function') {
+            marketSelect.value = getCurrentMarket();
+        }
+        modal.style.display = 'flex';
+    }
+}
+
+function closeCleanupModal() {
+    const modal = document.getElementById('cleanupModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function renderCleanupResults(data) {
+    const results = document.getElementById('cleanupResults');
+    if (!results) return;
+
+    const candidateItems = Array.isArray(data.candidates) ? data.candidates : [];
+    const deletedItems = Array.isArray(data.deleted) ? data.deleted : [];
+    const skippedItems = Array.isArray(data.skipped) ? data.skipped : [];
+    const errorItems = Array.isArray(data.errors) ? data.errors : [];
+    const title = data.dry_run ? 'Dry-run preview' : 'Cleanup results';
+    const primaryItems = data.dry_run ? candidateItems : deletedItems;
+    const safeCandidates = candidateItems.filter(item => item.safe_to_delete);
+
+    const primaryRows = primaryItems.map(item => `
+        <tr>
+            <td><strong>${escapeHtml(item.title)}</strong></td>
+            <td>${escapeHtml(item.year || 'n/a')}<br><span class="cleanup-reason">Market ${escapeHtml(item.market || data.market || '')}</span></td>
+            <td>
+                TMDB ${escapeHtml(item.tmdb_id ?? 'n/a')} · Radarr ${escapeHtml(item.radarr_id ?? 'n/a')}
+                <br><span class="cleanup-reason">${escapeHtml(formatCleanupTags(item))}</span>
+            </td>
+            <td><span class="cleanup-path">${escapeHtml(item.path || 'n/a')}</span></td>
+            <td>${escapeHtml(item.best_rank || 'n/a')}</td>
+            <td>${escapeHtml(formatCleanupWeeks(item.weeks_found))}</td>
+            <td>${escapeHtml(formatMaybeBytes(item.size_on_disk))}</td>
+            <td><strong>${item.safe_to_delete ? 'yes' : 'no'}</strong>${item.unsafe_reason ? `<br><span class="cleanup-reason">${escapeHtml(item.unsafe_reason)}</span>` : ''}</td>
+            <td>${escapeHtml(item.reason || '')}</td>
+            <td>${escapeHtml(item.action || (data.dry_run ? 'candidate' : 'deleted'))}</td>
+        </tr>
+    `).join('');
+
+    const skippedRows = skippedItems.map(item => `
+        <tr>
+            <td><strong>${escapeHtml(item.title)}</strong></td>
+            <td>${escapeHtml(item.year || 'n/a')}<br><span class="cleanup-reason">Market ${escapeHtml(item.market || data.market || '')}</span></td>
+            <td>
+                TMDB ${escapeHtml(item.tmdb_id ?? 'n/a')} · Radarr ${escapeHtml(item.radarr_id ?? 'n/a')}
+                <br><span class="cleanup-reason">${escapeHtml(formatCleanupTags(item))}</span>
+            </td>
+            <td><span class="cleanup-path">${escapeHtml(item.path || 'n/a')}</span></td>
+            <td>${escapeHtml(item.best_rank || 'n/a')}</td>
+            <td>${escapeHtml(formatCleanupWeeks(item.weeks_found))}</td>
+            <td>${escapeHtml(formatMaybeBytes(item.size_on_disk))}</td>
+            <td><strong>${item.safe_to_delete ? 'yes' : 'no'}</strong>${item.unsafe_reason ? `<br><span class="cleanup-reason">${escapeHtml(item.unsafe_reason)}</span>` : ''}</td>
+            <td>${escapeHtml(item.reason || '')}</td>
+            <td>skip</td>
+        </tr>
+    `).join('');
+
+    const errorList = errorItems.length
+        ? `<div style="padding: 1rem; border-top: 1px solid var(--border-color);">
+                <strong>Errors</strong>
+                <ul style="margin: 0.5rem 0 0 1.25rem; color: var(--error-color);">
+                    ${errorItems.map(err => `<li>${escapeHtml(err.error || err.message || JSON.stringify(err))}</li>`).join('')}
+                </ul>
+           </div>`
+        : '';
+
+    const summaryHtml = `
+        <div class="cleanup-summary">
+            <span class="summary-pill"><strong>${escapeHtml(title)}</strong></span>
+            <span class="summary-pill">Markets: ${escapeHtml((data.markets_scanned || [data.market]).join(', '))}</span>
+            <span class="summary-pill">Considered: ${escapeHtml(data.considered_total || data.movies_scanned || 0)}</span>
+            <span class="summary-pill">${data.dry_run ? 'Candidates' : 'Deleted'}: ${escapeHtml(primaryItems.length)}</span>
+            ${data.dry_run ? `<span class="summary-pill">Safe: ${escapeHtml(safeCandidates.length)}</span>` : ''}
+            <span class="summary-pill">Skipped: ${escapeHtml(skippedItems.length)}</span>
+            <span class="summary-pill">Errors: ${escapeHtml(errorItems.length)}</span>
+            <span class="summary-pill">Estimated size: ${escapeHtml(formatBytes(data.estimated_size_to_delete || data.estimated_size_deleted || 0))}</span>
+        </div>
+        <div style="padding: 1rem;">
+            <div style="margin-bottom: 0.75rem; color: var(--text-secondary);">
+                Target add limit: <strong>${escapeHtml(data.target_add_limit)}</strong>
+                · Market: <strong>${escapeHtml(data.market)}</strong>
+                · Delete files: <strong>${data.delete_files ? 'yes' : 'no'}</strong>
+                · Protected tag: <strong>${escapeHtml(data.protect_tag || 'boxarr-keep')}</strong>
+            </div>
+            <h4 style="margin: 0 0 0.5rem 0;">${escapeHtml(data.dry_run ? 'Candidate deletions' : 'Deleted movies')}</h4>
+            ${primaryItems.length ? `
+                <table class="cleanup-table">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Year</th>
+                            <th>IDs / Tags</th>
+                            <th>Path</th>
+                            <th>Best rank</th>
+                            <th>Weeks found</th>
+                            <th>Size</th>
+                            <th>Safe</th>
+                            <th>Reason</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>${primaryRows}</tbody>
+                </table>
+            ` : '<div class="cleanup-results-empty">No delete candidates found.</div>'}
+            <h4 style="margin: 1rem 0 0.5rem 0;">Skipped</h4>
+            ${skippedItems.length ? `
+                <table class="cleanup-table">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Year</th>
+                            <th>IDs / Tags</th>
+                            <th>Path</th>
+                            <th>Best rank</th>
+                            <th>Weeks found</th>
+                            <th>Size</th>
+                            <th>Safe</th>
+                            <th>Reason</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>${skippedRows}</tbody>
+                </table>
+            ` : '<div class="cleanup-results-empty">No skipped items.</div>'}
+            ${errorList}
+        </div>
+    `;
+
+    results.innerHTML = summaryHtml;
+}
+
+async function runCleanupDryRun() {
+    const payload = cleanupPayloadFromForm();
+    cleanupLastPayload = JSON.stringify(payload);
+    cleanupDryRunData = null;
+    cleanupButtonSetEnabled(false);
+
+    const results = document.getElementById('cleanupResults');
+    if (results) {
+        results.innerHTML = '<div class="cleanup-results-empty">Running dry-run...</div>';
+    }
+
+    try {
+        const response = await fetch(apiUrlWithMarket('/cleanup/add-limit/dry-run', payload.market), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.detail || data.message || `HTTP ${response.status}`);
+        }
+
+        cleanupDryRunData = data;
+        renderCleanupResults(data);
+        cleanupButtonSetEnabled(
+            cleanupConfirmSatisfied() &&
+            (data.candidates || []).some(item => item.safe_to_delete)
+        );
+    } catch (error) {
+        if (results) {
+            results.innerHTML = `<div class="cleanup-results-empty" style="color: var(--error-color);">Dry-run failed: ${escapeHtml(error.message)}</div>`;
+        }
+        cleanupButtonSetEnabled(false);
+    }
+}
+
+async function executeCleanup() {
+    if (!cleanupDryRunData) {
+        alert('Run a dry-run first.');
+        return;
+    }
+
+    if (!(cleanupDryRunData.candidates || []).some(item => item.safe_to_delete)) {
+        alert('No safe candidates to delete.');
+        return;
+    }
+
+    if (!cleanupConfirmSatisfied()) {
+        alert('Type DELETE to enable execution.');
+        return;
+    }
+
+    const payload = cleanupPayloadFromForm();
+    const payloadKey = JSON.stringify(payload);
+    if (cleanupLastPayload && payloadKey !== cleanupLastPayload) {
+        alert('Cleanup settings changed after dry-run. Run a new dry-run first.');
+        cleanupButtonSetEnabled(false);
+        cleanupDryRunData = null;
+        return;
+    }
+
+    const results = document.getElementById('cleanupResults');
+    if (results) {
+        results.innerHTML = '<div class="cleanup-results-empty">Executing cleanup...</div>';
+    }
+
+    try {
+        const response = await fetch(apiUrlWithMarket('/cleanup/add-limit/execute', payload.market), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.detail || data.message || `HTTP ${response.status}`);
+        }
+
+        cleanupDryRunData = data;
+        renderCleanupResults(data);
+        cleanupButtonSetEnabled(false);
+    } catch (error) {
+        if (results) {
+            results.innerHTML = `<div class="cleanup-results-empty" style="color: var(--error-color);">Execute failed: ${escapeHtml(error.message)}</div>`;
+        }
+        cleanupButtonSetEnabled(false);
     }
 }
 

@@ -14,6 +14,7 @@ from ..utils.config import settings
 from ..utils.logger import get_logger
 from .routes import (
     admin_router,
+    cleanup_router,
     boxoffice_router,
     config_router,
     movies_router,
@@ -65,6 +66,7 @@ def create_app(scheduler: Optional[BoxarrScheduler] = None) -> FastAPI:
 
     # Include routers
     app.include_router(admin_router)
+    app.include_router(cleanup_router)
     app.include_router(config_router)
     app.include_router(boxoffice_router)
     app.include_router(movies_router)
