@@ -12,9 +12,13 @@ from bs4 import BeautifulSoup
 
 from ..utils.logger import get_logger
 from .boxoffice_provider import (
+    DEFAULT_MARKET,
     DEFAULT_PROVIDER,
     BoxOfficeProvider,
+    market_for_provider,
+    normalize_market,
     normalize_provider,
+    provider_for_market,
 )
 from .exceptions import BoxOfficeError
 
@@ -279,20 +283,35 @@ def create_provider(provider: Optional[str] = None, http_client=None) -> BoxOffi
     raise BoxOfficeError(f"Unsupported provider '{provider}'")
 
 
+def create_provider_for_market(
+    market: Optional[str] = None, http_client=None
+) -> BoxOfficeProvider:
+    """Create a provider instance from a market id."""
+    normalized_market = normalize_market(market)
+    return create_provider(provider_for_market(normalized_market), http_client=http_client)
+
+
 class BoxOfficeService(BoxOfficeProvider):
     """Compatibility facade that delegates to a concrete provider."""
 
     def __init__(
         self,
         http_client: Optional[httpx.Client] = None,
-        provider: str = DEFAULT_PROVIDER,
+        market: str = DEFAULT_MARKET,
+        provider: Optional[str] = None,
     ):
-        if isinstance(http_client, str) and provider == DEFAULT_PROVIDER:
+        if isinstance(http_client, str) and provider is None and market == DEFAULT_MARKET:
             provider = http_client
             http_client = None
 
-        self.provider_key = normalize_provider(provider)
-        self._provider = create_provider(self.provider_key, http_client=http_client)
+        if provider is not None and market == DEFAULT_MARKET:
+            market = market_for_provider(provider)
+
+        self.market_key = normalize_market(market)
+        self.provider_key = normalize_provider(provider or provider_for_market(self.market_key))
+        self._provider = create_provider(
+            self.provider_key, http_client=http_client
+        )
         super().__init__(getattr(self._provider, "client", None))
 
     def close(self) -> None:

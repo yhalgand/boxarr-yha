@@ -137,11 +137,12 @@ def test_update_week_respects_genre_mapping(tmp_path, monkeypatch):
     # Use any valid-ish year/week; BoxOfficeService is faked anyway
     resp = client.post(
         "/api/scheduler/update-week",
-        json={"year": 2024, "week": 10},
+        json={"year": 2024, "week": 10, "market": "us"},
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data["success"] is True
+    assert data["market"] == "us"
     assert data["provider"] == "mojo_us"
     assert data["movies_found"] == 1
     assert data["movies_added"] == 1
@@ -161,7 +162,23 @@ def test_update_week_rejects_invalid_provider(tmp_path, monkeypatch):
 
     resp = client.post(
         "/api/scheduler/update-week",
-        json={"year": 2024, "week": 10, "provider": "bogus"},
+        json={"year": 2024, "week": 10, "market": "bogus"},
     )
     assert resp.status_code == 400
-    assert "Unsupported provider" in resp.json()["detail"]
+    assert "Unsupported market" in resp.json()["detail"]
+
+
+def test_update_week_fr_returns_not_implemented(tmp_path, monkeypatch):
+    config_path = _seed_config(tmp_path)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/scheduler/update-week",
+        json={"year": 2024, "week": 10, "market": "fr"},
+    )
+    assert resp.status_code == 501
+    assert "not implemented yet" in resp.json()["detail"]

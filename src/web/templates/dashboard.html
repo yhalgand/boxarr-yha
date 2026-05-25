@@ -699,10 +699,10 @@
         <div class="filter-controls">
             <div class="year-filters">
                 <span class="year-filter-label">Filter by year:</span>
-                <a href="{{ request.scope.get('root_path', '') }}/weeks?page=1&per_page={{ per_page }}" 
+                <a href="{{ request.scope.get('root_path', '') }}/weeks?market={{ market }}&page=1&per_page={{ per_page }}"
                    class="year-btn {% if not year_filter %}active{% endif %}">All</a>
                 {% for year in available_years %}
-                <a href="{{ request.scope.get('root_path', '') }}/weeks?year={{ year }}&page=1&per_page={{ per_page }}" 
+                <a href="{{ request.scope.get('root_path', '') }}/weeks?market={{ market }}&year={{ year }}&page=1&per_page={{ per_page }}"
                    class="year-btn {% if year_filter == year %}active{% endif %}">{{ year }}</a>
                 {% endfor %}
             </div>
@@ -769,7 +769,7 @@
                 <div class="pagination">
                     <!-- Previous button -->
                     {% if current_page > 1 %}
-                    <a href="{{ request.scope.get('root_path', '') }}/weeks?page={{ current_page - 1 }}&per_page={{ per_page }}{% if year_filter %}&year={{ year_filter }}{% endif %}" 
+                    <a href="{{ request.scope.get('root_path', '') }}/weeks?market={{ market }}&page={{ current_page - 1 }}&per_page={{ per_page }}{% if year_filter %}&year={{ year_filter }}{% endif %}"
                        class="page-link">← Previous</a>
                     {% else %}
                     <span class="page-link disabled">← Previous</span>
@@ -782,7 +782,7 @@
                     {% if end_page > total_pages %}{% set end_page = total_pages %}{% endif %}
                     
                     {% if start_page > 1 %}
-                    <a href="{{ request.scope.get('root_path', '') }}/weeks?page=1&per_page={{ per_page }}{% if year_filter %}&year={{ year_filter }}{% endif %}" 
+                    <a href="{{ request.scope.get('root_path', '') }}/weeks?market={{ market }}&page=1&per_page={{ per_page }}{% if year_filter %}&year={{ year_filter }}{% endif %}"
                        class="page-link">1</a>
                     {% if start_page > 2 %}
                     <span class="page-link disabled">...</span>
@@ -793,7 +793,7 @@
                     {% if page_num == current_page %}
                     <span class="page-link active">{{ page_num }}</span>
                     {% else %}
-                    <a href="{{ request.scope.get('root_path', '') }}/weeks?page={{ page_num }}&per_page={{ per_page }}{% if year_filter %}&year={{ year_filter }}{% endif %}" 
+                    <a href="{{ request.scope.get('root_path', '') }}/weeks?market={{ market }}&page={{ page_num }}&per_page={{ per_page }}{% if year_filter %}&year={{ year_filter }}{% endif %}"
                        class="page-link">{{ page_num }}</a>
                     {% endif %}
                     {% endfor %}
@@ -802,13 +802,13 @@
                     {% if end_page < total_pages - 1 %}
                     <span class="page-link disabled">...</span>
                     {% endif %}
-                    <a href="{{ request.scope.get('root_path', '') }}/weeks?page={{ total_pages }}&per_page={{ per_page }}{% if year_filter %}&year={{ year_filter }}{% endif %}" 
+                    <a href="{{ request.scope.get('root_path', '') }}/weeks?market={{ market }}&page={{ total_pages }}&per_page={{ per_page }}{% if year_filter %}&year={{ year_filter }}{% endif %}"
                        class="page-link">{{ total_pages }}</a>
                     {% endif %}
                     
                     <!-- Next button -->
                     {% if current_page < total_pages %}
-                    <a href="{{ request.scope.get('root_path', '') }}/weeks?page={{ current_page + 1 }}&per_page={{ per_page }}{% if year_filter %}&year={{ year_filter }}{% endif %}" 
+                    <a href="{{ request.scope.get('root_path', '') }}/weeks?market={{ market }}&page={{ current_page + 1 }}&per_page={{ per_page }}{% if year_filter %}&year={{ year_filter }}{% endif %}"
                        class="page-link">Next →</a>
                     {% else %}
                     <span class="page-link disabled">Next →</span>
@@ -943,7 +943,7 @@
                     {% endif %}
                     
                     <p style="margin-top: 1rem; font-size: 0.85rem; color: var(--text-primary);">
-                        💡 <strong>Note:</strong> This behavior applies to all historical fetches. You can change these settings in <a href="{{ request.scope.get('root_path', '') }}/setup" style="color: var(--primary-color); text-decoration: underline;">Settings</a>.
+                        💡 <strong>Note:</strong> This behavior applies to all historical fetches. You can change these settings in <a href="{{ request.scope.get('root_path', '') }}/setup?market={{ market }}" style="color: var(--primary-color); text-decoration: underline;">Settings</a>.
                     </p>
                 </div>
             </div>
@@ -986,7 +986,7 @@
             
             <div style="padding: 0.75rem; background: rgba(var(--info-rgb, 59, 130, 246), 0.1); border-radius: 8px; border: 1px solid rgba(var(--info-rgb, 59, 130, 246), 0.2);">
                 <p style="font-size: 0.85rem; color: var(--text-primary); margin: 0;">
-                    💡 <strong>Tip:</strong> To change auto-add behavior or filters, visit <a href="{{ request.scope.get('root_path', '') }}/setup" style="color: var(--primary-color); text-decoration: underline;">Settings</a>.
+                    💡 <strong>Tip:</strong> To change auto-add behavior or filters, visit <a href="{{ request.scope.get('root_path', '') }}/setup?market={{ market }}" style="color: var(--primary-color); text-decoration: underline;">Settings</a>.
                 </p>
             </div>
         </div>
@@ -1162,11 +1162,11 @@ class RangeProcessor {
             this.updateProgress(i, `Processing ${weekStr}...`);
             
             try {
-                const provider = getCurrentProvider ? getCurrentProvider() : (window.BOXARR_PROVIDER || 'mojo_us');
-                const response = await fetch(apiUrl('/scheduler/update-week'), {
+                const market = getCurrentMarket ? getCurrentMarket() : (window.BOXARR_MARKET || 'us');
+                const response = await fetch(apiUrlWithMarket('/scheduler/update-week', market), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({year, week, provider})
+                    body: JSON.stringify({year, week, market})
                 });
                 
                 const data = await response.json();
@@ -1518,8 +1518,8 @@ function updateCurrentWeek() {
     showProgress('Updating Last Week');
     addToProgressLog('Starting update for last week...');
     
-    const provider = getCurrentProvider ? getCurrentProvider() : (window.BOXARR_PROVIDER || 'mojo_us');
-    fetch(apiUrl(`/scheduler/trigger?provider=${encodeURIComponent(provider)}`), {
+    const market = getCurrentMarket ? getCurrentMarket() : (window.BOXARR_MARKET || 'us');
+    fetch(apiUrlWithMarket('/scheduler/trigger', market), {
         method: 'POST',
         headers: {'Content-Type': 'application/json'}
     })
@@ -1557,11 +1557,11 @@ function updateHistoricalWeek() {
     showProgress(`Updating Week ${week}, ${year}`);
     addToProgressLog(`Starting update for Week ${week}, ${year}...`);
     
-    const provider = getCurrentProvider ? getCurrentProvider() : (window.BOXARR_PROVIDER || 'mojo_us');
-    fetch(apiUrl('/scheduler/update-week'), {
+    const market = getCurrentMarket ? getCurrentMarket() : (window.BOXARR_MARKET || 'us');
+    fetch(apiUrlWithMarket('/scheduler/update-week', market), {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({year: parseInt(year), week: parseInt(week), provider})
+        body: JSON.stringify({year: parseInt(year), week: parseInt(week), market})
     })
     .then(response => {
         if (!response.ok) {
@@ -1627,8 +1627,8 @@ async function deleteWeek(year, week) {
 // Check for missing metadata
 async function checkMissingMetadata() {
     try {
-        const provider = getCurrentProvider ? getCurrentProvider() : (window.BOXARR_PROVIDER || 'mojo_us');
-        const response = await fetch(apiUrl(`/admin/check-missing-metadata?provider=${encodeURIComponent(provider)}`));
+        const market = getCurrentMarket ? getCurrentMarket() : (window.BOXARR_MARKET || 'us');
+        const response = await fetch(apiUrlWithMarket('/admin/check-missing-metadata', market));
         const data = await response.json();
         
         if (data.has_issues) {
@@ -1657,8 +1657,8 @@ async function fixMissingData() {
     addToProgressLog('Starting metadata repair process...');
     
     try {
-        const provider = getCurrentProvider ? getCurrentProvider() : (window.BOXARR_PROVIDER || 'mojo_us');
-        const response = await fetch(apiUrl(`/admin/repair-missing-metadata?provider=${encodeURIComponent(provider)}`), {
+        const market = getCurrentMarket ? getCurrentMarket() : (window.BOXARR_MARKET || 'us');
+        const response = await fetch(apiUrlWithMarket('/admin/repair-missing-metadata', market), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({

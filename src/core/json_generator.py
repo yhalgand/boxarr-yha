@@ -7,8 +7,15 @@ from typing import Any, Dict, List, Optional
 
 from ..utils.config import settings
 from ..utils.logger import get_logger
-from .boxoffice_provider import DEFAULT_PROVIDER, normalize_provider
-from .boxoffice_storage import provider_weekly_page_path, provider_weekly_pages_dir
+from .boxoffice_provider import (
+    DEFAULT_MARKET,
+    DEFAULT_PROVIDER,
+    market_for_provider,
+    normalize_market,
+    normalize_provider,
+    provider_for_market,
+)
+from .boxoffice_storage import market_weekly_page_path, market_weekly_pages_dir
 from .matcher import MatchResult
 from .models import MovieStatus
 from .radarr import RadarrService
@@ -22,7 +29,8 @@ class WeeklyDataGenerator:
     def __init__(
         self,
         radarr_service: Optional[RadarrService] = None,
-        provider: str = DEFAULT_PROVIDER,
+        market: str = DEFAULT_MARKET,
+        provider: Optional[str] = None,
     ):
         """
         Initialize data generator.
@@ -32,9 +40,12 @@ class WeeklyDataGenerator:
             provider: Provider identifier
         """
         self.radarr_service = radarr_service
-        self.provider = normalize_provider(provider)
-        self.output_dir = provider_weekly_pages_dir(
-            settings.boxarr_data_directory, self.provider, create=True
+        if provider is not None and market == DEFAULT_MARKET:
+            market = market_for_provider(provider)
+        self.market = normalize_market(market)
+        self.provider = normalize_provider(provider or provider_for_market(self.market))
+        self.output_dir = market_weekly_pages_dir(
+            settings.boxarr_data_directory, self.market, create=True
         )
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -228,6 +239,7 @@ class WeeklyDataGenerator:
         # Save metadata with full movie data
         metadata = {
             "generated_at": datetime.now().isoformat(),
+            "market": self.market,
             "provider": self.provider,
             "year": year,
             "week": week,
@@ -241,8 +253,8 @@ class WeeklyDataGenerator:
         }
 
         # Save JSON file
-        metadata_path = provider_weekly_page_path(
-            settings.boxarr_data_directory, self.provider, year, week
+        metadata_path = market_weekly_page_path(
+            settings.boxarr_data_directory, self.market, year, week
         )
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=2)

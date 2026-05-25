@@ -5,19 +5,42 @@
 
 // Get base path from injected variable (set in base.html)
 const BASE_PATH = window.BOXARR_BASE_PATH || '';
-const DEFAULT_MARKET = window.BOXARR_MARKET || 'US';
+const DEFAULT_MARKET = String(window.BOXARR_MARKET || 'us').toLowerCase();
 const DEFAULT_PROVIDER = window.BOXARR_PROVIDER || 'mojo_us';
 
 function providerForMarket(market) {
-    return String(market || 'US').toUpperCase() === 'FR' ? 'jpboxoffice_fr' : 'mojo_us';
+    return String(market || 'us').toLowerCase() === 'fr' ? 'jpboxoffice_fr' : 'mojo_us';
 }
 
 function marketForProvider(provider) {
-    return String(provider || 'mojo_us').toLowerCase() === 'jpboxoffice_fr' ? 'FR' : 'US';
+    return String(provider || 'mojo_us').toLowerCase() === 'jpboxoffice_fr' ? 'fr' : 'us';
+}
+
+function normalizeMarket(market) {
+    const value = String(market || '').trim().toLowerCase();
+    if (value === 'fr' || value === 'us') {
+        return value;
+    }
+    return DEFAULT_MARKET;
+}
+
+function getUrlMarket() {
+    const params = new URL(window.location.href).searchParams;
+    const urlMarket = params.get('market');
+    if (urlMarket) {
+        return normalizeMarket(urlMarket);
+    }
+    const urlProvider = params.get('provider');
+    if (urlProvider) {
+        return marketForProvider(urlProvider);
+    }
+    return null;
 }
 
 function getCurrentMarket() {
-    return localStorage.getItem('boxarr-market') || DEFAULT_MARKET;
+    return normalizeMarket(
+        getUrlMarket() || localStorage.getItem('boxarr-market') || DEFAULT_MARKET
+    );
 }
 
 function getCurrentProvider() {
@@ -25,25 +48,27 @@ function getCurrentProvider() {
 }
 
 function setMarketPreference(market) {
-    const normalizedMarket = String(market || 'US').toUpperCase() === 'FR' ? 'FR' : 'US';
+    const normalizedMarket = normalizeMarket(market);
     localStorage.setItem('boxarr-market', normalizedMarket);
     window.BOXARR_MARKET = normalizedMarket;
     window.BOXARR_PROVIDER = providerForMarket(normalizedMarket);
 
     const url = new URL(window.location.href);
     url.searchParams.set('market', normalizedMarket);
+    url.searchParams.delete('provider');
     window.location.href = url.toString();
 }
 
-function apiUrlWithProvider(endpoint, provider = getCurrentProvider()) {
+function apiUrlWithMarket(endpoint, market = getCurrentMarket()) {
     const url = new URL(apiUrl(endpoint), window.location.origin);
-    url.searchParams.set('provider', provider);
+    url.searchParams.set('market', normalizeMarket(market));
     return url.toString();
 }
 
-function pageUrlWithMarket(path) {
+function pageUrlWithMarket(path, market = getCurrentMarket()) {
     const url = new URL(makeUrl(path), window.location.origin);
-    url.searchParams.set('market', getCurrentMarket());
+    url.searchParams.set('market', normalizeMarket(market));
+    url.searchParams.delete('provider');
     return url.toString();
 }
 
@@ -224,7 +249,7 @@ function updateGenreMode() {
 }
 
 function refreshSchedulerStatus() {
-    fetch(apiUrlWithProvider('/scheduler/status'))
+    fetch(apiUrlWithMarket('/scheduler/status'))
         .then(response => response.json())
         .then(data => {
             // Update service status
@@ -308,7 +333,7 @@ function triggerScheduler() {
     btn.disabled = true;
     btn.textContent = 'Triggering...';
     
-    fetch(apiUrlWithProvider('/scheduler/trigger'), { method: 'POST' })
+    fetch(apiUrlWithMarket('/scheduler/trigger'), { method: 'POST' })
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -334,7 +359,7 @@ function reloadScheduler() {
     btn.disabled = true;
     btn.textContent = 'Reloading...';
     
-    fetch(apiUrl('/scheduler/reload'), { method: 'POST' })
+    fetch(apiUrlWithMarket('/scheduler/reload'), { method: 'POST' })
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -375,7 +400,7 @@ function reloadScheduler() {
         // Skip if elements don't exist (e.g., on setup page)
         if (!statusDot || !statusText) return;
         
-        fetch(apiUrl('/health'))
+        fetch(apiUrlWithMarket('/health'))
             .then(response => {
                 if (response.ok) {
                     statusDot.classList.add('connected');
@@ -400,7 +425,7 @@ function reloadScheduler() {
      * Check for application updates
      */
     function checkForUpdates() {
-        fetch(apiUrl('/config/check-update'))
+        fetch(apiUrlWithMarket('/config/check-update'))
             .then(response => response.json())
             .then(data => {
                 if (data.update_available) {
@@ -497,7 +522,7 @@ function reloadScheduler() {
         
         addLogEntry('Starting box office update...');
         
-        fetch(apiUrlWithProvider('/scheduler/trigger'), { method: 'POST' })
+        fetch(apiUrlWithMarket('/scheduler/trigger'), { method: 'POST' })
             .then(response => {
                 addLogEntry('Received response from server');
                 return response.json();
@@ -613,13 +638,13 @@ function reloadScheduler() {
         
         addLogEntry(`Starting historical data fetch for ${selectedHistoricalWeekText}`);
         
-        fetch(apiUrlWithProvider('/scheduler/update-week'), {
+        fetch(apiUrlWithMarket('/scheduler/update-week'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 year: parseInt(year), 
                 week: parseInt(week),
-                provider: getCurrentProvider(),
+                market: getCurrentMarket(),
             })
         })
         .then(response => {
@@ -713,13 +738,13 @@ function reloadScheduler() {
         
         addLogEntry(`Starting historical data fetch for Week ${week}, ${year}`);
         
-        fetch(apiUrlWithProvider('/scheduler/update-week'), {
+        fetch(apiUrlWithMarket('/scheduler/update-week'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 year: parseInt(year), 
                 week: parseInt(week),
-                provider: getCurrentProvider(),
+                market: getCurrentMarket(),
             })
         })
         .then(response => {
@@ -770,7 +795,7 @@ function reloadScheduler() {
 
     window.deleteWeek = function(year, week) {
         if (confirm(`Are you sure you want to delete Week ${week}, ${year}?`)) {
-            fetch(apiUrl(`/weeks/${year}/W${week}/delete`), { method: 'DELETE' })
+            fetch(apiUrlWithMarket(`/weeks/${year}/W${week}/delete`), { method: 'DELETE' })
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
@@ -805,7 +830,7 @@ function reloadScheduler() {
         
         if (movieIds.length === 0) return;
         
-        fetch(apiUrl('/movies/status'), {
+        fetch(apiUrlWithMarket('/movies/status'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ movie_ids: movieIds })
@@ -872,7 +897,7 @@ function reloadScheduler() {
     window.loadAvailableRootFolders = function(preserveSelection = false) {
         const folderSelect = document.getElementById('newMappingFolder');
         const previous = preserveSelection && folderSelect ? folderSelect.value : '';
-        fetch(apiUrl('/movies/root-folders/available'))
+        fetch(apiUrlWithMarket('/movies/root-folders/available'))
             .then(response => response.json())
             .then(data => {
                 availableRootFolders = data.folders || [];
@@ -1097,7 +1122,7 @@ function reloadScheduler() {
                 buttonElement.style.opacity = '0.7';
             }
             
-            fetch(apiUrl('/movies/add'), {
+            fetch(apiUrlWithMarket('/movies/add'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ title, year })
@@ -1154,7 +1179,7 @@ function reloadScheduler() {
                 buttonElement.textContent = 'Processing...';
             }
             
-            fetch(apiUrl(`/movies/${movieId}/upgrade`), {
+            fetch(apiUrlWithMarket(`/movies/${movieId}/upgrade`), {
                 method: 'POST'
             })
             .then(response => response.json())
@@ -1212,7 +1237,7 @@ function reloadScheduler() {
         if (testButton) testButton.textContent = 'Testing...';
         if (testSpinner) testSpinner.style.display = 'inline-block';
         
-        fetch(apiUrl('/config/test'), {
+        fetch(apiUrlWithMarket('/config/test'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url, api_key: apiKey })
@@ -1432,7 +1457,7 @@ function reloadScheduler() {
         
         showMessage('Saving configuration...', 'info');
         
-        fetch(apiUrl('/config/save'), {
+        fetch(apiUrlWithMarket('/config/save'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
@@ -1480,23 +1505,25 @@ function reloadScheduler() {
     // ==========================================
 
     document.addEventListener('DOMContentLoaded', function() {
-        const storedMarket = localStorage.getItem('boxarr-market');
-        if (!storedMarket) {
-            localStorage.setItem('boxarr-market', DEFAULT_MARKET);
-        } else if (storedMarket !== getCurrentMarket()) {
+        const urlMarket = getUrlMarket();
+        if (!urlMarket) {
             const currentUrl = new URL(window.location.href);
-            currentUrl.searchParams.set('market', storedMarket);
+            currentUrl.searchParams.set('market', DEFAULT_MARKET);
+            currentUrl.searchParams.delete('provider');
             window.location.replace(currentUrl.toString());
             return;
         }
 
-        const marketSelector = document.getElementById('marketSelector');
-        if (marketSelector) {
-            marketSelector.value = getCurrentMarket();
-        }
+        localStorage.setItem('boxarr-market', urlMarket);
 
-        window.BOXARR_MARKET = getCurrentMarket();
+        window.BOXARR_MARKET = urlMarket;
         window.BOXARR_PROVIDER = getCurrentProvider();
+        const marketTabUs = document.getElementById('marketTabUs');
+        const marketTabFr = document.getElementById('marketTabFr');
+        if (marketTabUs && marketTabFr) {
+            marketTabUs.classList.toggle('active', urlMarket === 'us');
+            marketTabFr.classList.toggle('active', urlMarket === 'fr');
+        }
 
         // Check connection status
         checkConnection();
@@ -1533,7 +1560,7 @@ function reloadScheduler() {
         if (isCurrentPath('/setup')) {
             // Rehydrate root-folder mapping UI from server state
             loadAvailableRootFolders();
-            fetch(apiUrl('/config/root-folders'))
+            fetch(apiUrlWithMarket('/config/root-folders'))
                 .then(r => r.json())
                 .then(data => {
                     const cfg = data?.config || { enabled: false, mappings: [] };
@@ -1670,7 +1697,7 @@ function reloadScheduler() {
         }
 
         try {
-            const response = await fetch(apiUrl('/movies/refresh-stored-status'), {
+            const response = await fetch(apiUrlWithMarket('/movies/refresh-stored-status'), {
                 method: 'POST'
             });
             const data = await response.json();
@@ -1713,11 +1740,11 @@ function reloadScheduler() {
         try {
             let response;
             if (isCurrentlyIgnored) {
-                response = await fetch(apiUrl('/movies/ignore/' + tmdbId), {
+                response = await fetch(apiUrlWithMarket('/movies/ignore/' + tmdbId), {
                     method: 'DELETE'
                 });
             } else {
-                response = await fetch(apiUrl('/movies/ignore'), {
+                response = await fetch(apiUrlWithMarket('/movies/ignore'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ tmdb_id: tmdbId, title: title })
@@ -1775,19 +1802,20 @@ function reloadScheduler() {
         window[`${prefix}Failures`] = [];
     }
 
-    async function runBoxarrUpdate(year, week, provider, prefix) {
-        const response = await fetch(apiUrlWithProvider('/scheduler/update-week', provider), {
+    async function runBoxarrUpdate(year, week, market, prefix) {
+        const normalizedMarket = normalizeMarket(market || getCurrentMarket());
+        const response = await fetch(apiUrlWithMarket('/scheduler/update-week', normalizedMarket), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 year: parseInt(year),
                 week: parseInt(week),
-                provider,
+                market: normalizedMarket,
             }),
         });
 
         const data = await response.json();
-        const entry = { year: parseInt(year), week: parseInt(week), provider, ...data };
+        const entry = { year: parseInt(year), week: parseInt(week), market: normalizedMarket, ...data };
 
         if (!response.ok || !data.success) {
             window[`${prefix}Failures`].push(entry);
@@ -1798,18 +1826,18 @@ function reloadScheduler() {
         return entry;
     }
 
-    window.boxarrWeek = async function (year, week, provider = getCurrentProvider()) {
-        const normalizedProvider = String(provider || getCurrentProvider()).toLowerCase();
+    window.boxarrWeek = async function (year, week, market = getCurrentMarket()) {
+        const normalizedMarket = normalizeMarket(market || getCurrentMarket());
         resetBoxarrBatchState('boxarrWeek');
-        return runBoxarrUpdate(year, week, normalizedProvider, 'boxarrWeek');
+        return runBoxarrUpdate(year, week, normalizedMarket, 'boxarrWeek');
     };
 
-    window.boxarrTest = async function (items, delayMs = 500, provider = getCurrentProvider()) {
-        const normalizedProvider = String(provider || getCurrentProvider()).toLowerCase();
+    window.boxarrTest = async function (items, delayMs = 500, market = getCurrentMarket()) {
+        const normalizedMarket = normalizeMarket(market || getCurrentMarket());
         resetBoxarrBatchState('boxarrTest');
         for (const item of items || []) {
             const [year, week] = item;
-            await runBoxarrUpdate(year, week, normalizedProvider, 'boxarrTest');
+            await runBoxarrUpdate(year, week, normalizedMarket, 'boxarrTest');
             if (delayMs > 0) {
                 await new Promise(resolve => setTimeout(resolve, delayMs));
             }
@@ -1820,11 +1848,11 @@ function reloadScheduler() {
         };
     };
 
-    window.boxarrWeeksForYear = async function (year, weeks, delayMs = 500, provider = getCurrentProvider()) {
-        const normalizedProvider = String(provider || getCurrentProvider()).toLowerCase();
+    window.boxarrWeeksForYear = async function (year, weeks, delayMs = 500, market = getCurrentMarket()) {
+        const normalizedMarket = normalizeMarket(market || getCurrentMarket());
         resetBoxarrBatchState('boxarrWeeksForYear');
         for (const week of weeks || []) {
-            await runBoxarrUpdate(year, week, normalizedProvider, 'boxarrWeeksForYear');
+            await runBoxarrUpdate(year, week, normalizedMarket, 'boxarrWeeksForYear');
             if (delayMs > 0) {
                 await new Promise(resolve => setTimeout(resolve, delayMs));
             }
@@ -1835,12 +1863,12 @@ function reloadScheduler() {
         };
     };
 
-    window.boxarrOneYear = async function (year, delayMs = 500, provider = getCurrentProvider()) {
-        const normalizedProvider = String(provider || getCurrentProvider()).toLowerCase();
+    window.boxarrOneYear = async function (year, delayMs = 500, market = getCurrentMarket()) {
+        const normalizedMarket = normalizeMarket(market || getCurrentMarket());
         const weeks = Array.from({ length: 53 }, (_, idx) => idx + 1);
         resetBoxarrBatchState('boxarrOneYear');
         for (const week of weeks) {
-            await runBoxarrUpdate(year, week, normalizedProvider, 'boxarrOneYear');
+            await runBoxarrUpdate(year, week, normalizedMarket, 'boxarrOneYear');
             if (delayMs > 0) {
                 await new Promise(resolve => setTimeout(resolve, delayMs));
             }
@@ -1857,15 +1885,15 @@ function reloadScheduler() {
         delayMs = 500,
         startWeek = 1,
         endWeek = 53,
-        provider = getCurrentProvider()
+        market = getCurrentMarket()
     ) {
-        const normalizedProvider = String(provider || getCurrentProvider()).toLowerCase();
+        const normalizedMarket = normalizeMarket(market || getCurrentMarket());
         resetBoxarrBatchState('boxarrYearsRange');
         for (let year = startYear; year <= endYear; year++) {
             const firstWeek = year === startYear ? startWeek : 1;
             const lastWeek = year === endYear ? endWeek : 53;
             for (let week = firstWeek; week <= lastWeek; week++) {
-                await runBoxarrUpdate(year, week, normalizedProvider, 'boxarrYearsRange');
+                await runBoxarrUpdate(year, week, normalizedMarket, 'boxarrYearsRange');
                 if (delayMs > 0) {
                     await new Promise(resolve => setTimeout(resolve, delayMs));
                 }

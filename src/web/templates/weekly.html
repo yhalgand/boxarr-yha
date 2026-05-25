@@ -383,12 +383,11 @@
 
         try {
             const rootPath = '{{ request.scope.get("root_path", "") }}';
-            const market = window.BOXARR_MARKET || localStorage.getItem('boxarr-market') || 'US';
-            const provider = window.BOXARR_PROVIDER || (market === 'FR' ? 'jpboxoffice_fr' : 'mojo_us');
-            const response = await fetch(`${rootPath}/api/scheduler/update-week?provider=${encodeURIComponent(provider)}`, {
+            const market = (window.BOXARR_MARKET || localStorage.getItem('boxarr-market') || 'us').toLowerCase();
+            const response = await fetch(`${rootPath}/api/scheduler/update-week?market=${encodeURIComponent(market)}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ year, week, provider }),
+                body: JSON.stringify({ year, week, market }),
             });
 
             const data = await response.json();

@@ -11,7 +11,14 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ...core.radarr import RadarrService
-from ...core.boxoffice_provider import DEFAULT_PROVIDER, normalize_provider
+from ...core.boxoffice_provider import (
+    DEFAULT_MARKET,
+    DEFAULT_PROVIDER,
+    market_for_provider,
+    normalize_market,
+    normalize_provider,
+    provider_for_market,
+)
 from ...core.boxoffice_storage import iter_weekly_page_paths
 from ...utils.config import settings
 from ...utils.logger import get_logger
@@ -51,11 +58,15 @@ class RepairProgress(BaseModel):
 
 
 @router.get("/check-missing-metadata", response_model=MissingMetadataCheck)
-async def check_missing_metadata(provider: str = DEFAULT_PROVIDER):
+async def check_missing_metadata(
+    market: str = DEFAULT_MARKET, provider: Optional[str] = None
+):
     """Check for movies with missing TMDB metadata."""
     try:
-        provider = normalize_provider(provider)
-        json_files = iter_weekly_page_paths(settings.boxarr_data_directory, provider)
+        if provider and market == DEFAULT_MARKET:
+            market = market_for_provider(provider)
+        market = normalize_market(market)
+        json_files = iter_weekly_page_paths(settings.boxarr_data_directory, market)
         if not json_files:
             return MissingMetadataCheck(
                 has_issues=False,
@@ -125,7 +136,11 @@ async def check_missing_metadata(provider: str = DEFAULT_PROVIDER):
 
 
 @router.post("/repair-missing-metadata")
-async def repair_missing_metadata(request: RepairRequest, provider: str = DEFAULT_PROVIDER):
+async def repair_missing_metadata(
+    request: RepairRequest,
+    market: str = DEFAULT_MARKET,
+    provider: Optional[str] = None,
+):
     """Repair missing TMDB metadata for movies with streaming progress updates."""
 
     async def generate_progress() -> AsyncGenerator[str, None]:
@@ -134,7 +149,12 @@ async def repair_missing_metadata(request: RepairRequest, provider: str = DEFAUL
                 yield f"data: {json.dumps({'error': 'Radarr not configured'})}\n\n"
                 return
 
-            provider_value = normalize_provider(provider)
+            if provider and market == DEFAULT_MARKET:
+                market_value = market_for_provider(provider)
+            else:
+                market_value = market
+            market_value = normalize_market(market_value)
+            provider_value = provider_for_market(market_value)
             radarr_service = RadarrService()
 
             # Phase 1: Collect unique movies missing data
@@ -144,9 +164,7 @@ async def repair_missing_metadata(request: RepairRequest, provider: str = DEFAUL
                 {}
             )  # title -> {sample_data, weeks: []}
 
-            json_files = iter_weekly_page_paths(
-                settings.boxarr_data_directory, provider_value
-            )
+            json_files = iter_weekly_page_paths(settings.boxarr_data_directory, market_value)
             for idx, json_file in enumerate(json_files, 1):
                 try:
                     with open(json_file) as f:
@@ -303,7 +321,7 @@ async def repair_missing_metadata(request: RepairRequest, provider: str = DEFAUL
 
                     if updated:
                         # Save the updated file
-                        if json_file.parent.name != provider_value:
+                        if json_file.parent.name != market_value:
                             # Keep legacy flat files read-only.
                             continue
                         with open(json_file, "w") as f:

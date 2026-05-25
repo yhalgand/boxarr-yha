@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Union
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -12,10 +13,14 @@ from pydantic import BaseModel
 
 from ... import __version__
 from ...core.boxoffice_provider import (
+    DEFAULT_MARKET,
     DEFAULT_PROVIDER,
+    market_for_provider,
     market_from_provider,
+    market_label,
+    normalize_market,
     normalize_provider,
-    provider_from_market,
+    provider_for_market,
 )
 from ...core.boxoffice_storage import (
     iter_weekly_page_paths,
@@ -59,26 +64,36 @@ def get_template_context(request: Request, **kwargs) -> dict:
         "request": request,
         "version": __version__,
         "theme": theme_str,
-        "market": kwargs.get("market", "US"),
-        "provider": kwargs.get("provider", DEFAULT_PROVIDER),
+        "market": kwargs.get("market", DEFAULT_MARKET),
+        "provider": kwargs.get("provider")
+        or provider_for_market(kwargs.get("market", DEFAULT_MARKET)),
     }
     context.update(kwargs)
     return context
 
 
-def _selected_provider(request: Request) -> str:
-    """Read the selected provider from query params, defaulting to US."""
+def _selected_market(request: Request) -> str:
+    """Read the selected market from query params, defaulting to US."""
     market_or_provider = request.query_params.get("market") or request.query_params.get(
         "provider"
     )
     try:
-        return provider_from_market(market_or_provider)
+        return normalize_market(market_or_provider)
     except ValueError:
-        return DEFAULT_PROVIDER
+        return DEFAULT_MARKET
 
 
-def _selected_market(request: Request) -> str:
-    return market_from_provider(_selected_provider(request))
+def _selected_provider(request: Request) -> str:
+    return provider_for_market(_selected_market(request))
+
+
+def _redirect_with_market(request: Request, path: str, market: str) -> RedirectResponse:
+    """Redirect to a canonical market URL while preserving other query params."""
+    params = dict(request.query_params)
+    params.pop("provider", None)
+    params["market"] = market
+    base = request.scope.get("root_path", "")
+    return RedirectResponse(url=f"{base}{path}?{urlencode(params)}")
 
 
 class WeekInfo(BaseModel):
@@ -105,14 +120,15 @@ class WidgetData(BaseModel):
 @router.get("/", response_class=HTMLResponse)
 async def home_page(request: Request):
     """Serve the home page (overview or setup)."""
+    market = _selected_market(request)
     # Check if Radarr is configured
     if not settings.is_configured:
         base = request.scope.get("root_path", "")
-        return RedirectResponse(url=f"{base}/setup")
+        return RedirectResponse(url=f"{base}/setup?market={market}")
 
     # Redirect to overview as the main landing page
     base = request.scope.get("root_path", "")
-    return RedirectResponse(url=f"{base}/overview")
+    return RedirectResponse(url=f"{base}/overview?market={market}")
 
 
 @router.get("/settings", response_class=HTMLResponse)
@@ -123,13 +139,13 @@ async def settings_redirect(request: Request):
     Honors the app's root_path for reverse proxy setups.
     """
     base = request.scope.get("root_path", "")
-    return RedirectResponse(url=f"{base}/setup")
+    return RedirectResponse(url=f"{base}/setup?market={_selected_market(request)}")
 
 
-async def aggregate_all_movies(provider: str = DEFAULT_PROVIDER) -> List[dict]:
+async def aggregate_all_movies(market: str = DEFAULT_MARKET) -> List[dict]:
     """Aggregate all movies from all weekly JSON files, handling duplicates."""
-    provider = normalize_provider(provider)
-    weekly_files = iter_weekly_page_paths(settings.boxarr_data_directory, provider)
+    market = normalize_market(market)
+    weekly_files = iter_weekly_page_paths(settings.boxarr_data_directory, market)
     if not weekly_files:
         return []
 
@@ -187,11 +203,14 @@ async def movie_overview_page(request: Request):
     # Check if configured - if not, redirect to setup
     if not settings.is_configured:
         base = request.scope.get("root_path", "")
-        return RedirectResponse(url=f"{base}/setup")
+        return RedirectResponse(url=f"{base}/setup?market={_selected_market(request)}")
+
+    if "market" not in request.query_params:
+        return _redirect_with_market(request, "/overview", _selected_market(request))
 
     # Get query parameters for filtering
-    provider = _selected_provider(request)
-    market = market_from_provider(provider)
+    market = _selected_market(request)
+    provider = provider_for_market(market)
 
     page = int(request.query_params.get("page", 1))
     per_page = int(request.query_params.get("per_page", 50))
@@ -204,7 +223,7 @@ async def movie_overview_page(request: Request):
         per_page = 50
 
     # Aggregate movies from all weeks
-    all_movies = await aggregate_all_movies(provider)
+    all_movies = await aggregate_all_movies(market)
 
     # Avoid synchronous full Radarr fetch here; hydrate via AJAX on the client
 
@@ -302,7 +321,7 @@ async def movie_overview_page(request: Request):
     }
 
     # Get recent weeks for quick navigation
-    recent_weeks = await get_available_weeks(provider)
+    recent_weeks = await get_available_weeks(market)
     recent_weeks = recent_weeks[:5]  # Show last 5 weeks
 
     return templates.TemplateResponse(
@@ -341,11 +360,14 @@ async def dashboard_page(request: Request):
     # Check if configured - if not, redirect to setup
     if not settings.is_configured:
         base = request.scope.get("root_path", "")
-        return RedirectResponse(url=f"{base}/setup")
+        return RedirectResponse(url=f"{base}/setup?market={_selected_market(request)}")
+
+    if "market" not in request.query_params:
+        return _redirect_with_market(request, "/weeks", _selected_market(request))
 
     # Get query parameters for pagination and filtering
-    provider = _selected_provider(request)
-    market = market_from_provider(provider)
+    market = _selected_market(request)
+    provider = provider_for_market(market)
 
     page = int(request.query_params.get("page", 1))
     per_page = int(request.query_params.get("per_page", 10))
@@ -356,7 +378,7 @@ async def dashboard_page(request: Request):
         per_page = 10
 
     # Get all available weeks
-    all_weeks = await get_available_weeks(provider)
+    all_weeks = await get_available_weeks(market)
 
     # Apply year filter if specified
     year_filter: Optional[int] = None
@@ -500,8 +522,11 @@ async def dashboard_page(request: Request):
 @router.get("/setup", response_class=HTMLResponse)
 async def setup_page(request: Request):
     """Serve the setup page."""
-    provider = _selected_provider(request)
-    market = market_from_provider(provider)
+    if "market" not in request.query_params:
+        return _redirect_with_market(request, "/setup", _selected_market(request))
+
+    market = _selected_market(request)
+    provider = provider_for_market(market)
     # Parse current cron for display
     cron = settings.boxarr_scheduler_cron
     import re
@@ -594,8 +619,11 @@ async def serve_weekly_page(request: Request, year: int, week: int):
     """Serve a specific week's page using template with dynamic data."""
     from datetime import date, datetime, timedelta
 
-    provider = _selected_provider(request)
-    market = market_from_provider(provider)
+    if "market" not in request.query_params:
+        return _redirect_with_market(request, f"/{year}W{week}", _selected_market(request))
+
+    market = _selected_market(request)
+    provider = provider_for_market(market)
 
     # Check for JSON data file
     json_file = resolve_weekly_page_path(
@@ -623,7 +651,7 @@ async def serve_weekly_page(request: Request, year: int, week: int):
     friday = monday + timedelta(days=4)
     sunday = monday + timedelta(days=6)
 
-    available_weeks = await get_available_weeks(provider)
+    available_weeks = await get_available_weeks(market)
     current_idx = next(
         (
             idx
@@ -682,22 +710,22 @@ async def serve_weekly_page(request: Request, year: int, week: int):
 @router.get("/api/weeks")
 async def get_weeks(request: Request):
     """Get list of all available weeks with metadata."""
-    return await get_available_weeks(_selected_provider(request))
+    return await get_available_weeks(_selected_market(request))
 
 
 @router.delete("/api/weeks/{year}/W{week}/delete")
 async def delete_week(request: Request, year: int, week: int):
     """Delete a specific week's data files."""
     try:
-        provider = _selected_provider(request)
+        market = _selected_market(request)
         json_file = resolve_weekly_page_path(
-            settings.boxarr_data_directory, provider, year, week
+            settings.boxarr_data_directory, market, year, week
         )
         html_file = None
 
         deleted_files = []
         if json_file.exists():
-            if json_file.parent.name != provider:
+            if json_file.parent.name != market:
                 return {"success": False, "message": "Legacy flat files are read-only"}
             json_file.unlink()
             deleted_files.append("JSON")
@@ -722,7 +750,7 @@ async def get_widget(request: Request):
     """Get embeddable widget HTML."""
     try:
         # Get current week data
-        widget_data = await get_widget_data(_selected_provider(request))
+        widget_data = await get_widget_data(_selected_market(request))
 
         # Build the base URL with correct scheme, host, and base path
         # request.base_url already includes the root_path from FastAPI
@@ -747,13 +775,13 @@ async def get_widget(request: Request):
 @router.get("/api/widget/json", response_model=WidgetData)
 async def get_widget_json(request: Request):
     """Get widget data as JSON."""
-    return await get_widget_data(_selected_provider(request))
+    return await get_widget_data(_selected_market(request))
 
 
-async def get_available_weeks(provider: str = DEFAULT_PROVIDER) -> List[WeekInfo]:
+async def get_available_weeks(market: str = DEFAULT_MARKET) -> List[WeekInfo]:
     """Get all available weeks with metadata."""
-    provider = normalize_provider(provider)
-    weekly_files = iter_weekly_page_paths(settings.boxarr_data_directory, provider)
+    market = normalize_market(market)
+    weekly_files = iter_weekly_page_paths(settings.boxarr_data_directory, market)
     if not weekly_files:
         return []
 
@@ -812,10 +840,10 @@ async def get_available_weeks(provider: str = DEFAULT_PROVIDER) -> List[WeekInfo
     return weeks
 
 
-async def get_widget_data(provider: str = DEFAULT_PROVIDER) -> WidgetData:
+async def get_widget_data(market: str = DEFAULT_MARKET) -> WidgetData:
     """Get current week widget data."""
-    provider = normalize_provider(provider)
-    json_files = iter_weekly_page_paths(settings.boxarr_data_directory, provider)
+    market = normalize_market(market)
+    json_files = iter_weekly_page_paths(settings.boxarr_data_directory, market)
     if not json_files:
         return WidgetData(
             current_week=0,

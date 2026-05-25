@@ -63,6 +63,7 @@ def test_refresh_weekly_data_from_radarr_updates_stale_entries(tmp_path, monkeyp
         json.dump(
             {
                 "generated_at": "2026-04-05T10:00:00",
+                "market": "us",
                 "provider": "mojo_us",
                 "year": 2024,
                 "week": 10,
@@ -157,7 +158,7 @@ def test_refresh_weekly_data_from_radarr_updates_stale_entries(tmp_path, monkeyp
         "movies_linked": 1,
     }
 
-    provider_week_file = weekly_pages_dir / "mojo_us" / "2024W10.json"
+    provider_week_file = weekly_pages_dir / "us" / "2024W10.json"
     assert provider_week_file.exists()
     assert legacy_week_file.exists()
 
@@ -178,4 +179,5 @@ def test_refresh_weekly_data_from_radarr_updates_stale_entries(tmp_path, monkeyp
 
     assert refreshed["matched_movies"] == 2
     assert "status_refreshed_at" in refreshed
+    assert refreshed["market"] == "us"
     assert refreshed["provider"] == "mojo_us"

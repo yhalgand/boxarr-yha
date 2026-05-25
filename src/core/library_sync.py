@@ -7,11 +7,18 @@ from typing import Any, Dict, Optional
 
 from ..utils.config import settings
 from ..utils.logger import get_logger
-from .boxoffice_provider import DEFAULT_PROVIDER, normalize_provider
+from .boxoffice_provider import (
+    DEFAULT_MARKET,
+    DEFAULT_PROVIDER,
+    market_for_provider,
+    normalize_market,
+    normalize_provider,
+    provider_for_market,
+)
 from .boxoffice_storage import (
     iter_weekly_page_paths,
-    provider_weekly_page_path,
-    provider_weekly_pages_dir,
+    market_weekly_page_path,
+    market_weekly_pages_dir,
 )
 from .models import MovieStatus
 from .radarr import (
@@ -82,12 +89,16 @@ def refresh_weekly_data_from_radarr(
     radarr_service: Optional[RadarrService] = None,
     data_directory: Optional[Path] = None,
     ignore_cache: bool = False,
-    provider: str = DEFAULT_PROVIDER,
+    market: str = DEFAULT_MARKET,
+    provider: Optional[str] = None,
 ) -> Dict[str, int]:
     """Refresh stored weekly JSON files with current Radarr status/details."""
     base_directory = data_directory or settings.boxarr_data_directory
-    provider = normalize_provider(provider)
-    weekly_paths = iter_weekly_page_paths(base_directory, provider)
+    if provider is not None and market == DEFAULT_MARKET:
+        market = market_for_provider(provider)
+    market = normalize_market(market)
+    provider = normalize_provider(provider or provider_for_market(market))
+    weekly_paths = iter_weekly_page_paths(base_directory, market)
     if not weekly_paths:
         return {
             "weeks_scanned": 0,
@@ -164,11 +175,12 @@ def refresh_weekly_data_from_radarr(
                 1 for movie in data.get("movies", []) if movie.get("radarr_id")
             )
             data["status_refreshed_at"] = datetime.now().isoformat()
+            data["market"] = normalize_market(data.get("market") or market)
             data["provider"] = normalize_provider(data.get("provider") or provider)
             target_file = json_file
-            if provider == DEFAULT_PROVIDER and json_file.parent == base_directory / "weekly_pages":
-                target_file = provider_weekly_page_path(
-                    base_directory, provider, data["year"], data["week"]
+            if market == DEFAULT_MARKET and json_file.parent == base_directory / "weekly_pages":
+                target_file = market_weekly_page_path(
+                    base_directory, market, data["year"], data["week"]
                 )
             with open(target_file, "w") as f:
                 json.dump(data, f, indent=2, default=str)

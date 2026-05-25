@@ -7,7 +7,14 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from ...core.boxoffice import BoxOfficeService
-from ...core.boxoffice_provider import DEFAULT_PROVIDER, normalize_provider
+from ...core.boxoffice_provider import (
+    DEFAULT_MARKET,
+    DEFAULT_PROVIDER,
+    market_for_provider,
+    normalize_market,
+    normalize_provider,
+    provider_for_market,
+)
 from ...core.exceptions import BoxOfficeError
 from ...core.matcher import MovieMatcher
 from ...core.radarr import RadarrService
@@ -35,13 +42,17 @@ class BoxOfficeMovieResponse(BaseModel):
 
 @router.get("/current", response_model=List[BoxOfficeMovieResponse])
 async def get_current_box_office(
-    provider: str = Query(DEFAULT_PROVIDER, description="Box office provider"),
+    market: str = Query(DEFAULT_MARKET, description="Box office market"),
+    provider: Optional[str] = Query(None, description="Compat provider fallback"),
 ):
     """Get current week's box office with Radarr matching."""
     try:
-        provider = normalize_provider(provider)
+        if provider and market == DEFAULT_MARKET:
+            market = market_for_provider(provider)
+        market = normalize_market(market)
+        provider = provider_for_market(market)
         # Get current week's box office
-        boxoffice_service = BoxOfficeService(provider=provider)
+        boxoffice_service = BoxOfficeService(market=market)
         movies = boxoffice_service.get_current_week_movies()
 
         # Match with Radarr if configured
@@ -103,7 +114,7 @@ async def get_current_box_office(
 
         return results
     except ValueError as e:
-        logger.error(f"Invalid provider for box office current: {e}")
+        logger.error(f"Invalid market/provider for box office current: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except BoxOfficeError as e:
         raise HTTPException(status_code=501, detail=str(e))
@@ -116,11 +127,14 @@ async def get_current_box_office(
 async def get_historical_box_office(
     year: int,
     week: int,
-    provider: str = Query(DEFAULT_PROVIDER, description="Box office provider"),
+    market: str = Query(DEFAULT_MARKET, description="Box office market"),
+    provider: Optional[str] = Query(None, description="Compat provider fallback"),
 ):
     """Get historical box office data for a specific week."""
     try:
-        provider = normalize_provider(provider)
+        if provider and market == DEFAULT_MARKET:
+            market = market_for_provider(provider)
+        market = normalize_market(market)
         # Validate year and week
         if year < 1982 or year > datetime.now().year:
             raise HTTPException(status_code=400, detail="Invalid year")
@@ -128,7 +142,7 @@ async def get_historical_box_office(
             raise HTTPException(status_code=400, detail="Invalid week number")
 
         # Get historical data
-        boxoffice_service = BoxOfficeService(provider=provider)
+        boxoffice_service = BoxOfficeService(market=market)
         movies = boxoffice_service.fetch_weekend_box_office(year, week)
 
         # Return simplified data
@@ -142,7 +156,7 @@ async def get_historical_box_office(
             for movie in movies
         ]
     except ValueError as e:
-        logger.error(f"Invalid provider for historical box office: {e}")
+        logger.error(f"Invalid market/provider for historical box office: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except BoxOfficeError as e:
         raise HTTPException(status_code=501, detail=str(e))

@@ -136,7 +136,10 @@ def test_ignore_rereleases_enabled_skips_old_years(tmp_path, monkeypatch):
 
     _FakeRadarrService.added_calls.clear()
 
-    resp = client.post("/api/scheduler/update-week", json={"year": 2021, "week": 10})
+    resp = client.post(
+        "/api/scheduler/update-week",
+        json={"year": 2021, "week": 10, "market": "us"},
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["success"] is True

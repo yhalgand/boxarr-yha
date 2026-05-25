@@ -9,7 +9,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ...core.scheduler import BoxarrScheduler
-from ...core.boxoffice_provider import DEFAULT_PROVIDER, normalize_provider
+from ...core.boxoffice_provider import (
+    DEFAULT_MARKET,
+    DEFAULT_PROVIDER,
+    market_for_provider,
+    normalize_market,
+    normalize_provider,
+    provider_for_market,
+)
 from ...core.boxoffice_storage import (
     iter_history_paths,
 )
@@ -48,12 +55,17 @@ class TriggerResponse(BaseModel):
 
 
 @router.post("/trigger", response_model=TriggerResponse)
-async def trigger_update(provider: str = DEFAULT_PROVIDER):
+async def trigger_update(
+    market: str = DEFAULT_MARKET, provider: Optional[str] = None
+):
     """Manually trigger box office update."""
     try:
-        provider = normalize_provider(provider)
+        if provider and market == DEFAULT_MARKET:
+            market = market_for_provider(provider)
+        market = normalize_market(market)
+        provider = provider_for_market(market)
         scheduler = get_scheduler()
-        result = await scheduler.update_box_office(provider=provider)
+        result = await scheduler.update_box_office(market=market, provider=provider)
 
         # Handle added_movies which is a list
         added_movies = result.get("added_movies", [])
@@ -113,10 +125,15 @@ async def reload_scheduler():
 
 
 @router.get("/status")
-async def get_scheduler_status(provider: str = DEFAULT_PROVIDER):
+async def get_scheduler_status(
+    market: str = DEFAULT_MARKET, provider: Optional[str] = None
+):
     """Get current scheduler status and configuration."""
     try:
-        provider = normalize_provider(provider)
+        if provider and market == DEFAULT_MARKET:
+            market = market_for_provider(provider)
+        market = normalize_market(market)
+        provider = provider_for_market(market)
         scheduler = get_scheduler()
 
         # Get job information
@@ -159,7 +176,7 @@ async def get_scheduler_status(provider: str = DEFAULT_PROVIDER):
         try:
             history_files = [
                 path
-                for path in iter_history_paths(settings.boxarr_data_directory, provider)
+                for path in iter_history_paths(settings.boxarr_data_directory, market)
                 if path.name.endswith("_latest.json")
             ]
             if history_files:
@@ -193,6 +210,7 @@ async def get_scheduler_status(provider: str = DEFAULT_PROVIDER):
             "last_run": last_run_info,
             "jobs": job_info,
             "auto_add_enabled": settings.boxarr_features_auto_add,
+            "market": market,
             "provider": provider,
         }
     except ValueError as e:
@@ -212,13 +230,17 @@ async def get_scheduler_status(provider: str = DEFAULT_PROVIDER):
 
 
 @router.get("/history")
-async def get_scheduler_history(provider: str = DEFAULT_PROVIDER):
+async def get_scheduler_history(
+    market: str = DEFAULT_MARKET, provider: Optional[str] = None
+):
     """Get scheduler run history."""
     try:
-        provider = normalize_provider(provider)
+        if provider and market == DEFAULT_MARKET:
+            market = market_for_provider(provider)
+        market = normalize_market(market)
         history_files = [
             path
-            for path in iter_history_paths(settings.boxarr_data_directory, provider)
+            for path in iter_history_paths(settings.boxarr_data_directory, market)
         ]
         if not history_files:
             return {"runs": []}
@@ -281,7 +303,8 @@ class UpdateWeekRequest(BaseModel):
 
     year: int
     week: int
-    provider: str = DEFAULT_PROVIDER
+    market: str = DEFAULT_MARKET
+    provider: Optional[str] = None
 
 
 @router.post("/update-week")
@@ -289,7 +312,12 @@ async def update_specific_week(request: UpdateWeekRequest):  # noqa: C901
     """Update box office for a specific historical week."""
     year = request.year
     week = request.week
-    provider = normalize_provider(request.provider)
+    if request.provider and request.market == DEFAULT_MARKET:
+        market = market_for_provider(request.provider)
+    else:
+        market = request.market
+    market = normalize_market(market)
+    provider = provider_for_market(market)
     try:
         # Validate inputs
         if year < 1982 or year > datetime.now().year:
@@ -306,7 +334,7 @@ async def update_specific_week(request: UpdateWeekRequest):  # noqa: C901
         )
 
         # Get box office data
-        boxoffice_service = BoxOfficeService(provider=provider)
+        boxoffice_service = BoxOfficeService(market=market)
         limit = settings.boxarr_features_box_office_limit
         box_office_movies = boxoffice_service.fetch_weekend_box_office(
             year, week, limit=limit
@@ -362,6 +390,7 @@ async def update_specific_week(request: UpdateWeekRequest):  # noqa: C901
         # Generate data file
         generator = WeeklyDataGenerator(
             radarr_service=radarr_service if settings.radarr_api_key else None,
+            market=market,
             provider=provider,
         )
         generator.generate_weekly_data(
@@ -376,10 +405,11 @@ async def update_specific_week(request: UpdateWeekRequest):  # noqa: C901
             "message": f"Updated week {year}W{week:02d}",
             "movies_found": len(box_office_movies),
             "movies_added": added_count,
+            "market": market,
             "provider": provider,
         }
     except ValueError as e:
-        logger.error(f"Invalid provider for update-week: {e}")
+        logger.error(f"Invalid market/provider for update-week: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except BoxOfficeError as e:
         raise HTTPException(status_code=501, detail=str(e))

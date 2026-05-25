@@ -8,13 +8,26 @@ from typing import Dict, List, Optional, Tuple
 
 from .exceptions import BoxOfficeError
 
+SUPPORTED_MARKETS: Tuple[str, ...] = ("us", "fr")
 SUPPORTED_PROVIDERS: Tuple[str, ...] = ("mojo_us", "jpboxoffice_fr")
+DEFAULT_MARKET = "us"
 DEFAULT_PROVIDER = "mojo_us"
-MARKET_TO_PROVIDER: Dict[str, str] = {
-    "US": "mojo_us",
-    "FR": "jpboxoffice_fr",
+MARKET_DEFINITIONS: Dict[str, Dict[str, str]] = {
+    "us": {
+        "label": "US Box Office",
+        "provider": "mojo_us",
+    },
+    "fr": {
+        "label": "France Box Office",
+        "provider": "jpboxoffice_fr",
+    },
 }
-PROVIDER_TO_MARKET: Dict[str, str] = {value: key for key, value in MARKET_TO_PROVIDER.items()}
+MARKET_TO_PROVIDER: Dict[str, str] = {
+    market: definition["provider"] for market, definition in MARKET_DEFINITIONS.items()
+}
+PROVIDER_TO_MARKET: Dict[str, str] = {
+    provider: market for market, provider in MARKET_TO_PROVIDER.items()
+}
 
 
 def normalize_provider(provider: Optional[str]) -> str:
@@ -31,29 +44,61 @@ def normalize_provider(provider: Optional[str]) -> str:
     )
 
 
-def provider_from_market(market: Optional[str]) -> str:
-    """Map a simple market selector to a provider identifier."""
+def normalize_market(market: Optional[str]) -> str:
+    """Normalize and validate a market identifier."""
     if market is None or str(market).strip() == "":
-        return DEFAULT_PROVIDER
+        return DEFAULT_MARKET
 
-    candidate = str(market).strip()
-    normalized_candidate = candidate.lower()
-    if normalized_candidate in SUPPORTED_PROVIDERS:
-        return normalize_provider(normalized_candidate)
+    normalized = str(market).strip().lower()
+    if normalized in SUPPORTED_MARKETS:
+        return normalized
 
-    market_code = candidate.upper()
-    if market_code in MARKET_TO_PROVIDER:
-        return MARKET_TO_PROVIDER[market_code]
+    if normalized in SUPPORTED_PROVIDERS:
+        return PROVIDER_TO_MARKET[normalize_provider(normalized)]
 
     raise ValueError(
-        f"Unsupported market '{market}'. Supported markets: {', '.join(sorted(MARKET_TO_PROVIDER))}"
+        f"Unsupported market '{market}'. Supported markets: {', '.join(SUPPORTED_MARKETS)}"
+    )
+
+
+def provider_for_market(market: Optional[str]) -> str:
+    """Map a market identifier to a provider identifier."""
+    market_key = normalize_market(market)
+    return MARKET_TO_PROVIDER[market_key]
+
+
+def provider_from_market(market: Optional[str]) -> str:
+    """Backward-compatible alias for provider_for_market."""
+    return provider_for_market(market)
+
+
+def market_for_provider(provider: Optional[str]) -> str:
+    """Map a provider identifier to a market identifier."""
+    if provider is None or str(provider).strip() == "":
+        return DEFAULT_MARKET
+
+    candidate = str(provider).strip()
+    normalized_candidate = candidate.lower()
+    if normalized_candidate in SUPPORTED_PROVIDERS:
+        return PROVIDER_TO_MARKET[normalize_provider(normalized_candidate)]
+
+    if normalized_candidate in SUPPORTED_MARKETS:
+        return normalize_market(normalized_candidate)
+
+    raise ValueError(
+        f"Unsupported provider '{provider}'. Supported providers: {', '.join(SUPPORTED_PROVIDERS)}"
     )
 
 
 def market_from_provider(provider: Optional[str]) -> str:
-    """Map a provider identifier back to the UI market selector."""
-    normalized = normalize_provider(provider)
-    return PROVIDER_TO_MARKET.get(normalized, "US")
+    """Backward-compatible alias for market_for_provider."""
+    return market_for_provider(provider)
+
+
+def market_label(market: Optional[str]) -> str:
+    """Return the display label for a market."""
+    market_key = normalize_market(market)
+    return MARKET_DEFINITIONS[market_key]["label"]
 
 
 class BoxOfficeProvider(ABC):
@@ -109,4 +154,3 @@ class BoxOfficeProvider(ABC):
     @abstractmethod
     def fetch_weekend_box_office(self, year=None, week=None, limit: int = 10):
         """Fetch movie rankings for a specific weekend."""
-

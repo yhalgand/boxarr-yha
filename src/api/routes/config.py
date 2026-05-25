@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from ... import __version__
 from ...core.radarr import RadarrService
+from ...core.boxoffice_provider import DEFAULT_MARKET, MARKET_DEFINITIONS
 from ...utils.config import RootFolderConfig, RootFolderMapping, Settings, settings
 from ...utils.logger import get_logger
 
@@ -25,6 +26,8 @@ class ConfigResponse(BaseModel):
     radarr_configured: bool
     scheduler_enabled: bool
     auto_add: bool
+    default_market: str = DEFAULT_MARKET
+    markets: Dict[str, Any] = Field(default_factory=dict)
 
 
 class TestConfigRequest(BaseModel):
@@ -107,6 +110,13 @@ async def get_configuration():
         radarr_configured=bool(current_settings.radarr_api_key),
         scheduler_enabled=current_settings.boxarr_scheduler_enabled,
         auto_add=current_settings.boxarr_features_auto_add,
+        markets={
+            market: {
+                "label": definition["label"],
+                "provider": definition["provider"],
+            }
+            for market, definition in MARKET_DEFINITIONS.items()
+        },
     )
 
 

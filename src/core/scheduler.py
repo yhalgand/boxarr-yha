@@ -15,12 +15,19 @@ from apscheduler.triggers.cron import CronTrigger
 
 from ..utils.config import settings
 from ..utils.logger import get_logger
-from .boxoffice_provider import DEFAULT_PROVIDER, normalize_provider
+from .boxoffice_provider import (
+    DEFAULT_MARKET,
+    DEFAULT_PROVIDER,
+    market_for_provider,
+    normalize_market,
+    normalize_provider,
+    provider_for_market,
+)
 from .boxoffice_storage import (
     iter_history_paths,
-    provider_history_dir,
-    provider_history_file_path,
-    provider_history_latest_file_path,
+    market_history_dir,
+    market_history_file_path,
+    market_history_latest_file_path,
 )
 from .auto_add import auto_add_missing_movies
 from .boxoffice import BoxOfficeService
@@ -140,7 +147,8 @@ class BoxarrScheduler:
         self,
         year: Optional[int] = None,
         week: Optional[int] = None,
-        provider: str = DEFAULT_PROVIDER,
+        market: str = DEFAULT_MARKET,
+        provider: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Main job to update box office data.
@@ -152,23 +160,26 @@ class BoxarrScheduler:
         Returns:
             Update results dictionary
         """
-        provider = normalize_provider(provider)
+        if provider is not None and market == DEFAULT_MARKET:
+            market = market_for_provider(provider)
+        market = normalize_market(market)
+        provider = normalize_provider(provider or provider_for_market(market))
         if year and week:
             logger.info(
-                f"Starting box office update for {year} Week {week:02d} (provider={provider})"
+                f"Starting box office update for {year} Week {week:02d} (market={market}, provider={provider})"
             )
         else:
             logger.info(
-                f"Starting scheduled box office update for previous week (provider={provider})"
+                f"Starting scheduled box office update for previous week (market={market}, provider={provider})"
             )
         start_time = datetime.now()
 
         try:
             # Initialize services if needed
             if not self.boxoffice_service or getattr(
-                self.boxoffice_service, "provider_key", DEFAULT_PROVIDER
-            ) != provider:
-                self.boxoffice_service = BoxOfficeService(provider=provider)
+                self.boxoffice_service, "market_key", DEFAULT_MARKET
+            ) != market:
+                self.boxoffice_service = BoxOfficeService(market=market)
             if not self.radarr_service:
                 self.radarr_service = RadarrService()
 
@@ -181,7 +192,7 @@ class BoxarrScheduler:
             else:
                 # get_weekend_dates() returns the most recent complete weekend
                 _, _, actual_year, actual_week = (
-                self.boxoffice_service.get_weekend_dates()
+                    self.boxoffice_service.get_weekend_dates()
                 )
 
             # Fetch box office movies
@@ -246,7 +257,7 @@ class BoxarrScheduler:
 
             # Generate JSON data file
             page_generator = WeeklyDataGenerator(
-                self.radarr_service, provider=provider
+                self.radarr_service, market=market, provider=provider
             )
             data_path = await self._run_in_executor(
                 page_generator.generate_weekly_data,
@@ -261,6 +272,7 @@ class BoxarrScheduler:
                     refresh_weekly_data_from_radarr,
                     radarr_service=self.radarr_service,
                     ignore_cache=True,
+                    market=market,
                     provider=provider,
                 )
             )
@@ -276,10 +288,11 @@ class BoxarrScheduler:
             results["data_path"] = str(data_path)
             results["added_movies"] = added_movies
             results["status_refresh"] = refresh_results
+            results["market"] = market
             results["provider"] = provider
 
             # Save to history
-            await self._save_to_history(results, actual_year, actual_week, provider)
+            await self._save_to_history(results, actual_year, actual_week, market, provider)
 
             duration = (datetime.now() - start_time).total_seconds()
             logger.info(
@@ -370,7 +383,7 @@ class BoxarrScheduler:
             return "Pending"
 
     async def _save_to_history(
-        self, results: Dict[str, Any], year: int, week: int, provider: str
+        self, results: Dict[str, Any], year: int, week: int, market: str, provider: str
     ) -> None:
         """
         Save results to history.
@@ -381,21 +394,22 @@ class BoxarrScheduler:
             week: ISO week number of the processed week
         """
         try:
-            provider = normalize_provider(provider)
+            market = normalize_market(market)
+            provider = normalize_provider(provider or provider_for_market(market))
             base_dir = settings.boxarr_data_directory
-            history_dir = provider_history_dir(base_dir, provider, create=True)
+            history_dir = market_history_dir(base_dir, market, create=True)
 
             now = datetime.now()
 
             # Save to file
-            history_file = provider_history_file_path(
-                base_dir, provider, year, week, now.strftime("%Y%m%d_%H%M%S")
+            history_file = market_history_file_path(
+                base_dir, market, year, week, now.strftime("%Y%m%d_%H%M%S")
             )
             with open(history_file, "w") as f:
                 json.dump(results, f, indent=2, default=str)
 
             # Also save as latest
-            latest_file = provider_history_latest_file_path(base_dir, provider, year, week)
+            latest_file = market_history_latest_file_path(base_dir, market, year, week)
             with open(latest_file, "w") as f:
                 json.dump(results, f, indent=2, default=str)
 
@@ -523,7 +537,7 @@ class BoxarrScheduler:
             logger.warning("Scheduler is not running")
 
     async def get_history(
-        self, limit: int = 10, provider: str = DEFAULT_PROVIDER
+        self, limit: int = 10, market: str = DEFAULT_MARKET, provider: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Get historical update results.
@@ -534,8 +548,10 @@ class BoxarrScheduler:
         Returns:
             List of historical results
         """
-        provider = normalize_provider(provider)
-        history_files = iter_history_paths(settings.boxarr_data_directory, provider)
+        if provider is not None and market == DEFAULT_MARKET:
+            market = market_for_provider(provider)
+        market = normalize_market(market)
+        history_files = iter_history_paths(settings.boxarr_data_directory, market)
         history_files = sorted(
             [
             path

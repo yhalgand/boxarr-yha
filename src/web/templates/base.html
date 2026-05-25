@@ -84,29 +84,40 @@
             gap: 1rem;
         }
 
-        .market-switcher {
+        .market-tabs {
             display: inline-flex;
             align-items: center;
-            gap: 0.5rem;
-            padding: 0.4rem 0.75rem;
+            gap: 0.35rem;
+            padding: 0.35rem;
             background: var(--bg-color);
             border: 1px solid var(--border-color);
             border-radius: 999px;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
         }
 
-        .market-switcher label {
-            font-size: 0.8rem;
-            color: var(--text-secondary);
-            font-weight: 600;
-        }
-
-        .market-switcher select {
-            border: none;
+        .market-tab {
+            appearance: none;
+            border: 0;
+            border-radius: 999px;
+            padding: 0.7rem 1rem;
             background: transparent;
-            color: var(--text-primary);
-            font-weight: 600;
-            outline: none;
+            color: var(--text-secondary);
+            font-weight: 700;
             cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .market-tab:hover {
+            color: var(--text-primary);
+            background: rgba(255,255,255,0.06);
+        }
+
+        .market-tab.active {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            box-shadow: var(--shadow);
         }
         
         .nav-link {
@@ -232,7 +243,7 @@
     <script>
         // Inject base path for JavaScript usage
         window.BOXARR_BASE_PATH = "{{ request.scope.get('root_path', '') }}";
-        window.BOXARR_MARKET = "{{ market|default('US') }}";
+        window.BOXARR_MARKET = "{{ market|default('us') }}";
         window.BOXARR_PROVIDER = "{{ provider|default('mojo_us') }}";
     </script>
     <nav class="navbar">
@@ -246,12 +257,9 @@
                 </a>
             </div>
             <div class="navbar-menu">
-                <div class="market-switcher">
-                    <label for="marketSelector">Market</label>
-                    <select id="marketSelector" onchange="setMarketPreference(this.value)">
-                        <option value="US" {% if market == 'US' %}selected{% endif %}>US</option>
-                        <option value="FR" {% if market == 'FR' %}selected{% endif %}>FR</option>
-                    </select>
+                <div class="market-tabs" aria-label="Market selector">
+                    <a href="#" id="marketTabUs" class="market-tab {% if market == 'us' %}active{% endif %}" onclick="setMarketPreference('us'); return false;">US Box Office</a>
+                    <a href="#" id="marketTabFr" class="market-tab {% if market == 'fr' %}active{% endif %}" onclick="setMarketPreference('fr'); return false;">France Box Office</a>
                 </div>
                 <a href="{{ request.scope.get('root_path', '') }}/overview?market={{ market }}" class="nav-link {% if request.path.endswith('/overview') %}active{% endif %}">Movies</a>
                 <a href="{{ request.scope.get('root_path', '') }}/weeks?market={{ market }}" class="nav-link {% if request.path.endswith('/dashboard') or request.path.endswith('/weeks') %}active{% endif %}">Weeks</a>

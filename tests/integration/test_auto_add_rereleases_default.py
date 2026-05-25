@@ -154,7 +154,10 @@ def test_default_auto_add_adds_all_years(tmp_path, monkeypatch):
 
     # When fetching any 2021 week, both the new movie and the re-release
     # should be auto-added with current defaults (no re-release filter).
-    resp = client.post("/api/scheduler/update-week", json={"year": 2021, "week": 10})
+    resp = client.post(
+        "/api/scheduler/update-week",
+        json={"year": 2021, "week": 10, "market": "us"},
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["success"] is True

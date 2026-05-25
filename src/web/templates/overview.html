@@ -517,7 +517,7 @@
             </div>
             <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
                 {% for week in recent_weeks %}
-                <a href="{{ request.scope.get('root_path', '') }}/{{ week.year }}W{{ "%02d"|format(week.week) }}" 
+                <a href="{{ request.scope.get('root_path', '') }}/{{ week.year }}W{{ "%02d"|format(week.week) }}?market={{ market }}"
                    style="padding: 0.5rem 1rem; background: var(--card-bg); border: 1px solid var(--border-color); 
                           border-radius: 6px; text-decoration: none; color: var(--text-primary); 
                           font-size: 0.85rem; transition: all 0.2s;"
@@ -527,7 +527,7 @@
                     <div style="font-size: 0.75rem; color: var(--text-secondary);">{{ week.movie_count }} movies</div>
                 </a>
                 {% endfor %}
-                <a href="{{ request.scope.get('root_path', '') }}/weeks" 
+                <a href="{{ request.scope.get('root_path', '') }}/weeks?market={{ market }}"
                    style="padding: 0.5rem 1rem; background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)); 
                           border-radius: 6px; text-decoration: none; color: white; 
                           font-size: 0.85rem; transition: all 0.2s; display: flex; align-items: center;"

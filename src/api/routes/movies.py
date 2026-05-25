@@ -11,7 +11,15 @@ from pydantic import BaseModel
 from ...core.ignore_list import IgnoreList
 from ...core.json_generator import WeeklyDataGenerator
 from ...core.library_sync import refresh_weekly_data_from_radarr
-from ...core.boxoffice_provider import DEFAULT_PROVIDER, normalize_provider
+from ...core.boxoffice_provider import (
+    DEFAULT_MARKET,
+    DEFAULT_PROVIDER,
+    SUPPORTED_MARKETS,
+    market_for_provider,
+    normalize_market,
+    normalize_provider,
+    provider_for_market,
+)
 from ...core.boxoffice_storage import iter_weekly_page_paths
 from ...core.models import MovieStatus
 from ...core.radarr import RadarrService, get_all_movies_with_optional_cache_bypass
@@ -177,16 +185,20 @@ async def unignore_movie(tmdb_id: int):
 
 
 @router.post("/refresh-stored-status", response_model=RefreshStoredStatusResponse)
-async def refresh_stored_status(provider: str = DEFAULT_PROVIDER):
+async def refresh_stored_status(market: str = DEFAULT_MARKET, provider: Optional[str] = None):
     """Refresh stored weekly movie data using current Radarr state."""
     try:
-        provider = normalize_provider(provider)
+        if provider and market == DEFAULT_MARKET:
+            market = market_for_provider(provider)
+        market = normalize_market(market)
+        provider = provider_for_market(market)
         if not settings.radarr_api_key:
             raise HTTPException(status_code=400, detail="Radarr not configured")
 
         results = await asyncio.to_thread(
             refresh_weekly_data_from_radarr,
             ignore_cache=True,
+            market=market,
             provider=provider,
         )
         return RefreshStoredStatusResponse(
@@ -504,7 +516,11 @@ def regenerate_weeks_with_movie(movie_title: str):
     )
 
     # Search all metadata files
-    for json_file in iter_weekly_page_paths(settings.boxarr_data_directory, DEFAULT_PROVIDER):
+    weekly_files = []
+    for market in SUPPORTED_MARKETS:
+        weekly_files.extend(iter_weekly_page_paths(settings.boxarr_data_directory, market))
+
+    for json_file in weekly_files:
         try:
             with open(json_file) as f:
                 metadata = json.load(f)
@@ -528,7 +544,11 @@ def regenerate_weeks_with_movie(movie_title: str):
                 from ...core.boxoffice import BoxOfficeService
                 from ...core.matcher import MovieMatcher
 
-                boxoffice_service = BoxOfficeService()
+                market = normalize_market(metadata.get("market") or DEFAULT_MARKET)
+                provider = normalize_provider(
+                    metadata.get("provider") or provider_for_market(market)
+                )
+                boxoffice_service = BoxOfficeService(market=market)
                 matcher = MovieMatcher()
 
                 # Get week's data
@@ -539,8 +559,9 @@ def regenerate_weeks_with_movie(movie_title: str):
                 match_results = matcher.match_movies(box_office_movies, radarr_movies)
 
                 # Generate updated data file
-                provider = normalize_provider(metadata.get("provider") or DEFAULT_PROVIDER)
-                generator = WeeklyDataGenerator(radarr_service, provider=provider)
+                generator = WeeklyDataGenerator(
+                    radarr_service, market=market, provider=provider
+                )
                 generator.generate_weekly_data(match_results, year, week, radarr_movies)
         except Exception as e:
             logger.error(f"Error processing {json_file}: {e}")

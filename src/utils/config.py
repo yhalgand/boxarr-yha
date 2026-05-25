@@ -502,16 +502,16 @@ class Settings(BaseSettings):
         (self.boxarr_data_directory / "history").mkdir(parents=True, exist_ok=True)
         (self.boxarr_data_directory / "logs").mkdir(parents=True, exist_ok=True)
         (self.boxarr_data_directory / "weekly_pages").mkdir(parents=True, exist_ok=True)
-        (self.boxarr_data_directory / "weekly_pages" / "mojo_us").mkdir(
+        (self.boxarr_data_directory / "weekly_pages" / "us").mkdir(
             parents=True, exist_ok=True
         )
-        (self.boxarr_data_directory / "weekly_pages" / "jpboxoffice_fr").mkdir(
+        (self.boxarr_data_directory / "weekly_pages" / "fr").mkdir(
             parents=True, exist_ok=True
         )
-        (self.boxarr_data_directory / "history" / "mojo_us").mkdir(
+        (self.boxarr_data_directory / "history" / "us").mkdir(
             parents=True, exist_ok=True
         )
-        (self.boxarr_data_directory / "history" / "jpboxoffice_fr").mkdir(
+        (self.boxarr_data_directory / "history" / "fr").mkdir(
             parents=True, exist_ok=True
         )
 
