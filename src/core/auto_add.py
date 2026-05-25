@@ -5,6 +5,7 @@ from typing import List
 from ..utils.config import settings
 from ..utils.logger import get_logger
 from .ignore_list import IgnoreList
+from .movie_identity import resolve_movie_identity
 from .matcher import MatchResult
 from .radarr import RadarrService
 from .root_folder_manager import RootFolderManager
@@ -16,6 +17,7 @@ def auto_add_missing_movies(
     match_results: List[MatchResult],
     radarr_service: RadarrService,
     top_year: int,
+    market: str = "us",
 ) -> List[str]:
     """
     Add unmatched movies to Radarr with filters and validation.
@@ -65,16 +67,22 @@ def auto_add_missing_movies(
 
     for result in unmatched:
         try:
-            # Search for movie in Radarr database (TMDB)
-            search_results = radarr_service.search_movie(result.box_office_movie.title)
+            # Resolve a reliable TMDb candidate from the box-office title(s).
+            identity = resolve_movie_identity(
+                result.box_office_movie,
+                radarr_service.search_movie,
+                market=market,
+            )
 
-            if not search_results:
+            if not identity.matched or not identity.movie_info:
                 logger.warning(
-                    f"Movie '{result.box_office_movie.title}' not found in TMDB"
+                    "Movie '%s' not resolved in TMDB (%s)",
+                    result.box_office_movie.title,
+                    identity.reason,
                 )
                 continue
 
-            movie_info = search_results[0]
+            movie_info = identity.movie_info
 
             # Skip movies on the ignore list
             movie_tmdb_id = movie_info.get("tmdbId")

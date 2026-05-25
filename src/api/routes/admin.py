@@ -10,6 +10,8 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from ...core.boxoffice import BoxOfficeMovie
+from ...core.movie_identity import resolve_movie_identity
 from ...core.radarr import RadarrService
 from ...core.boxoffice_provider import (
     DEFAULT_MARKET,
@@ -211,26 +213,19 @@ async def repair_missing_metadata(
                     )
                     yield f"data: {json.dumps({'stage': 'fetching', 'progress': idx, 'total': total_movies, 'message': message})}\n\n"
 
-                    # Search for movie in TMDB via Radarr
-                    search_results = radarr_service.search_movie(title)
-                    if search_results and len(search_results) > 0:
-                        # Select the best match from search results
-                        # Prefer: 1) Movies with posters, 2) Newer movies
-                        tmdb_movie = search_results[0]
-
-                        # Try to find a better match with a poster
-                        for result in search_results:
-                            # Prefer movies with posters
-                            if result.get("remotePoster") and not tmdb_movie.get(
-                                "remotePoster"
-                            ):
-                                tmdb_movie = result
-                            # If both have posters or both don't, prefer newer movie
-                            elif (
-                                bool(result.get("remotePoster"))
-                                == bool(tmdb_movie.get("remotePoster"))
-                            ) and result.get("year", 0) > tmdb_movie.get("year", 0):
-                                tmdb_movie = result
+                    sample_data = unique_movies[title]["sample_data"]
+                    identity = resolve_movie_identity(
+                        BoxOfficeMovie(
+                            rank=sample_data.get("rank", 0) or 0,
+                            title=sample_data.get("title", title),
+                            original_title=sample_data.get("original_title"),
+                            year=sample_data.get("source_year") or sample_data.get("year"),
+                        ),
+                        radarr_service.search_movie,
+                        market=market_value,
+                    )
+                    if identity.matched and identity.movie_info:
+                        tmdb_movie = identity.movie_info
                         # Only cache if we have meaningful data (at least a poster or tmdb_id)
                         if tmdb_movie.get("remotePoster") or tmdb_movie.get("tmdbId"):
                             tmdb_cache[title] = {
@@ -251,20 +246,22 @@ async def repair_missing_metadata(
                                 ),
                             }
                             logger.info(
-                                f"Found TMDB data for '{title}' (year: {tmdb_movie.get('year')}, has poster: {bool(tmdb_movie.get('remotePoster'))})"
+                                f"Found TMDB data for '{title}' (year: {tmdb_movie.get('year')}, has poster: {bool(tmdb_movie.get('remotePoster'))}, confidence: {identity.confidence:.2f})"
                             )
                         else:
                             logger.warning(
                                 f"TMDB result for '{title}' has no poster or ID, skipping"
                             )
-
-                        # Rate limiting
-                        await asyncio.sleep(request.rate_limit_delay / 1000.0)
                     else:
-                        logger.warning(f"No TMDB match found for '{title}'")
+                        logger.warning(
+                            "No TMDB match found for '%s' (%s)", title, identity.reason
+                        )
                         errors.append(f"No match: {title}")
                         message = f'No TMDB match for "{title}" ({idx}/{total_movies})'
                         yield f"data: {json.dumps({'stage': 'fetching', 'progress': idx, 'total': total_movies, 'message': message})}\n\n"
+
+                    # Rate limiting
+                    await asyncio.sleep(request.rate_limit_delay / 1000.0)
 
                 except Exception as e:
                     logger.error(f"Error fetching TMDB data for '{title}': {e}")

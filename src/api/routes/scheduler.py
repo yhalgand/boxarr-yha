@@ -365,7 +365,7 @@ async def update_specific_week(request: UpdateWeekRequest):  # noqa: C901
                 from ...core.auto_add import auto_add_missing_movies
 
                 added_titles = auto_add_missing_movies(
-                    match_results, radarr_service, year
+                    match_results, radarr_service, year, market=market
                 )
                 added_count = len(added_titles)
 

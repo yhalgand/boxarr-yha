@@ -222,7 +222,7 @@ class BoxarrScheduler:
             if settings.boxarr_features_auto_add:
                 logger.info("Auto-add is enabled, adding missing movies to Radarr")
                 added_movies = await self._auto_add_missing_movies(
-                    match_results, actual_year
+                    match_results, actual_year, market=market
                 )
             else:
                 unmatched_count = len([r for r in match_results if not r.is_matched])
@@ -446,7 +446,7 @@ class BoxarrScheduler:
             logger.error(f"Failed to cleanup history: {e}")
 
     async def _auto_add_missing_movies(
-        self, match_results: List[MatchResult], top_year: int
+        self, match_results: List[MatchResult], top_year: int, market: str = "us"
     ) -> List[str]:
         """
         Automatically add unmatched movies to Radarr with default profile.
@@ -461,7 +461,11 @@ class BoxarrScheduler:
         if not self.radarr_service:
             return []
         result: List[str] = await self._run_in_executor(
-            auto_add_missing_movies, match_results, self.radarr_service, top_year
+            auto_add_missing_movies,
+            match_results,
+            self.radarr_service,
+            top_year,
+            market,
         )
         return result
 

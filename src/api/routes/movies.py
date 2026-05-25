@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from ...core.ignore_list import IgnoreList
 from ...core.json_generator import WeeklyDataGenerator
 from ...core.library_sync import refresh_weekly_data_from_radarr
+from ...core.boxoffice import BoxOfficeMovie
 from ...core.boxoffice_provider import (
     DEFAULT_MARKET,
     DEFAULT_PROVIDER,
@@ -21,6 +22,7 @@ from ...core.boxoffice_provider import (
     provider_for_market,
 )
 from ...core.boxoffice_storage import iter_weekly_page_paths
+from ...core.movie_identity import resolve_movie_identity
 from ...core.models import MovieStatus
 from ...core.radarr import RadarrService, get_all_movies_with_optional_cache_bypass
 from ...core.root_folder_manager import RootFolderManager
@@ -393,18 +395,21 @@ async def add_movie_to_radarr(request: AddMovieRequest):
         if not req_title:
             return {"success": False, "message": "No movie title provided"}
 
-        # Search for movie on TMDB
-        search_results = radarr_service.search_movie_tmdb(req_title)
-        if not search_results:
+        # Search for movie on TMDB using a safer resolver than raw first-result lookup.
+        identity = resolve_movie_identity(
+            BoxOfficeMovie(rank=0, title=req_title), radarr_service.search_movie_tmdb
+        )
+        if not identity.matched or not identity.movie_info:
             return {"success": False, "message": "Movie not found on TMDB"}
 
-        # Use first result or match by TMDB ID if provided
-        movie_data = search_results[0]
+        movie_data = identity.movie_info
         if request.tmdb_id:
-            movie_data = next(
-                (m for m in search_results if m.get("tmdbId") == request.tmdb_id),
-                search_results[0],
-            )
+            tmdb_search_results = radarr_service.search_movie_tmdb(f"tmdb:{request.tmdb_id}")
+            if tmdb_search_results:
+                movie_data = next(
+                    (m for m in tmdb_search_results if m.get("tmdbId") == request.tmdb_id),
+                    tmdb_search_results[0],
+                )
 
         # Determine root folder based on genres
         root_folder_manager = RootFolderManager(radarr_service)

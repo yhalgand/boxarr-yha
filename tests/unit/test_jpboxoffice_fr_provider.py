@@ -53,6 +53,7 @@ def test_fr_provider_parses_fixture_and_enriches_imdb():
     assert len(movies) >= 10
     assert [movie.rank for movie in movies[:10]] == list(range(1, 11))
     assert movies[0].title == "La Femme de ménage"
+    assert movies[0].original_title == "The Housemaid"
     assert movies[0].weekend_gross == 373410.0
     assert movies[0].total_gross == 3823351.0
     assert movies[0].weeks_released == 4
@@ -60,6 +61,7 @@ def test_fr_provider_parses_fixture_and_enriches_imdb():
     assert movies[0].imdb_id == "tt1234567"
 
     assert movies[1].title == "Avatar : de feu et de cendres"
+    assert movies[1].original_title == "Avatar: Fire and Ash"
     assert movies[1].weekend_gross == 336843.0
     assert movies[1].total_gross == 8242711.0
     assert movies[1].weeks_released == 6
@@ -75,6 +77,7 @@ def test_fr_provider_parses_fixture_and_enriches_imdb():
 
     assert movies[4].rank == 5
     assert movies[4].title == "Zootopie 2"
+    assert movies[4].original_title == "Zootopia 2"
     assert movies[4].weekend_gross == 195116.0
     assert movies[4].total_gross == 8164429.0
     assert movies[4].weeks_released == 9
@@ -120,12 +123,14 @@ def test_fr_provider_parses_live_debug_fixture():
     assert len(movies) >= 10
     assert [movie.rank for movie in movies[:10]] == list(range(1, 11))
     assert movies[0].title == "La Femme de ménage"
+    assert movies[0].original_title == "The Housemaid"
     assert movies[0].weekend_gross == 373410.0
     assert movies[0].total_gross == 3823351.0
     assert movies[0].weeks_released == 5
     assert movies[0].theater_count == 967
 
     assert movies[1].title == "Avatar : de feu et de cendres"
+    assert movies[1].original_title == "Avatar: Fire and Ash"
     assert movies[1].weekend_gross == 336843.0
     assert movies[1].total_gross == 8242711.0
     assert movies[1].weeks_released == 6

@@ -16,6 +16,7 @@ from .boxoffice_provider import (
     normalize_provider,
     provider_for_market,
 )
+from .movie_identity import resolve_movie_identity
 from .boxoffice_storage import market_weekly_page_path, market_weekly_pages_dir
 from .matcher import MatchResult
 from .models import MovieStatus
@@ -125,6 +126,8 @@ class WeeklyDataGenerator:
                 "weeks_released": result.box_office_movie.weeks_released,
                 "weeks_in_release": result.box_office_movie.weeks_released,
                 "theater_count": result.box_office_movie.theater_count,
+                "original_title": result.box_office_movie.original_title,
+                "source_year": result.box_office_movie.year,
                 "radarr_id": None,
                 "radarr_title": None,
                 "status": "Not in Radarr",
@@ -201,13 +204,13 @@ class WeeklyDataGenerator:
                 # This ensures we have poster and description for dashboard display
                 if self.radarr_service:
                     try:
-                        # Search for movie in TMDB via Radarr
-                        search_results = self.radarr_service.search_movie(
-                            result.box_office_movie.title
+                        identity = resolve_movie_identity(
+                            result.box_office_movie,
+                            self.radarr_service.search_movie,
+                            market=self.market,
                         )
-                        if search_results and len(search_results) > 0:
-                            # Use the first result
-                            tmdb_movie = search_results[0]
+                        if identity.matched and identity.movie_info:
+                            tmdb_movie = identity.movie_info
                             movie_data.update(
                                 {
                                     "tmdb_id": tmdb_movie.get("tmdbId"),
@@ -238,7 +241,16 @@ class WeeklyDataGenerator:
                                 }
                             )
                             logger.info(
-                                f"Enriched '{result.box_office_movie.title}' with TMDB data"
+                                "Enriched '%s' with TMDB data (term='%s', confidence=%.2f)",
+                                result.box_office_movie.title,
+                                identity.search_term,
+                                identity.confidence,
+                            )
+                        else:
+                            logger.debug(
+                                "No TMDB enrichment for '%s': %s",
+                                result.box_office_movie.title,
+                                identity.reason,
                             )
                     except Exception as e:
                         logger.warning(

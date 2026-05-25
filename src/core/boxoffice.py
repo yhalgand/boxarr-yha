@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import httpx
 from bs4 import BeautifulSoup
@@ -40,6 +40,8 @@ class BoxOfficeMovie:
     total_gross: Optional[float] = None
     weeks_released: Optional[int] = None
     theater_count: Optional[int] = None
+    original_title: Optional[str] = None
+    year: Optional[int] = None
     imdb_id: Optional[str] = None
     release_url: Optional[str] = None
 
@@ -427,6 +429,49 @@ class JPBoxOfficeFRProvider(BoxOfficeProvider):
     def _title_key(self, title: str) -> str:
         return re.sub(r"[^\w\s]", "", title.lower()).strip()
 
+    def _extract_year_from_text(self, text: Optional[str]) -> Optional[int]:
+        if not text:
+            return None
+        match = re.search(r"\((\d{4})\)", text)
+        if match:
+            try:
+                return int(match.group(1))
+            except ValueError:
+                return None
+        return None
+
+    def _extract_fr_title_metadata(
+        self, title_cell, title: str
+    ) -> Tuple[Optional[str], Optional[int]]:
+        """Extract original title and year from a JPBoxOffice title cell."""
+        original_title = None
+        year = self._extract_year_from_text(title)
+
+        stripped_strings = [
+            self._normalize_space(part)
+            for part in title_cell.stripped_strings
+            if self._normalize_space(part)
+        ]
+
+        for extra in stripped_strings[1:]:
+            if not extra or extra == title:
+                continue
+            if extra.startswith("(") and extra.endswith(")"):
+                continue
+            if "/" in extra:
+                continue
+            extra_year = self._extract_year_from_text(extra)
+            if extra_year and year is None:
+                year = extra_year
+            candidate = re.sub(r"\s*\(\d{4}\)\s*$", "", extra).strip()
+            if candidate and candidate != title:
+                original_title = candidate
+                if year is None:
+                    year = extra_year
+                break
+
+        return original_title, year
+
     def _parse_metrics_from_block(self, block_lines: List[str]) -> Optional[Dict[str, Optional[float]]]:
         metric_start = None
         for idx, line in enumerate(block_lines):
@@ -593,6 +638,7 @@ class JPBoxOfficeFRProvider(BoxOfficeProvider):
             if release_url and not release_url.startswith("/"):
                 release_url = f"/{release_url.lstrip('/')}"
             release_url = release_urls.get(self._title_key(title), release_url)
+            original_title, year = self._extract_fr_title_metadata(title_cell, title)
 
             weeks_released = self._parse_int(value_cells[0].get_text(" ", strip=True), first_only=True)
             weekend_gross = self._parse_number(value_cells[1].get_text(" ", strip=True), first_only=True)
@@ -619,14 +665,18 @@ class JPBoxOfficeFRProvider(BoxOfficeProvider):
                 total_gross=total_gross,
                 weeks_released=weeks_released,
                 theater_count=theater_count,
+                original_title=original_title,
+                year=year,
                 release_url=release_url,
             )
             movies.append(movie)
             detected_ranks.append(rank)
             logger.debug(
-                "Parsed JPBoxOffice row: rank=%s title=%s weeks=%s weekly=%s total=%s copies=%s new=%s",
+                "Parsed JPBoxOffice row: rank=%s title=%s original=%s year=%s weeks=%s weekly=%s total=%s copies=%s new=%s",
                 rank,
                 title,
+                original_title,
+                year,
                 weeks_released,
                 weekend_gross,
                 total_gross,

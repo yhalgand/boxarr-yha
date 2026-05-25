@@ -1,6 +1,7 @@
 """Movie matching algorithms for finding Radarr movies from box office titles."""
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Tuple
@@ -156,8 +157,12 @@ class MovieMatcher:
         Returns:
             Normalized title
         """
+        decomposed = unicodedata.normalize("NFKD", title.lower())
+        decomposed = "".join(
+            char for char in decomposed if not unicodedata.combining(char)
+        )
         # Remove non-alphanumeric characters
-        normalized = re.sub(r"[^\w\s]", "", title.lower())
+        normalized = re.sub(r"[^\w\s]", "", decomposed)
         # Collapse multiple spaces
         normalized = re.sub(r"\s+", " ", normalized)
         return normalized.strip()
@@ -345,6 +350,30 @@ class MovieMatcher:
             match_method="none",
         )
 
+    def _match_title_variants(
+        self,
+        box_office_movie: BoxOfficeMovie,
+        radarr_movies: List[RadarrMovie],
+        title_variants: List[str],
+    ) -> MatchResult:
+        """Try a set of title variants and keep the best match."""
+        best_result: Optional[MatchResult] = None
+        for title in title_variants:
+            if not title:
+                continue
+            result = self.match_single(title, radarr_movies)
+            if not best_result or result.confidence > best_result.confidence:
+                best_result = result
+        if not best_result:
+            return MatchResult(
+                box_office_movie=box_office_movie,
+                radarr_movie=None,
+                confidence=0.0,
+                match_method="none",
+            )
+        best_result.box_office_movie = box_office_movie
+        return best_result
+
     def _try_imdb_match(self, imdb_id: Optional[str]) -> Optional[RadarrMovie]:
         """Try matching by IMDb ID."""
         if not imdb_id:
@@ -520,19 +549,7 @@ class MovieMatcher:
 
         results = []
         for box_movie in box_office_movies:
-            # Try IMDb match first (language-agnostic)
-            imdb_match = self._try_imdb_match(box_movie.imdb_id)
-            if imdb_match:
-                match_result = MatchResult(
-                    box_office_movie=box_movie,
-                    radarr_movie=imdb_match,
-                    confidence=1.0,
-                    match_method="imdb_id",
-                )
-            else:
-                match_result = self.match_single(box_movie.title, radarr_movies)
-                # Update the box office movie in the result
-                match_result.box_office_movie = box_movie
+            match_result = self.match_movie(box_movie, radarr_movies)
             results.append(match_result)
 
             if match_result.is_matched:
@@ -577,9 +594,25 @@ class MovieMatcher:
                 match_method="imdb_id",
             )
 
-        # Fall back to title matching
-        result = self.match_single(box_office_movie.title, radarr_movies)
-        result.box_office_movie = box_office_movie
+        # Fall back to title matching, preferring the original title when available.
+        title_variants = [box_office_movie.title]
+        if box_office_movie.original_title and box_office_movie.original_title not in title_variants:
+            title_variants.append(box_office_movie.original_title)
+        if box_office_movie.year:
+            year_variants = [
+                f"{box_office_movie.title} ({box_office_movie.year})",
+            ]
+            if box_office_movie.original_title:
+                year_variants.append(
+                    f"{box_office_movie.original_title} ({box_office_movie.year})"
+                )
+            for variant in year_variants:
+                if variant not in title_variants:
+                    title_variants.append(variant)
+
+        result = self._match_title_variants(
+            box_office_movie, radarr_movies, title_variants
+        )
         return result
 
     def match_movies(

@@ -222,6 +222,45 @@ class TestMovieTitleMatching:
         assert result.radarr_movie.title == "The Batman"
         assert result.box_office_movie == box_office_movie
 
+    def test_french_original_title_variants_match_radarr(self):
+        """French box-office titles should match by original title when available."""
+        radarr_movies = [
+            self._create_radarr_movie(19, "Avatar: Fire and Ash", 2026),
+            self._create_radarr_movie(20, "Zootopia 2", 2026),
+            self._create_radarr_movie(21, "L'Affaire Bojarski", 2026),
+        ]
+        self.matcher.build_movie_index(radarr_movies)
+
+        avatar = BoxOfficeMovie(
+            rank=2,
+            title="Avatar : de feu et de cendres",
+            original_title="Avatar: Fire and Ash",
+            year=2026,
+        )
+        result = self.matcher.match_movie(avatar, radarr_movies)
+        assert result.is_matched
+        assert result.radarr_movie.title == "Avatar: Fire and Ash"
+        assert result.confidence >= 0.95
+
+        zootopie = BoxOfficeMovie(
+            rank=5,
+            title="Zootopie 2",
+            original_title="Zootopia 2",
+            year=2026,
+        )
+        result = self.matcher.match_movie(zootopie, radarr_movies)
+        assert result.is_matched
+        assert result.radarr_movie.title == "Zootopia 2"
+
+        apostrophe = BoxOfficeMovie(
+            rank=4,
+            title="L’Affaire Bojarski",
+            year=2026,
+        )
+        result = self.matcher.match_movie(apostrophe, radarr_movies)
+        assert result.is_matched
+        assert result.radarr_movie.title == "L'Affaire Bojarski"
+
 
 class TestMatcherEdgeCases:
     """Test edge cases and error handling in the matcher."""
