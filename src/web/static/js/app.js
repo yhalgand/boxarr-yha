@@ -6,7 +6,7 @@
 // Get base path from injected variable (set in base.html)
 const BASE_PATH = window.BOXARR_BASE_PATH || '';
 const DEFAULT_MARKET = String(window.BOXARR_MARKET || 'us').toLowerCase();
-const DEFAULT_PROVIDER = window.BOXARR_PROVIDER || 'mojo_us';
+const DEFAULT_PROVIDER = window.BOXARR_PROVIDER || 'mojo';
 
 function getConfiguredMarkets() {
     const markets = window.BOXARR_MARKETS || {};
@@ -24,18 +24,21 @@ function providerForMarket(market) {
     if (definition && definition.provider) {
         return String(definition.provider).toLowerCase();
     }
-    return String(market || 'us').toLowerCase() === 'fr' ? 'jpboxoffice_fr' : 'mojo_us';
+    return String(market || 'us').toLowerCase() === 'fr' ? 'jpboxoffice' : 'mojo';
 }
 
 function marketForProvider(provider) {
-    const normalizedProvider = String(provider || 'mojo_us').toLowerCase();
+    const normalizedProvider = String(provider || 'mojo').toLowerCase();
     const markets = getConfiguredMarkets();
     for (const [marketKey, definition] of Object.entries(markets)) {
         if (String(definition?.provider || '').toLowerCase() === normalizedProvider) {
             return marketKey;
         }
     }
-    return normalizedProvider === 'jpboxoffice_fr' ? 'fr' : 'us';
+    if (normalizedProvider === 'jpboxoffice_fr' || normalizedProvider === 'jpboxoffice') {
+        return 'fr';
+    }
+    return 'us';
 }
 
 function normalizeMarket(market) {

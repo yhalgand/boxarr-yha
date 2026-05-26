@@ -269,7 +269,10 @@ class BoxarrScheduler:
 
             # Generate JSON data file
             page_generator = WeeklyDataGenerator(
-                self.radarr_service, market=market, provider=provider
+                self.radarr_service,
+                market=market,
+                provider=provider,
+                provider_config=effective_market_settings.get("provider_config", {}),
             )
             data_path = await self._run_in_executor(
                 page_generator.generate_weekly_data,

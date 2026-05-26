@@ -11,6 +11,7 @@ from .boxoffice_provider import (
     DEFAULT_MARKET,
     DEFAULT_PROVIDER,
     MARKET_DEFINITIONS,
+    canonicalize_provider_definition,
     market_for_provider,
     normalize_market,
     normalize_provider,
@@ -33,6 +34,7 @@ class WeeklyDataGenerator:
         radarr_service: Optional[RadarrService] = None,
         market: str = DEFAULT_MARKET,
         provider: Optional[str] = None,
+        provider_config: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize data generator.
@@ -46,6 +48,20 @@ class WeeklyDataGenerator:
             market = market_for_provider(provider)
         self.market = normalize_market(market)
         self.provider = normalize_provider(provider or provider_for_market(self.market))
+        if provider_config is None:
+            try:
+                from ..utils.config import settings as current_settings
+                from .market_settings import get_market_definition
+
+                provider_config = get_market_definition(current_settings, self.market).get(
+                    "provider_config", {}
+                )
+            except Exception:
+                provider_config = {}
+        canonical = canonicalize_provider_definition(self.provider, provider_config)
+        self.provider = canonical["provider"]
+        self.provider_config = canonical["provider_config"]
+        self.provider_aliases = canonical["aliases"]
         self.output_dir = market_weekly_pages_dir(
             settings.boxarr_data_directory, self.market, create=True
         )
@@ -119,6 +135,9 @@ class WeeklyDataGenerator:
             movie_data = {
                 "rank": result.box_office_movie.rank,
                 "title": result.box_office_movie.title,
+                "provider": self.provider,
+                "provider_config": self.provider_config,
+                "provider_aliases": self.provider_aliases,
                 "weekend_gross": result.box_office_movie.weekend_gross,
                 "total_gross": result.box_office_movie.total_gross,
                 # Internal field is weeks_released; API response uses weeks_in_release.

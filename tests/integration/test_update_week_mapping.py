@@ -153,7 +153,7 @@ def test_update_week_respects_genre_mapping(tmp_path, monkeypatch):
     data = resp.json()
     assert data["success"] is True
     assert data["market"] == "us"
-    assert data["provider"] == "mojo_us"
+    assert data["provider"] == "mojo"
     assert data["movies_found"] == 1
     assert data["movies_added"] == 1
 
@@ -200,13 +200,14 @@ def test_update_week_fr_uses_provider_wiring(tmp_path, monkeypatch):
     data = resp.json()
     assert data["success"] is True
     assert data["market"] == "fr"
-    assert data["provider"] == "jpboxoffice_fr"
+    assert data["provider"] == "jpboxoffice"
 
     output_file = tmp_path / "weekly_pages" / "fr" / "2024W10.json"
     assert output_file.exists()
     payload = json.loads(output_file.read_text())
     assert payload["market"] == "fr"
-    assert payload["provider"] == "jpboxoffice_fr"
+    assert payload["provider"] == "jpboxoffice"
+    assert payload["provider_aliases"] == ["jpboxoffice_fr"]
     assert payload["movies"][0]["weeks_released"] == 2
     assert payload["movies"][0]["weeks_in_release"] == 2
     assert payload["movies"][0]["theater_count"] == 789

@@ -7,20 +7,20 @@ from typing import Any, Dict, List, Optional
 
 from ..utils.config import MarketConfig, Settings
 from ..utils.logger import get_logger
-from .boxoffice_provider import DEFAULT_MARKET, MARKET_DEFINITIONS
+from .boxoffice_provider import DEFAULT_MARKET, canonicalize_provider_definition
 
 logger = get_logger(__name__)
 
 _DEFAULT_MARKET_CONFIGS: Dict[str, Dict[str, Any]] = {
     "us": {
         "label": "US Box Office",
-        "provider": "mojo_us",
+        "provider": "mojo",
         "provider_config": {"area": "us"},
         "enabled": True,
     },
     "fr": {
         "label": "France Box Office",
-        "provider": "jpboxoffice_fr",
+        "provider": "jpboxoffice",
         "provider_config": {"country": "fr"},
         "enabled": True,
     },
@@ -58,6 +58,15 @@ def _market_config_to_dict(market_config: MarketConfig | Dict[str, Any]) -> Dict
     return dict(market_config or {})
 
 
+def _canonicalize_provider_fields(
+    provider: Any, provider_config: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    provider_value = str(provider or "").strip()
+    if not provider_value:
+        return canonicalize_provider_definition("mojo", {"area": "us"})
+    return canonicalize_provider_definition(provider_value, provider_config)
+
+
 def _configured_market_overrides(settings_obj: Settings) -> Dict[str, Dict[str, Any]]:
     overrides: Dict[str, Dict[str, Any]] = {}
     markets = getattr(settings_obj, "markets", {}) or {}
@@ -83,8 +92,19 @@ def _merged_market_registry(settings_obj: Settings) -> Dict[str, Dict[str, Any]]
         key: {
             "market": key,
             "label": value["label"],
-            "provider": value["provider"],
-            "provider_config": deepcopy(value.get("provider_config", {})),
+            "provider": _canonicalize_provider_fields(
+                value.get("provider"), value.get("provider_config", {})
+            )["provider"],
+            "provider_config": deepcopy(
+                _canonicalize_provider_fields(
+                    value.get("provider"), value.get("provider_config", {})
+                )["provider_config"]
+            ),
+            "aliases": list(
+                _canonicalize_provider_fields(
+                    value.get("provider"), value.get("provider_config", {})
+                )["aliases"]
+            ),
             "enabled": value.get("enabled", True),
             "configured": False,
             "overrides": {},
@@ -93,13 +113,17 @@ def _merged_market_registry(settings_obj: Settings) -> Dict[str, Dict[str, Any]]
     }
 
     for key, override in _configured_market_overrides(settings_obj).items():
+        canonical = _canonicalize_provider_fields(
+            override.get("provider"), override.get("provider_config", {})
+        )
         base = registry.get(
             key,
             {
                 "market": key,
                 "label": key.upper(),
-                "provider": override.get("provider", ""),
+                "provider": canonical["provider"],
                 "provider_config": {},
+                "aliases": list(canonical.get("aliases", [])),
                 "enabled": True,
                 "configured": False,
                 "overrides": {},
@@ -109,11 +133,12 @@ def _merged_market_registry(settings_obj: Settings) -> Dict[str, Dict[str, Any]]
             **base,
             "market": key,
             "label": override.get("label", base.get("label") or key.upper()),
-            "provider": override.get("provider", base.get("provider")),
+            "provider": canonical["provider"] or base.get("provider"),
             "provider_config": {
                 **deepcopy(base.get("provider_config", {})),
-                **deepcopy(override.get("provider_config", {})),
+                **deepcopy(canonical.get("provider_config", {})),
             },
+            "aliases": list(canonical.get("aliases", base.get("aliases", []))),
             "enabled": override.get("enabled", base.get("enabled", True)),
             "configured": True,
             "overrides": override,
@@ -210,6 +235,7 @@ def get_effective_market_settings(settings_obj: Settings, market: str) -> Dict[s
         "label": definition["label"],
         "provider": definition["provider"],
         "provider_config": deepcopy(definition.get("provider_config", {})),
+        "aliases": list(definition.get("aliases", [])),
         "enabled": bool(definition.get("enabled", True)),
         "configured": bool(definition.get("configured", False)),
         "overrides": overrides,
@@ -220,4 +246,3 @@ def get_effective_market_settings(settings_obj: Settings, market: str) -> Dict[s
         "effective": effective,
         "sources": sources,
     }
-

@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.core.boxoffice import JPBoxOfficeFRProvider, create_provider
+from src.core.boxoffice import JPBoxOfficeFRProvider, MojoUSProvider, create_provider
 from src.core.boxoffice_provider import (
     DEFAULT_MARKET,
     DEFAULT_PROVIDER,
@@ -27,12 +27,14 @@ def test_market_and_provider_mapping():
     assert normalize_market("US") == "us"
     assert normalize_market("fr") == "fr"
     assert normalize_provider(None) == DEFAULT_PROVIDER
-    assert normalize_provider("mojo_us") == "mojo_us"
-    assert normalize_provider("jpboxoffice_fr") == "jpboxoffice_fr"
-    assert provider_from_market("us") == "mojo_us"
-    assert provider_from_market("fr") == "jpboxoffice_fr"
+    assert normalize_provider("mojo_us") == "mojo"
+    assert normalize_provider("jpboxoffice_fr") == "jpboxoffice"
+    assert provider_from_market("us") == "mojo"
+    assert provider_from_market("fr") == "jpboxoffice"
     assert market_from_provider("mojo_us") == "us"
     assert market_from_provider("jpboxoffice_fr") == "fr"
+    assert market_from_provider("mojo") == "us"
+    assert market_from_provider("jpboxoffice") == "fr"
 
     with pytest.raises(ValueError):
         normalize_market("de")
@@ -113,3 +115,15 @@ def test_iterators_do_not_fall_back_to_legacy_for_fr(tmp_path):
 def test_fr_provider_is_real_provider_class():
     provider = create_provider("jpboxoffice_fr")
     assert isinstance(provider, JPBoxOfficeFRProvider)
+
+
+def test_generic_providers_accept_canonical_config():
+    mojo = create_provider("mojo", provider_config={"area": "us"})
+    assert isinstance(mojo, MojoUSProvider)
+
+    fr = create_provider("jpboxoffice", provider_config={"country": "fr"})
+    assert isinstance(fr, JPBoxOfficeFRProvider)
+
+    with pytest.raises(BoxOfficeError) as exc:
+        create_provider("jpboxoffice", provider_config={"country": "de"})
+    assert "not implemented yet" in str(exc.value)

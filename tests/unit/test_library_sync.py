@@ -180,4 +180,4 @@ def test_refresh_weekly_data_from_radarr_updates_stale_entries(tmp_path, monkeyp
     assert refreshed["matched_movies"] == 2
     assert "status_refreshed_at" in refreshed
     assert refreshed["market"] == "us"
-    assert refreshed["provider"] == "mojo_us"
+    assert refreshed["provider"] == "mojo"

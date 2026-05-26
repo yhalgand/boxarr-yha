@@ -23,8 +23,10 @@ def test_default_markets_fallback_to_us_and_fr():
 
     assert "us" in configured
     assert "fr" in configured
-    assert configured["us"]["provider"] == "mojo_us"
-    assert configured["fr"]["provider"] == "jpboxoffice_fr"
+    assert configured["us"]["provider"] == "mojo"
+    assert configured["fr"]["provider"] == "jpboxoffice"
+    assert configured["us"]["aliases"] == ["mojo_us"]
+    assert configured["fr"]["aliases"] == ["jpboxoffice_fr"]
 
     effective_us = get_effective_market_settings(settings, "us")
     assert effective_us["effective"]["box_office_fetch_limit"] == settings.boxarr_features_box_office_limit
@@ -37,7 +39,7 @@ def test_market_overrides_take_precedence_and_sources_reflect_market():
         markets={
             "us": MarketConfig(
                 label="US Box Office",
-                provider="mojo_us",
+                provider="mojo",
                 provider_config={"area": "us"},
                 enabled=True,
                 maximum_movies_to_add=3,
@@ -46,7 +48,7 @@ def test_market_overrides_take_precedence_and_sources_reflect_market():
             ),
             "fr": MarketConfig(
                 label="France Box Office",
-                provider="jpboxoffice_fr",
+                provider="jpboxoffice",
                 provider_config={"country": "fr"},
                 enabled=True,
                 maximum_movies_to_add=7,
@@ -74,7 +76,7 @@ def test_null_override_falls_back_to_global():
         markets={
             "us": MarketConfig(
                 label="US Box Office",
-                provider="mojo_us",
+                provider="mojo",
                 provider_config={"area": "us"},
                 enabled=True,
                 maximum_movies_to_add=None,
@@ -92,7 +94,7 @@ def test_dynamic_market_registry_accepts_custom_market(monkeypatch):
         markets={
             "de": MarketConfig(
                 label="Germany Box Office",
-                provider="jpboxoffice_fr",
+                provider="jpboxoffice",
                 provider_config={"country": "de"},
                 enabled=True,
             )
@@ -106,8 +108,9 @@ def test_dynamic_market_registry_accepts_custom_market(monkeypatch):
         "src.core.boxoffice_provider._runtime_market_registry", lambda: configured
     )
     assert normalize_market("de") == "de"
-    assert provider_for_market("de") == "jpboxoffice_fr"
+    assert provider_for_market("de") == "jpboxoffice"
     assert market_for_provider("jpboxoffice_fr") == "fr"
+    assert market_for_provider("jpboxoffice") == "fr"
 
 
 def test_unknown_market_raises_without_configuration():

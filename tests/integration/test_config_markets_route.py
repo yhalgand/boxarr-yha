@@ -28,7 +28,7 @@ def _write_config(dir_path: Path) -> Path:
         "markets": {
             "us": {
                 "label": "US Box Office",
-                "provider": "mojo_us",
+                "provider": "mojo",
                 "provider_config": {"area": "us"},
                 "enabled": True,
                 "maximum_movies_to_add": 3,
@@ -36,7 +36,7 @@ def _write_config(dir_path: Path) -> Path:
             },
             "fr": {
                 "label": "France Box Office",
-                "provider": "jpboxoffice_fr",
+                "provider": "jpboxoffice",
                 "provider_config": {"country": "fr"},
                 "enabled": True,
                 "maximum_movies_to_add": None,
@@ -66,4 +66,6 @@ def test_get_config_markets_returns_effective_values(tmp_path, monkeypatch):
     assert body["markets"]["us"]["sources"]["maximum_movies_to_add"] == "market"
     assert body["markets"]["fr"]["effective"]["maximum_movies_to_add"] == 10
     assert body["markets"]["fr"]["sources"]["maximum_movies_to_add"] == "global"
+    assert body["markets"]["us"]["definition"]["aliases"] == ["mojo_us"]
+    assert body["markets"]["fr"]["definition"]["aliases"] == ["jpboxoffice_fr"]
     assert body["markets"]["us"]["effective"]["cleanup_protect_tag"] == "boxarr-keep"

@@ -4,24 +4,24 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .exceptions import BoxOfficeError
 
 SUPPORTED_MARKETS: Tuple[str, ...] = ("us", "fr")
-SUPPORTED_PROVIDERS: Tuple[str, ...] = ("mojo_us", "jpboxoffice_fr")
+SUPPORTED_PROVIDERS: Tuple[str, ...] = ("mojo", "jpboxoffice", "mojo_us", "jpboxoffice_fr")
 DEFAULT_MARKET = "us"
-DEFAULT_PROVIDER = "mojo_us"
+DEFAULT_PROVIDER = "mojo"
 MARKET_DEFINITIONS: Dict[str, Dict[str, str]] = {
     "us": {
         "label": "US Box Office",
-        "provider": "mojo_us",
+        "provider": "mojo",
         "source": "boxofficemojo",
         "units": "usd",
     },
     "fr": {
         "label": "France Box Office",
-        "provider": "jpboxoffice_fr",
+        "provider": "jpboxoffice",
         "source": "jpboxoffice",
         "units": "admissions",
     },
@@ -32,6 +32,64 @@ MARKET_TO_PROVIDER: Dict[str, str] = {
 PROVIDER_TO_MARKET: Dict[str, str] = {
     provider: market for market, provider in MARKET_TO_PROVIDER.items()
 }
+PROVIDER_ALIAS_MAP: Dict[str, Tuple[str, Dict[str, Any]]] = {
+    "mojo_us": ("mojo", {"area": "us"}),
+    "jpboxoffice_fr": ("jpboxoffice", {"country": "fr"}),
+}
+PROVIDER_FAMILY_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    "mojo": {"area": "us"},
+    "jpboxoffice": {"country": "fr"},
+}
+
+
+def normalize_provider_config(
+    provider: Optional[str], provider_config: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Normalize provider-specific config and fill in family defaults."""
+    provider_key = normalize_provider(provider)
+    normalized_config: Dict[str, Any] = dict(provider_config or {})
+
+    alias_default = PROVIDER_ALIAS_MAP.get(str(provider or "").strip().lower())
+    if alias_default and provider_key == alias_default[0]:
+        for key, value in alias_default[1].items():
+            normalized_config.setdefault(key, value)
+
+    for key, value in PROVIDER_FAMILY_DEFAULTS.get(provider_key, {}).items():
+        normalized_config.setdefault(key, value)
+
+    return normalized_config
+
+
+def provider_aliases(
+    provider: Optional[str], provider_config: Optional[Dict[str, Any]] = None
+) -> List[str]:
+    """Return legacy aliases for a canonical provider when possible."""
+    normalized_provider = normalize_provider(provider)
+    normalized_config = normalize_provider_config(normalized_provider, provider_config)
+
+    aliases: List[str] = []
+    if normalized_provider == "mojo" and normalized_config.get("area"):
+        aliases.append(f"mojo_{str(normalized_config['area']).strip().lower()}")
+    elif normalized_provider == "jpboxoffice" and normalized_config.get("country"):
+        aliases.append(
+            f"jpboxoffice_{str(normalized_config['country']).strip().lower()}"
+        )
+
+    return aliases
+
+
+def canonicalize_provider_definition(
+    provider: Optional[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Return canonical provider metadata plus compatibility aliases."""
+    canonical_provider = normalize_provider(provider)
+    canonical_config = normalize_provider_config(canonical_provider, provider_config)
+    return {
+        "provider": canonical_provider,
+        "provider_config": canonical_config,
+        "aliases": provider_aliases(canonical_provider, canonical_config),
+    }
 
 
 def _runtime_market_registry() -> Dict[str, Dict[str, object]]:
@@ -52,6 +110,9 @@ def normalize_provider(provider: Optional[str]) -> str:
 
     normalized = str(provider).strip().lower()
     if normalized in SUPPORTED_PROVIDERS:
+        alias = PROVIDER_ALIAS_MAP.get(normalized)
+        if alias:
+            return alias[0]
         return normalized
 
     registry = _runtime_market_registry()

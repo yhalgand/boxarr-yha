@@ -244,7 +244,7 @@
         // Inject base path for JavaScript usage
         window.BOXARR_BASE_PATH = "{{ request.scope.get('root_path', '') }}";
         window.BOXARR_MARKET = "{{ market|default('us') }}";
-        window.BOXARR_PROVIDER = "{{ provider|default('mojo_us') }}";
+        window.BOXARR_PROVIDER = "{{ provider|default('mojo') }}";
         window.BOXARR_MARKETS = {{ configured_markets|default({})|tojson }};
     </script>
     <nav class="navbar">

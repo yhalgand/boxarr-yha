@@ -117,6 +117,7 @@ async def get_configuration():
                 "label": definition["label"],
                 "provider": definition["provider"],
                 "provider_config": definition.get("provider_config", {}),
+                "aliases": definition.get("aliases", []),
                 "enabled": definition.get("enabled", True),
             }
             for market, definition in configured_markets.items()

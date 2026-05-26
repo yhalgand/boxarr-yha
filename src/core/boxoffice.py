@@ -19,6 +19,7 @@ from .boxoffice_provider import (
     market_for_provider,
     normalize_market,
     normalize_provider,
+    normalize_provider_config,
     provider_for_market,
 )
 from .exceptions import BoxOfficeError
@@ -51,13 +52,22 @@ class BoxOfficeMovie:
 
 
 class MojoUSProvider(BoxOfficeProvider):
-    """Box Office Mojo US provider."""
+    """Box Office Mojo provider family.
 
-    provider_key = "mojo_us"
+    ``market=us`` currently uses ``provider=mojo`` with ``area=us``.
+    ``mojo_us`` remains a compatibility alias and resolves to the same
+    implementation.
+    """
+
+    provider_key = "mojo"
     BASE_URL = "https://www.boxofficemojo.com"
     USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
-    def __init__(self, http_client: Optional[httpx.Client] = None):
+    def __init__(
+        self,
+        http_client: Optional[httpx.Client] = None,
+        provider_config: Optional[Dict[str, object]] = None,
+    ):
         super().__init__(
             http_client
             or httpx.Client(
@@ -66,6 +76,12 @@ class MojoUSProvider(BoxOfficeProvider):
                 follow_redirects=True,
             )
         )
+        self.provider_config = normalize_provider_config("mojo", provider_config)
+        self.area = str(self.provider_config.get("area", "us")).strip().lower()
+        if self.area != "us":
+            raise BoxOfficeError(
+                f"BoxOffice Mojo area '{self.area}' is not implemented yet"
+            )
 
     def close(self) -> None:
         if self.client:
@@ -271,7 +287,7 @@ class JPBoxOfficeFRProvider(BoxOfficeProvider):
     represent admissions/entries rather than USD revenue.
     """
 
-    provider_key = "jpboxoffice_fr"
+    provider_key = "jpboxoffice"
     BASE_URL = "https://www.jpbox-office.com"
     USER_AGENT = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -283,7 +299,11 @@ class JPBoxOfficeFRProvider(BoxOfficeProvider):
     ).strip().lower() in {"1", "true", "yes", "on"}
     DEBUG_DUMP_DIR = Path(__import__("os").environ.get("BOXARR_JPBOXOFFICE_DEBUG_DIR", "/tmp"))
 
-    def __init__(self, http_client: Optional[httpx.Client] = None):
+    def __init__(
+        self,
+        http_client: Optional[httpx.Client] = None,
+        provider_config: Optional[Dict[str, object]] = None,
+    ):
         super().__init__(
             http_client
             or httpx.Client(
@@ -292,6 +312,14 @@ class JPBoxOfficeFRProvider(BoxOfficeProvider):
                 follow_redirects=True,
             )
         )
+        self.provider_config = normalize_provider_config(
+            "jpboxoffice", provider_config
+        )
+        self.country = str(self.provider_config.get("country", "fr")).strip().lower()
+        if self.country != "fr":
+            raise BoxOfficeError(
+                f"JPBoxOffice country '{self.country}' is not implemented yet"
+            )
 
     def close(self) -> None:
         if self.client:
@@ -711,13 +739,19 @@ class JPBoxOfficeFRProvider(BoxOfficeProvider):
         return movies
 
 
-def create_provider(provider: Optional[str] = None, http_client=None) -> BoxOfficeProvider:
+def create_provider(
+    provider: Optional[str] = None,
+    http_client=None,
+    provider_config: Optional[Dict[str, object]] = None,
+) -> BoxOfficeProvider:
     """Create a concrete provider instance from a provider id."""
     normalized = normalize_provider(provider)
-    if normalized == "mojo_us":
-        return MojoUSProvider(http_client=http_client)
-    if normalized == "jpboxoffice_fr":
-        return JPBoxOfficeFRProvider(http_client=http_client)
+    if normalized == "mojo":
+        return MojoUSProvider(http_client=http_client, provider_config=provider_config)
+    if normalized == "jpboxoffice":
+        return JPBoxOfficeFRProvider(
+            http_client=http_client, provider_config=provider_config
+        )
 
     raise BoxOfficeError(f"Unsupported provider '{provider}'")
 
@@ -727,7 +761,21 @@ def create_provider_for_market(
 ) -> BoxOfficeProvider:
     """Create a provider instance from a market id."""
     normalized_market = normalize_market(market)
-    return create_provider(provider_for_market(normalized_market), http_client=http_client)
+    provider_config = None
+    try:
+        from ..utils.config import settings
+        from .market_settings import get_market_definition
+
+        provider_config = get_market_definition(settings, normalized_market).get(
+            "provider_config", {}
+        )
+    except Exception:
+        provider_config = None
+    return create_provider(
+        provider_for_market(normalized_market),
+        http_client=http_client,
+        provider_config=provider_config,
+    )
 
 
 class BoxOfficeService(BoxOfficeProvider):
@@ -738,6 +786,7 @@ class BoxOfficeService(BoxOfficeProvider):
         http_client: Optional[httpx.Client] = None,
         market: str = DEFAULT_MARKET,
         provider: Optional[str] = None,
+        provider_config: Optional[Dict[str, object]] = None,
     ):
         if isinstance(http_client, str) and provider is None and market == DEFAULT_MARKET:
             provider = http_client
@@ -748,8 +797,20 @@ class BoxOfficeService(BoxOfficeProvider):
 
         self.market_key = normalize_market(market)
         self.provider_key = normalize_provider(provider or provider_for_market(self.market_key))
+        if provider_config is None:
+            try:
+                from ..utils.config import settings
+                from .market_settings import get_market_definition
+
+                provider_config = get_market_definition(settings, self.market_key).get(
+                    "provider_config", {}
+                )
+            except Exception:
+                provider_config = None
         self._provider = create_provider(
-            self.provider_key, http_client=http_client
+            self.provider_key,
+            http_client=http_client,
+            provider_config=provider_config,
         )
         super().__init__(getattr(self._provider, "client", None))
 
