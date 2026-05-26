@@ -761,16 +761,12 @@ def create_provider_for_market(
 ) -> BoxOfficeProvider:
     """Create a provider instance from a market id."""
     normalized_market = normalize_market(market)
-    provider_config = None
-    try:
-        from ..utils.config import settings
-        from .market_settings import get_market_definition
+    from ..utils.config import settings
+    from .market_settings import ensure_market_enabled
 
-        provider_config = get_market_definition(settings, normalized_market).get(
-            "provider_config", {}
-        )
-    except Exception:
-        provider_config = None
+    provider_config = ensure_market_enabled(settings, normalized_market).get(
+        "provider_config", {}
+    )
     return create_provider(
         provider_for_market(normalized_market),
         http_client=http_client,
@@ -797,16 +793,17 @@ class BoxOfficeService(BoxOfficeProvider):
 
         self.market_key = normalize_market(market)
         self.provider_key = normalize_provider(provider or provider_for_market(self.market_key))
-        if provider_config is None:
-            try:
-                from ..utils.config import settings
-                from .market_settings import get_market_definition
+        try:
+            from ..utils.config import settings
+            from .market_settings import ensure_market_enabled
 
-                provider_config = get_market_definition(settings, self.market_key).get(
-                    "provider_config", {}
-                )
-            except Exception:
+            market_definition = ensure_market_enabled(settings, self.market_key)
+            if provider_config is None:
+                provider_config = market_definition.get("provider_config", {})
+        except Exception:
+            if provider_config is None:
                 provider_config = None
+            raise
         self._provider = create_provider(
             self.provider_key,
             http_client=http_client,

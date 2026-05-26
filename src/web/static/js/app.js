@@ -1512,6 +1512,247 @@ function reloadScheduler() {
         });
     };
 
+    function setMarketModalMessage(message, type = 'info') {
+        const container = document.getElementById('marketModalMessage');
+        if (!container) return;
+        container.style.display = 'block';
+        container.className = `status-message status-${type}`;
+        container.textContent = message;
+    }
+
+    function clearMarketModalMessage() {
+        const container = document.getElementById('marketModalMessage');
+        if (!container) return;
+        container.style.display = 'none';
+        container.textContent = '';
+        container.className = 'status-message';
+    }
+
+    function normalizeMarketTagsInput(value) {
+        if (!value) return null;
+        const parts = String(value)
+            .split(',')
+            .map((part) => part.trim())
+            .filter(Boolean);
+        return parts.length ? parts : null;
+    }
+
+    function parseProviderConfigInput(value) {
+        const text = String(value || '').trim();
+        if (!text) return {};
+        return JSON.parse(text);
+    }
+
+    function toggleMarketModal(show) {
+        const modal = document.getElementById('marketModal');
+        if (!modal) return;
+        modal.classList.toggle('show', show);
+        modal.setAttribute('aria-hidden', show ? 'false' : 'true');
+    }
+
+    window.closeMarketEditor = function() {
+        toggleMarketModal(false);
+        clearMarketModalMessage();
+    };
+
+    window.openMarketEditor = function(marketKey = null) {
+        clearMarketModalMessage();
+        const modal = document.getElementById('marketModal');
+        if (!modal) return;
+
+        const isEdit = Boolean(marketKey);
+        const markets = window.BOXARR_MARKETS || {};
+        const definition = isEdit ? (markets[marketKey] || {}) : {};
+
+        modal.dataset.mode = isEdit ? 'edit' : 'create';
+        modal.dataset.market = isEdit ? marketKey : '';
+
+        const title = document.getElementById('marketModalTitle');
+        const subtitle = document.getElementById('marketModalSubtitle');
+        const keyInput = document.getElementById('marketKeyInput');
+        const labelInput = document.getElementById('marketLabelInput');
+        const providerInput = document.getElementById('marketProviderInput');
+        const enabledInput = document.getElementById('marketEnabledInput');
+        const providerConfigInput = document.getElementById('marketProviderConfigInput');
+        const fetchLimitInput = document.getElementById('marketFetchLimitInput');
+        const addLimitInput = document.getElementById('marketAddLimitInput');
+        const autoAddInput = document.getElementById('marketAutoAddInput');
+        const cleanupInput = document.getElementById('marketCleanupInput');
+        const autoTagTextInput = document.getElementById('marketAutoTagTextInput');
+        const tagsInput = document.getElementById('marketTagsInput');
+
+        if (title) title.textContent = isEdit ? `Edit market ${marketKey}` : 'Add market';
+        if (subtitle) {
+            subtitle.textContent = isEdit
+                ? 'Update the market definition and save it back to local.yaml.'
+                : 'Create a new market definition in local.yaml.';
+        }
+
+        if (keyInput) {
+            keyInput.value = isEdit ? marketKey : '';
+            keyInput.disabled = isEdit;
+        }
+        if (labelInput) labelInput.value = definition.label || '';
+        if (providerInput) providerInput.value = definition.provider || 'mojo';
+        if (enabledInput) enabledInput.value = String(definition.enabled !== false);
+        if (providerConfigInput) {
+            providerConfigInput.value = definition.provider_config
+                ? JSON.stringify(definition.provider_config, null, 2)
+                : '';
+        }
+        if (fetchLimitInput) fetchLimitInput.value = definition.box_office_fetch_limit ?? '';
+        if (addLimitInput) addLimitInput.value = definition.maximum_movies_to_add ?? '';
+        if (autoAddInput) {
+            autoAddInput.value =
+                definition.auto_add_enabled === undefined || definition.auto_add_enabled === null
+                    ? ''
+                    : String(Boolean(definition.auto_add_enabled));
+        }
+        if (cleanupInput) cleanupInput.value = definition.cleanup_protect_tag || '';
+        if (autoTagTextInput) autoTagTextInput.value = definition.auto_tag_text || '';
+        if (tagsInput) {
+            const tagsValue = definition.tags || [];
+            tagsInput.value = Array.isArray(tagsValue) ? tagsValue.join(', ') : '';
+        }
+
+        toggleMarketModal(true);
+    };
+
+    window.saveMarketEditor = function() {
+        const modal = document.getElementById('marketModal');
+        if (!modal) return;
+
+        const mode = modal.dataset.mode || 'create';
+        const marketKey = (document.getElementById('marketKeyInput')?.value || modal.dataset.market || '').trim().toLowerCase();
+        const label = (document.getElementById('marketLabelInput')?.value || '').trim();
+        const provider = document.getElementById('marketProviderInput')?.value || 'mojo';
+        const enabled = document.getElementById('marketEnabledInput')?.value === 'true';
+        const providerConfigRaw = document.getElementById('marketProviderConfigInput')?.value || '';
+        const fetchLimitRaw = document.getElementById('marketFetchLimitInput')?.value || '';
+        const addLimitRaw = document.getElementById('marketAddLimitInput')?.value || '';
+        const autoAddRaw = document.getElementById('marketAutoAddInput')?.value || '';
+        const cleanupProtectTag = (document.getElementById('marketCleanupInput')?.value || '').trim();
+        const autoTagText = (document.getElementById('marketAutoTagTextInput')?.value || '').trim();
+        const tagsRaw = document.getElementById('marketTagsInput')?.value || '';
+
+        if (!marketKey) {
+            setMarketModalMessage('Market key is required.', 'error');
+            return;
+        }
+        if (mode === 'create' && !label) {
+            setMarketModalMessage('Label is required.', 'error');
+            return;
+        }
+        if (mode === 'create' && !provider) {
+            setMarketModalMessage('Provider is required.', 'error');
+            return;
+        }
+
+        const payload = {
+            enabled,
+        };
+        if (label) {
+            payload.label = label;
+        }
+        if (provider) {
+            payload.provider = provider;
+        }
+
+        if (mode === 'create') {
+            payload.market = marketKey;
+        }
+
+        if (providerConfigRaw.trim()) {
+            try {
+                payload.provider_config = parseProviderConfigInput(providerConfigRaw);
+            } catch (error) {
+                setMarketModalMessage('Provider config must be valid JSON.', 'error');
+                return;
+            }
+        } else if (mode === 'create') {
+            payload.provider_config = {};
+        }
+
+        if (fetchLimitRaw !== '') {
+            payload.box_office_fetch_limit = parseInt(fetchLimitRaw, 10);
+        }
+        if (addLimitRaw !== '') {
+            payload.maximum_movies_to_add = parseInt(addLimitRaw, 10);
+        }
+        if (autoAddRaw !== '') {
+            payload.auto_add_enabled = autoAddRaw === 'true';
+        }
+        if (cleanupProtectTag) {
+            payload.cleanup_protect_tag = cleanupProtectTag;
+        }
+        if (autoTagText) {
+            payload.auto_tag_text = autoTagText;
+        }
+        const tags = normalizeMarketTagsInput(tagsRaw);
+        if (tags) {
+            payload.tags = tags;
+        }
+
+        const method = mode === 'edit' ? 'PUT' : 'POST';
+        const endpoint = mode === 'edit'
+            ? apiUrl(`/config/markets/${encodeURIComponent(marketKey)}`)
+            : apiUrl('/config/markets');
+
+        const saveButton = document.getElementById('marketSaveButtonText');
+        const saveSpinner = document.getElementById('marketSaveButtonSpinner');
+        if (saveButton) saveButton.textContent = 'Saving...';
+        if (saveSpinner) saveSpinner.style.display = 'inline-block';
+
+        fetch(endpoint, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        })
+            .then(async (response) => {
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.detail || data.message || 'Unable to save market');
+                }
+                return data;
+            })
+            .then(() => {
+                showMessage('Market saved successfully. Reloading...', 'success');
+                setTimeout(() => window.location.reload(), 500);
+            })
+            .catch((error) => {
+                setMarketModalMessage(error.message, 'error');
+            })
+            .finally(() => {
+                if (saveButton) saveButton.textContent = 'Save market';
+                if (saveSpinner) saveSpinner.style.display = 'none';
+            });
+    };
+
+    window.toggleMarketEnabled = function(marketKey, enabled) {
+        const action = enabled ? 'enable' : 'disable';
+        if (!confirm(`${enabled ? 'Enable' : 'Disable'} market "${marketKey}"?`)) {
+            return;
+        }
+
+        fetch(apiUrl(`/config/markets/${encodeURIComponent(marketKey)}/${action}`), {
+            method: 'POST',
+        })
+            .then(async (response) => {
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.detail || data.message || 'Unable to update market');
+                }
+                return data;
+            })
+            .then(() => {
+                showMessage(`Market "${marketKey}" updated.`, 'success');
+                setTimeout(() => window.location.reload(), 500);
+            })
+            .catch((error) => {
+                showMessage(`Error: ${error.message}`, 'error');
+            });
+    };
+
     window.toggleScheduler = function() {
         const checkbox = document.getElementById('schedulerEnabled');
         const controls = document.querySelector('.scheduler-controls');

@@ -119,6 +119,12 @@
             color: white;
             box-shadow: var(--shadow);
         }
+
+        .market-tab.disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            text-decoration: line-through;
+        }
         
         .nav-link {
             padding: 0.5rem 1rem;
@@ -260,7 +266,12 @@
             <div class="navbar-menu">
                 <div class="market-tabs" aria-label="Market selector">
                     {% for market_key, market_def in configured_markets.items() %}
-                    <a href="#" id="marketTab{{ market_key|upper }}" class="market-tab {% if market == market_key %}active{% endif %}" onclick="setMarketPreference('{{ market_key }}'); return false;">{{ market_def.label }}</a>
+                    <a href="#"
+                       id="marketTab{{ market_key|upper }}"
+                       class="market-tab {% if market == market_key %}active{% endif %}{% if not market_def.enabled %} disabled{% endif %}"
+                       aria-disabled="{{ 'true' if not market_def.enabled else 'false' }}"
+                       title="{% if not market_def.enabled %}Disabled market{% endif %}"
+                       onclick="{% if market_def.enabled %}setMarketPreference('{{ market_key }}');{% endif %} return false;">{{ market_def.label }}</a>
                     {% endfor %}
                 </div>
                 <a href="{{ request.scope.get('root_path', '') }}/overview?market={{ market }}" class="nav-link {% if request.path.endswith('/overview') %}active{% endif %}">Movies</a>

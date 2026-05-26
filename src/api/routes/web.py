@@ -220,6 +220,10 @@ async def movie_overview_page(request: Request):
     market_settings_preview = get_effective_market_settings(settings, market)
     market_previews = {
         market_key: get_effective_market_settings(settings, market_key)
+        for market_key in configured_markets
+    }
+    market_previews = {
+        market_key: get_effective_market_settings(settings, market_key)
         for market_key in configured_markets.keys()
     }
 
@@ -584,6 +588,7 @@ async def setup_page(request: Request):
             provider=provider,
             configured_markets=configured_markets,
             market_settings_preview=market_settings_preview,
+            market_previews=market_previews,
             radarr_configured=bool(settings.radarr_api_key),
             is_configured=bool(settings.radarr_api_key),
             # Current settings for prefilling

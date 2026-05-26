@@ -6,6 +6,107 @@
     <title>{% block title %}Boxarr Setup{% endblock %}</title>
     <link rel="icon" type="image/png" href="{{ request.scope.get('root_path', '') }}/static/boxar-logo.png">
     <link rel="stylesheet" href="{{ request.scope.get('root_path', '') }}/static/css/style.css">
+    <style>
+        .market-management-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .market-management-actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .market-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .market-table th,
+        .market-table td {
+            padding: 0.75rem 0.6rem;
+            border-bottom: 1px solid var(--border-color);
+            vertical-align: top;
+            text-align: left;
+        }
+
+        .market-table th {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--text-secondary);
+        }
+
+        .market-table code {
+            background: var(--code-bg);
+            padding: 0.15rem 0.35rem;
+            border-radius: 4px;
+        }
+
+        .market-action-buttons {
+            display: flex;
+            gap: 0.35rem;
+            flex-wrap: wrap;
+        }
+
+        .market-modal-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.65);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+
+        .market-modal-backdrop.show {
+            display: flex;
+        }
+
+        .market-modal {
+            width: min(920px, 100%);
+            max-height: 92vh;
+            overflow: auto;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            box-shadow: var(--shadow-lg);
+            padding: 1.25rem;
+        }
+
+        .market-modal-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: start;
+            margin-bottom: 1rem;
+        }
+
+        .market-modal-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        .market-modal-grid .form-group {
+            margin-bottom: 0;
+        }
+
+        .market-modal-full {
+            grid-column: 1 / -1;
+        }
+
+        @media (max-width: 900px) {
+            .market-modal-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
     <script>
         // Apply theme immediately to prevent flash
         (function() {
@@ -24,6 +125,10 @@
     <script>
         // Inject base path for JavaScript usage
         window.BOXARR_BASE_PATH = "{{ request.scope.get('root_path', '') }}";
+        window.BOXARR_MARKET = "{{ market|default('us') }}";
+        window.BOXARR_PROVIDER = "{{ provider|default('mojo') }}";
+        window.BOXARR_MARKETS = {{ configured_markets|default({})|tojson }};
+        window.BOXARR_MARKET_PREVIEWS = {{ market_previews|default({})|tojson }};
     </script>
     <div class="setup-container">
         <div class="setup-header">
@@ -128,8 +233,16 @@
                 <p class="text-muted" style="margin-top: -0.5rem; margin-bottom: 1rem;">
                     Read-only preview of effective market settings. Blank market values inherit from the global settings.
                 </p>
+                <div class="market-management-header">
+                    <div></div>
+                    <div class="market-management-actions">
+                        <button type="button" class="btn btn-primary btn-sm" onclick="openMarketEditor()">
+                            + Add market
+                        </button>
+                    </div>
+                </div>
                 <div class="table-responsive">
-                    <table class="data-table">
+                    <table class="market-table">
                         <thead>
                             <tr>
                                 <th>Market</th>
@@ -140,6 +253,7 @@
                                 <th>Auto-Add</th>
                                 <th>Tags</th>
                                 <th>Cleanup Protect</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -182,10 +296,100 @@
                                     <code>{{ effective.cleanup_protect_tag }}</code>
                                     <span class="version-badge" style="margin-left: 0.35rem; font-size: 0.7rem;">{{ sources.cleanup_protect_tag }}</span>
                                 </td>
+                                <td>
+                                    <div class="market-action-buttons">
+                                        <button type="button" class="btn btn-sm btn-info" onclick="openMarketEditor('{{ market_key }}')">Edit</button>
+                                        {% if preview.definition.enabled %}
+                                        <button type="button" class="btn btn-sm btn-warning" onclick="toggleMarketEnabled('{{ market_key }}', false)">Disable</button>
+                                        {% else %}
+                                        <button type="button" class="btn btn-sm btn-success" onclick="toggleMarketEnabled('{{ market_key }}', true)">Enable</button>
+                                        {% endif %}
+                                    </div>
+                                </td>
                             </tr>
                             {% endfor %}
                         </tbody>
                     </table>
+                </div>
+            </div>
+
+            <div id="marketModal" class="market-modal-backdrop" aria-hidden="true">
+                <div class="market-modal" role="dialog" aria-modal="true" aria-labelledby="marketModalTitle">
+                    <div class="market-modal-header">
+                        <div>
+                            <h2 id="marketModalTitle" class="section-title" style="margin-bottom: 0.35rem;">Add market</h2>
+                            <p class="text-muted" id="marketModalSubtitle" style="margin: 0;">Create or update a configured market without editing local.yaml directly.</p>
+                        </div>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="closeMarketEditor()">Close</button>
+                    </div>
+
+                    <div class="market-modal-grid">
+                        <div class="form-group">
+                            <label for="marketKeyInput" class="form-label">Market key</label>
+                            <input id="marketKeyInput" class="form-input" placeholder="de" autocomplete="off">
+                            <small class="text-muted">Lowercase letters, digits, hyphen or underscore.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="marketLabelInput" class="form-label">Label</label>
+                            <input id="marketLabelInput" class="form-input" placeholder="Germany Box Office">
+                        </div>
+                        <div class="form-group">
+                            <label for="marketProviderInput" class="form-label">Provider</label>
+                            <select id="marketProviderInput" class="form-select">
+                                <option value="mojo">mojo</option>
+                                <option value="jpboxoffice">jpboxoffice</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="marketEnabledInput" class="form-label">Enabled</label>
+                            <select id="marketEnabledInput" class="form-select">
+                                <option value="true">Yes</option>
+                                <option value="false">No</option>
+                            </select>
+                        </div>
+                        <div class="form-group market-modal-full">
+                            <label for="marketProviderConfigInput" class="form-label">Provider config (JSON)</label>
+                            <textarea id="marketProviderConfigInput" class="form-input" rows="3" placeholder='{"country":"de"}'></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="marketFetchLimitInput" class="form-label">Fetch limit</label>
+                            <input id="marketFetchLimitInput" class="form-input" type="number" min="1" max="30" placeholder="inherit">
+                        </div>
+                        <div class="form-group">
+                            <label for="marketAddLimitInput" class="form-label">Maximum movies to add</label>
+                            <input id="marketAddLimitInput" class="form-input" type="number" min="1" max="30" placeholder="inherit">
+                        </div>
+                        <div class="form-group">
+                            <label for="marketAutoAddInput" class="form-label">Auto-add enabled</label>
+                            <select id="marketAutoAddInput" class="form-select">
+                                <option value="">inherit</option>
+                                <option value="true">Yes</option>
+                                <option value="false">No</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="marketCleanupInput" class="form-label">Cleanup protect tag</label>
+                            <input id="marketCleanupInput" class="form-input" placeholder="boxarr-keep">
+                        </div>
+                        <div class="form-group market-modal-full">
+                            <label for="marketAutoTagTextInput" class="form-label">Auto tag text</label>
+                            <input id="marketAutoTagTextInput" class="form-input" placeholder="boxarr-de">
+                        </div>
+                        <div class="form-group market-modal-full">
+                            <label for="marketTagsInput" class="form-label">Tags (comma-separated)</label>
+                            <input id="marketTagsInput" class="form-input" placeholder="boxarr, boxarr-de">
+                        </div>
+                    </div>
+
+                    <div id="marketModalMessage" class="status-message" style="display:none; margin-top: 1rem;"></div>
+
+                    <div class="button-row" style="margin-top: 1.25rem;">
+                        <button type="button" class="btn btn-secondary" onclick="closeMarketEditor()">Cancel</button>
+                        <button type="button" class="btn btn-primary" onclick="saveMarketEditor()">
+                            <span id="marketSaveButtonText">Save market</span>
+                            <span id="marketSaveButtonSpinner" class="loading-spinner" style="display:none;"></span>
+                        </button>
+                    </div>
                 </div>
             </div>
 

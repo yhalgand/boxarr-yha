@@ -10,6 +10,12 @@ from pydantic import BaseModel, Field
 
 from ... import __version__
 from ...core.boxoffice_provider import DEFAULT_MARKET
+from ...core.market_admin import (
+    build_market_definition,
+    load_yaml_config,
+    normalize_market_key,
+    save_yaml_config,
+)
 from ...core.market_settings import get_configured_markets, get_effective_market_settings
 from ...core.radarr import RadarrService
 from ...utils.config import RootFolderConfig, RootFolderMapping, Settings, settings
@@ -78,6 +84,37 @@ class SaveConfigRequest(BaseModel):
     boxarr_features_auto_tag_text: str = "boxarr"
     # UI theme setting
     boxarr_ui_theme: str = "light"
+
+
+class MarketCreateRequest(BaseModel):
+    """Create market request model."""
+
+    market: str
+    label: str
+    provider: str
+    provider_config: Dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
+    box_office_fetch_limit: Optional[int] = None
+    maximum_movies_to_add: Optional[int] = None
+    auto_add_enabled: Optional[bool] = None
+    tags: Optional[List[str]] = None
+    auto_tag_text: Optional[str] = None
+    cleanup_protect_tag: Optional[str] = None
+
+
+class MarketUpdateRequest(BaseModel):
+    """Update market request model."""
+
+    label: Optional[str] = None
+    provider: Optional[str] = None
+    provider_config: Optional[Dict[str, Any]] = None
+    enabled: Optional[bool] = None
+    box_office_fetch_limit: Optional[int] = None
+    maximum_movies_to_add: Optional[int] = None
+    auto_add_enabled: Optional[bool] = None
+    tags: Optional[List[str]] = None
+    auto_tag_text: Optional[str] = None
+    cleanup_protect_tag: Optional[str] = None
 
 
 @router.get("/root-folders")
@@ -165,6 +202,133 @@ async def get_market_configuration():
         },
         "markets": markets,
     }
+
+
+def _resolve_config_path() -> Path:
+    data_directory = Path(
+        os.getenv("BOXARR_DATA_DIRECTORY", str(settings.boxarr_data_directory))
+    )
+    return data_directory / "local.yaml"
+
+
+def _load_config_payload(config_path: Path) -> Dict[str, Any]:
+    return load_yaml_config(config_path)
+
+
+def _save_config_payload(config_path: Path, payload: Dict[str, Any]) -> None:
+    save_yaml_config(config_path, payload)
+
+
+def _get_market_section(payload: Dict[str, Any]) -> Dict[str, Any]:
+    markets = payload.get("markets", {}) or {}
+    if not isinstance(markets, dict):
+        markets = {}
+    return markets
+
+
+def _persist_market_definition(
+    market_key: str,
+    request_payload: Dict[str, Any],
+    *,
+    create: bool = False,
+) -> Dict[str, Any]:
+    normalized_market = normalize_market_key(market_key)
+    config_path = _resolve_config_path()
+    config_payload = _load_config_payload(config_path)
+    markets_section = _get_market_section(config_payload)
+
+    existing_markets = get_configured_markets(settings)
+    market_exists = normalized_market in existing_markets
+    if create and market_exists:
+        raise HTTPException(status_code=400, detail=f"Market '{normalized_market}' already exists")
+    if not create and not market_exists:
+        raise HTTPException(status_code=404, detail=f"Market '{normalized_market}' not found")
+
+    existing_definition = markets_section.get(normalized_market, {})
+    updated_definition = build_market_definition(
+        normalized_market,
+        request_payload,
+        existing=existing_definition,
+        create=create,
+    )
+    markets_section[normalized_market] = updated_definition
+    config_payload["markets"] = markets_section
+
+    _save_config_payload(config_path, config_payload)
+    Settings.reload_from_file(config_path)
+
+    refreshed_markets = get_configured_markets(settings)
+    refreshed_effective = get_effective_market_settings(settings, normalized_market)
+    return {
+        "market": normalized_market,
+        "definition": refreshed_markets[normalized_market],
+        "effective": refreshed_effective.get("effective", {}),
+        "sources": refreshed_effective.get("sources", {}),
+        "aliases": refreshed_markets[normalized_market].get("aliases", []),
+        "enabled": refreshed_markets[normalized_market].get("enabled", True),
+        "configured": refreshed_markets[normalized_market].get("configured", False),
+    }
+
+
+@router.post("/markets")
+async def create_market(config: MarketCreateRequest):
+    """Create a new market in local.yaml."""
+    try:
+        payload = config.model_dump(exclude_none=False)
+        market_key = payload.pop("market")
+        if "provider_config" not in payload or payload.get("provider_config") is None:
+            payload["provider_config"] = {}
+        return _persist_market_definition(str(market_key), payload, create=True)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Error creating market: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/markets/{market}")
+async def update_market(market: str, config: MarketUpdateRequest):
+    """Update an existing market in local.yaml."""
+    try:
+        payload = config.model_dump(exclude_none=False, exclude_unset=True)
+        return _persist_market_definition(market, payload, create=False)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Error updating market %s: %s", market, e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/markets/{market}/disable")
+async def disable_market(market: str):
+    """Disable a configured market."""
+    try:
+        return _persist_market_definition(market, {"enabled": False}, create=False)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Error disabling market %s: %s", market, e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/markets/{market}/enable")
+async def enable_market(market: str):
+    """Enable a configured market."""
+    try:
+        return _persist_market_definition(market, {"enabled": True}, create=False)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Error enabling market %s: %s", market, e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/test")

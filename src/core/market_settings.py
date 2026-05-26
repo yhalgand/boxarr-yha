@@ -170,6 +170,14 @@ def get_market_definition(settings_obj: Settings, market: str) -> Dict[str, Any]
     return registry[market_key]
 
 
+def ensure_market_enabled(settings_obj: Settings, market: str) -> Dict[str, Any]:
+    """Return the market definition or raise when the market is disabled."""
+    definition = get_market_definition(settings_obj, market)
+    if not bool(definition.get("enabled", True)):
+        raise ValueError(f"Market '{definition['market']}' is disabled")
+    return definition
+
+
 def _global_value(settings_obj: Settings, field_name: str) -> Any:
     value = getattr(settings_obj, field_name)
     if hasattr(value, "value"):
