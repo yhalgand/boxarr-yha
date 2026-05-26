@@ -208,6 +208,9 @@ def test_update_week_fr_uses_provider_wiring(tmp_path, monkeypatch):
     assert payload["market"] == "fr"
     assert payload["provider"] == "jpboxoffice"
     assert payload["provider_aliases"] == ["jpboxoffice_fr"]
+    assert payload["policy_snapshot"]["market"] == "fr"
+    assert payload["policy_snapshot"]["fetch_limit_used"] == 10
+    assert payload["policy_snapshot"]["add_limit_used"] == 10
     assert payload["movies"][0]["weeks_released"] == 2
     assert payload["movies"][0]["weeks_in_release"] == 2
     assert payload["movies"][0]["theater_count"] == 789

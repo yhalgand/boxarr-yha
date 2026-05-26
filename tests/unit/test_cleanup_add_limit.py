@@ -127,7 +127,8 @@ def test_cleanup_dry_run_keeps_any_movie_eligible_in_selected_market(tmp_path, m
     monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
 
     boxarr_tag = {"id": 1, "label": "boxarr"}
-    keep_tag = {"id": 2, "label": "boxarr-keep"}
+    protected_tag = {"id": 2, "label": "boxarr-protected"}
+    keep_tag = {"id": 3, "label": "boxarr-keep"}
 
     # FR market pages. Movie 201 is rank 7 in week 1 but rank 2 in week 2, so it stays.
     _write_week(
@@ -267,6 +268,15 @@ def test_cleanup_dry_run_keeps_any_movie_eligible_in_selected_market(tmp_path, m
             quality_profile_id=4,
         ),
         _movie(
+            7,
+            402,
+            "Legacy Protected",
+            tags=[1, 3],
+            size_bytes=4 * 1024 * 1024 * 1024,
+            path="/movies/Legacy Protected/Legacy Protected.mkv",
+            quality_profile_id=4,
+        ),
+        _movie(
             5,
             204,
             "Top Rank",
@@ -289,7 +299,7 @@ def test_cleanup_dry_run_keeps_any_movie_eligible_in_selected_market(tmp_path, m
         _movie(10, None, "Ambiguous", tags=[1], size_bytes=1 * 1024 * 1024 * 1024),
         _movie(11, 999, "Manual", tags=[], size_bytes=2 * 1024 * 1024 * 1024),
     ]
-    fake_service = _FakeRadarrService(movies, [boxarr_tag, keep_tag])
+    fake_service = _FakeRadarrService(movies, [boxarr_tag, protected_tag, keep_tag])
 
     cleanup = AddLimitCleanupService(fake_service, data_directory=tmp_path)
     report = cleanup.run(
@@ -297,7 +307,7 @@ def test_cleanup_dry_run_keeps_any_movie_eligible_in_selected_market(tmp_path, m
         target_add_limit=3,
         delete_files=True,
         require_boxarr_tag=True,
-        protect_tag="boxarr-keep",
+        protect_tag="boxarr-protected",
         execute=False,
     )
 
@@ -335,7 +345,8 @@ def test_cleanup_dry_run_keeps_any_movie_eligible_in_selected_market(tmp_path, m
     assert skipped["FR Keep"] == "present in eligible range by best_rank"
     assert skipped["Unsafe Delete"] == "unsafe to delete: size_on_disk unknown"
     assert skipped["US Keep"] == "no reliable Boxarr association"
-    assert skipped["Protected"] == "protected by tag 'boxarr-keep'"
+    assert skipped["Protected"] == "protected by tag 'boxarr-protected'"
+    assert skipped["Legacy Protected"] == "protected by tag 'boxarr-protected'"
     assert skipped["Ambiguous"] == "no reliable Boxarr association"
     assert skipped["Manual"] == "missing required boxarr tag"
 
@@ -376,7 +387,10 @@ def test_cleanup_execute_calls_delete_files_true(tmp_path, monkeypatch):
         _movie(3, 202, "Delete Me", tags=[1], size_bytes=3 * 1024 * 1024 * 1024),
         _movie(4, 203, "Unsafe Delete", tags=[1], size_bytes=0, has_file=False),
     ]
-    fake_service = _FakeRadarrService(movies, [{"id": 1, "label": "boxarr"}])
+    fake_service = _FakeRadarrService(
+        movies,
+        [{"id": 1, "label": "boxarr"}, {"id": 2, "label": "boxarr-protected"}],
+    )
 
     cleanup = AddLimitCleanupService(fake_service, data_directory=tmp_path)
     report = cleanup.run(
@@ -384,7 +398,7 @@ def test_cleanup_execute_calls_delete_files_true(tmp_path, monkeypatch):
         target_add_limit=3,
         delete_files=True,
         require_boxarr_tag=True,
-        protect_tag="boxarr-keep",
+        protect_tag="boxarr-protected",
         execute=True,
     )
 
@@ -419,7 +433,10 @@ def test_cleanup_market_us_reads_legacy_flat_file(tmp_path, monkeypatch):
     movies = [
         _movie(8, 501, "Legacy US Keep", tags=[1], size_bytes=1024),
     ]
-    fake_service = _FakeRadarrService(movies, [{"id": 1, "label": "boxarr"}])
+    fake_service = _FakeRadarrService(
+        movies,
+        [{"id": 1, "label": "boxarr"}, {"id": 2, "label": "boxarr-protected"}],
+    )
 
     cleanup = AddLimitCleanupService(fake_service, data_directory=tmp_path)
     report = cleanup.run(
@@ -427,7 +444,7 @@ def test_cleanup_market_us_reads_legacy_flat_file(tmp_path, monkeypatch):
         target_add_limit=3,
         delete_files=True,
         require_boxarr_tag=True,
-        protect_tag="boxarr-keep",
+        protect_tag="boxarr-protected",
         execute=False,
     )
 

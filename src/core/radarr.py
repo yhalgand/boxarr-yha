@@ -364,6 +364,7 @@ class RadarrService:
         root_folder: Optional[str] = None,
         monitored: bool = True,
         search_for_movie: Optional[bool] = None,
+        additional_tag_labels: Optional[List[str]] = None,
     ) -> RadarrMovie:
         """
         Add movie to Radarr.
@@ -440,15 +441,32 @@ class RadarrService:
             # Never let availability decoration break add flow
             pass
 
-        # Apply auto-tagging if enabled
+        # Apply auto-tagging if enabled and merge any additional policy tags.
         try:
+            labels: List[str] = []
             if settings.boxarr_features_auto_tag_enabled:
                 label = settings.boxarr_features_auto_tag_text
                 if isinstance(label, str) and label.strip():
-                    tag_id = self.ensure_tag(label.strip())
-                    if tag_id is not None:
-                        movie_data["tags"] = [tag_id]
-            else:
+                    labels.append(label.strip())
+            if additional_tag_labels:
+                for label in additional_tag_labels:
+                    if isinstance(label, str) and label.strip():
+                        labels.append(label.strip())
+
+            tag_ids: List[int] = []
+            seen_labels = set()
+            for label in labels:
+                normalized_label = label.lower()
+                if normalized_label in seen_labels:
+                    continue
+                seen_labels.add(normalized_label)
+                tag_id = self.ensure_tag(label)
+                if tag_id is not None and tag_id not in tag_ids:
+                    tag_ids.append(tag_id)
+
+            if tag_ids:
+                movie_data["tags"] = tag_ids
+            elif not settings.boxarr_features_auto_tag_enabled:
                 # Explicitly set empty tags to avoid any defaults
                 movie_data["tags"] = []
         except Exception as e:

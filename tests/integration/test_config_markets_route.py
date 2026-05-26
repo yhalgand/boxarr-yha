@@ -32,7 +32,7 @@ def _write_config(dir_path: Path) -> Path:
                 "provider_config": {"area": "us"},
                 "enabled": True,
                 "maximum_movies_to_add": 3,
-                "cleanup_protect_tag": "boxarr-keep",
+                "cleanup_protect_tag": "boxarr-protected",
             },
             "fr": {
                 "label": "France Box Office",
@@ -40,7 +40,7 @@ def _write_config(dir_path: Path) -> Path:
                 "provider_config": {"country": "fr"},
                 "enabled": True,
                 "maximum_movies_to_add": None,
-                "cleanup_protect_tag": "boxarr-keep",
+                "cleanup_protect_tag": "boxarr-protected",
             },
         },
     }
@@ -68,4 +68,8 @@ def test_get_config_markets_returns_effective_values(tmp_path, monkeypatch):
     assert body["markets"]["fr"]["sources"]["maximum_movies_to_add"] == "global"
     assert body["markets"]["us"]["definition"]["aliases"] == ["mojo_us"]
     assert body["markets"]["fr"]["definition"]["aliases"] == ["jpboxoffice_fr"]
-    assert body["markets"]["us"]["effective"]["cleanup_protect_tag"] == "boxarr-keep"
+    assert body["markets"]["us"]["effective"]["cleanup_protect_tag"] == "boxarr-protected"
+    assert body["markets"]["us"]["tag_policy"]["added_tag"] == "boxarr-added"
+    assert body["markets"]["us"]["tag_policy"]["market_tag"] == "boxarr-market-us"
+    assert body["markets"]["us"]["tag_policy"]["existing_tag"] == "boxarr-existing-us"
+    assert body["markets"]["us"]["tag_policy"]["protected_tag"] == "boxarr-protected"

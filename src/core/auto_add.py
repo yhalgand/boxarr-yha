@@ -1,6 +1,6 @@
 """Shared auto-add logic for adding unmatched movies to Radarr."""
 
-from typing import List
+from typing import Any, Dict, List
 
 from ..utils.config import settings
 from ..utils.logger import get_logger
@@ -19,7 +19,7 @@ def auto_add_missing_movies(
     radarr_service: RadarrService,
     top_year: int,
     market: str = "us",
-) -> List[str]:
+) -> List[Dict[str, Any]]:
     """
     Add unmatched movies to Radarr with filters and validation.
 
@@ -29,9 +29,9 @@ def auto_add_missing_movies(
         top_year: Year used for re-release filtering
 
     Returns:
-        List of added movie titles
+        List of added movie records with title/tmdb/radarr identifiers
     """
-    added_movies = []
+    added_movies: List[Dict[str, Any]] = []
     unmatched = [r for r in match_results if not r.is_matched]
 
     if not unmatched:
@@ -203,12 +203,22 @@ def auto_add_missing_movies(
                 root_folder,
                 True,  # monitored
                 True,  # search for movie
+                additional_tag_labels=[
+                    "boxarr-added",
+                    f"boxarr-market-{market}",
+                ],
             )
             logger.info(
                 f"Auto-added movie to Radarr: {added_movie.title} "
                 f"with profile '{default_profile.name}' in folder '{root_folder}'"
             )
-            added_movies.append(added_movie.title)
+            added_movies.append(
+                {
+                    "title": added_movie.title,
+                    "tmdbId": movie_info["tmdbId"],
+                    "id": added_movie.id,
+                }
+            )
 
         except Exception as e:
             logger.warning(f"Failed to auto-add {result.box_office_movie.title}: {e}")

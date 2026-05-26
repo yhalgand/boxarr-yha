@@ -189,7 +189,7 @@ def test_cleanup_routes_dry_run_then_execute(tmp_path, monkeypatch):
         "target_add_limit": 3,
         "delete_files": True,
         "require_boxarr_tag": True,
-        "protect_tag": "boxarr-keep",
+        "protect_tag": "boxarr-protected",
     }
 
     dry_run = client.post("/api/cleanup/add-limit/dry-run", json=payload)

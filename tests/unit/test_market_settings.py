@@ -31,7 +31,7 @@ def test_default_markets_fallback_to_us_and_fr():
     effective_us = get_effective_market_settings(settings, "us")
     assert effective_us["effective"]["box_office_fetch_limit"] == settings.boxarr_features_box_office_limit
     assert effective_us["sources"]["box_office_fetch_limit"] == "global"
-    assert effective_us["effective"]["cleanup_protect_tag"] == "boxarr-keep"
+    assert effective_us["effective"]["cleanup_protect_tag"] == "boxarr-protected"
 
 
 def test_market_overrides_take_precedence_and_sources_reflect_market():
@@ -44,7 +44,7 @@ def test_market_overrides_take_precedence_and_sources_reflect_market():
                 enabled=True,
                 maximum_movies_to_add=3,
                 auto_tag_text="boxarr-us",
-                cleanup_protect_tag="boxarr-keep",
+                cleanup_protect_tag="boxarr-protected",
             ),
             "fr": MarketConfig(
                 label="France Box Office",
@@ -53,7 +53,7 @@ def test_market_overrides_take_precedence_and_sources_reflect_market():
                 enabled=True,
                 maximum_movies_to_add=7,
                 auto_tag_text="boxarr-fr",
-                cleanup_protect_tag="boxarr-keep",
+                cleanup_protect_tag="boxarr-protected",
             ),
         }
     )
@@ -67,7 +67,7 @@ def test_market_overrides_take_precedence_and_sources_reflect_market():
     assert fr_effective["sources"]["maximum_movies_to_add"] == "market"
     assert us_effective["effective"]["tags"] == ["boxarr", "boxarr-us"]
     assert fr_effective["effective"]["tags"] == ["boxarr", "boxarr-fr"]
-    assert us_effective["effective"]["cleanup_protect_tag"] == "boxarr-keep"
+    assert us_effective["effective"]["cleanup_protect_tag"] == "boxarr-protected"
 
 
 def test_null_override_falls_back_to_global():

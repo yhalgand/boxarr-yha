@@ -27,7 +27,7 @@ class AddLimitCleanupRequest(BaseModel):
     week_to: Optional[int] = None
     delete_files: bool = True
     require_boxarr_tag: bool = True
-    protect_tag: str = "boxarr-keep"
+    protect_tag: str = "boxarr-protected"
 
 
 def _normalize_cleanup_market(market: str) -> str:

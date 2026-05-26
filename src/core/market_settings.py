@@ -235,7 +235,7 @@ def get_effective_market_settings(settings_obj: Settings, market: str) -> Dict[s
         effective["cleanup_protect_tag"] = cleanup_tag
         sources["cleanup_protect_tag"] = "market"
     else:
-        effective["cleanup_protect_tag"] = "boxarr-keep"
+        effective["cleanup_protect_tag"] = "boxarr-protected"
         sources["cleanup_protect_tag"] = "global"
 
     return {

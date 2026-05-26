@@ -824,6 +824,30 @@
             </a>
             {% endif %}
         </div>
+
+        <div style="margin-top: 1rem; padding: 1rem; background: rgba(14, 165, 233, 0.06); border: 1px solid rgba(14, 165, 233, 0.18); border-radius: 10px;">
+            <div style="display:flex; justify-content:space-between; gap:1rem; flex-wrap:wrap; align-items:center;">
+                <div>
+                    <h3 style="margin:0 0 0.4rem 0;">Current Market Policy</h3>
+                    <div style="font-size:0.95rem; color: var(--text-secondary);">
+                        <strong>{{ market_policy.label }}</strong> • Provider <code>{{ market_policy.provider }}</code>
+                    </div>
+                </div>
+                <div style="font-size: 0.9rem; color: var(--text-secondary);">
+                    Fetch top <strong>{{ market_policy.effective.box_office_fetch_limit }}</strong> •
+                    Add limit <strong>{{ market_policy.effective.maximum_movies_to_add }}</strong> •
+                    Auto-add <strong>{% if market_policy.effective.auto_add_enabled %}enabled{% else %}disabled{% endif %}</strong>
+                </div>
+            </div>
+            <div style="margin-top:0.5rem; font-size:0.9rem;">
+                Tags: <code>{{ market_policy.effective.tags | join(', ') }}</code> • Protected: <code>{{ market_policy.effective.cleanup_protect_tag }}</code>
+            </div>
+            <div style="margin-top:0.35rem; font-size:0.9rem; color: var(--text-secondary);">
+                New tags: <code>{{ market_policy.tag_policy.added_tag }}</code>,
+                <code>{{ market_policy.tag_policy.market_tag }}</code>,
+                <code>{{ market_policy.tag_policy.existing_tag }}</code>
+            </div>
+        </div>
     </div>
     
     <!-- Filters and Pagination Controls -->
@@ -1253,7 +1277,7 @@
                 </div>
                 <div class="cleanup-field">
                     <label for="cleanupProtectTag">Protect tag</label>
-                    <input id="cleanupProtectTag" type="text" value="boxarr-keep" maxlength="40">
+                    <input id="cleanupProtectTag" type="text" value="boxarr-protected" maxlength="40">
                 </div>
                 <div class="cleanup-field">
                     <label>Delete files</label>
@@ -2075,7 +2099,7 @@ function cleanupPayloadFromForm() {
             : null,
         delete_files: true,
         require_boxarr_tag: true,
-        protect_tag: (document.getElementById('cleanupProtectTag')?.value || 'boxarr-keep').trim() || 'boxarr-keep',
+        protect_tag: (document.getElementById('cleanupProtectTag')?.value || 'boxarr-protected').trim() || 'boxarr-protected',
     };
     return payload;
 }
@@ -2182,7 +2206,7 @@ function renderCleanupResults(data) {
                 Target add limit: <strong>${escapeHtml(data.target_add_limit)}</strong>
                 · Market: <strong>${escapeHtml(data.market)}</strong>
                 · Delete files: <strong>${data.delete_files ? 'yes' : 'no'}</strong>
-                · Protected tag: <strong>${escapeHtml(data.protect_tag || 'boxarr-keep')}</strong>
+                · Protected tag: <strong>${escapeHtml(data.protect_tag || 'boxarr-protected')}</strong>
             </div>
             <h4 style="margin: 0 0 0.5rem 0;">${escapeHtml(data.dry_run ? 'Candidate deletions' : 'Deleted movies')}</h4>
             ${primaryItems.length ? `

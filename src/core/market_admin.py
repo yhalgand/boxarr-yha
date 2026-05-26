@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 import yaml
 
 from .boxoffice_provider import DEFAULT_PROVIDER, canonicalize_provider_definition, normalize_provider
+from ..utils.config import Settings, settings
 
 MARKET_KEY_PATTERN = re.compile(r"^[a-z0-9_-]+$")
 
@@ -60,6 +61,13 @@ def save_yaml_config(config_path: Path, data: Dict[str, Any]) -> None:
     config_path.parent.mkdir(parents=True, exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+
+
+def resolve_config_path(base_directory: Optional[Path] = None) -> Path:
+    """Resolve the local YAML config path for the active data directory."""
+    if base_directory is None:
+        base_directory = Path(str(settings.boxarr_data_directory))
+    return Path(base_directory) / "local.yaml"
 
 
 def infer_provider_config(
@@ -162,8 +170,56 @@ def build_market_definition(
 
     cleanup_tag = incoming.get("cleanup_protect_tag", base.get("cleanup_protect_tag"))
     if cleanup_tag is None and create:
-        cleanup_tag = "boxarr-keep"
+        cleanup_tag = "boxarr-protected"
     if cleanup_tag is not None:
         record["cleanup_protect_tag"] = cleanup_tag
 
     return record
+
+
+def persist_market_definition(
+    market_key: str,
+    payload: Dict[str, Any],
+    *,
+    create: bool = False,
+    base_directory: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Create or update a market definition in local.yaml and reload settings."""
+    normalized_market = normalize_market_key(market_key)
+    config_path = resolve_config_path(base_directory)
+    config_payload = load_yaml_config(config_path)
+    markets_section = config_payload.get("markets", {}) or {}
+    if not isinstance(markets_section, dict):
+        markets_section = {}
+
+    current_markets = getattr(settings, "markets", {}) or {}
+    if not isinstance(current_markets, dict):
+        current_markets = {}
+
+    market_exists = normalized_market in current_markets or normalized_market in markets_section
+    if create and market_exists:
+        raise ValueError(f"Market '{normalized_market}' already exists")
+    if not create and not market_exists:
+        raise ValueError(f"Market '{normalized_market}' not found")
+
+    existing_definition = markets_section.get(normalized_market) or current_markets.get(
+        normalized_market, {}
+    )
+    updated_definition = build_market_definition(
+        normalized_market,
+        payload,
+        existing=existing_definition,
+        create=create,
+    )
+    markets_section[normalized_market] = updated_definition
+    config_payload["markets"] = markets_section
+    save_yaml_config(config_path, config_payload)
+    Settings.reload_from_file(config_path)
+
+    refreshed_markets = getattr(settings, "markets", {}) or {}
+    definition = refreshed_markets.get(normalized_market, updated_definition)
+    return {
+        "market": normalized_market,
+        "definition": definition,
+        "enabled": definition.get("enabled", True),
+    }

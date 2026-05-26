@@ -27,6 +27,7 @@ from ...core.market_settings import (
     get_effective_market_settings,
     get_market_definition,
 )
+from ...core.market_policy import get_market_policy
 from ...core.ignore_list import IgnoreList
 from ...core.models import MovieStatus
 from ...utils.config import settings
@@ -218,10 +219,7 @@ async def movie_overview_page(request: Request):
     provider = provider_for_market(market)
     configured_markets = get_configured_markets(settings)
     market_settings_preview = get_effective_market_settings(settings, market)
-    market_previews = {
-        market_key: get_effective_market_settings(settings, market_key)
-        for market_key in configured_markets
-    }
+    market_policy = get_market_policy(settings, market)
     market_previews = {
         market_key: get_effective_market_settings(settings, market_key)
         for market_key in configured_markets.keys()
@@ -361,6 +359,7 @@ async def movie_overview_page(request: Request):
             provider=provider,
             configured_markets=configured_markets,
             market_settings_preview=market_settings_preview,
+            market_policy=market_policy,
             # Features
             auto_add=settings.boxarr_features_auto_add,
             quality_upgrade=settings.boxarr_features_quality_upgrade,
@@ -387,6 +386,11 @@ async def dashboard_page(request: Request):
     provider = provider_for_market(market)
     configured_markets = get_configured_markets(settings)
     market_settings_preview = get_effective_market_settings(settings, market)
+    market_policy = get_market_policy(settings, market)
+    market_previews = {
+        market_key: get_effective_market_settings(settings, market_key)
+        for market_key in configured_markets.keys()
+    }
 
     page = int(request.query_params.get("page", 1))
     per_page = int(request.query_params.get("per_page", 10))
@@ -519,6 +523,7 @@ async def dashboard_page(request: Request):
             provider=provider,
             configured_markets=configured_markets,
             market_settings_preview=market_settings_preview,
+            market_policy=market_policy,
             market_previews=market_previews,
             radarr_configured=bool(settings.radarr_api_key),
             scheduler_enabled=settings.boxarr_scheduler_enabled,
@@ -551,6 +556,11 @@ async def setup_page(request: Request):
     provider = provider_for_market(market)
     configured_markets = get_configured_markets(settings)
     market_settings_preview = get_effective_market_settings(settings, market)
+    market_policy = get_market_policy(settings, market)
+    market_previews = {
+        market_key: get_effective_market_settings(settings, market_key)
+        for market_key in configured_markets.keys()
+    }
     # Parse current cron for display
     cron = settings.boxarr_scheduler_cron
     import re
@@ -588,6 +598,7 @@ async def setup_page(request: Request):
             provider=provider,
             configured_markets=configured_markets,
             market_settings_preview=market_settings_preview,
+            market_policy=market_policy,
             market_previews=market_previews,
             radarr_configured=bool(settings.radarr_api_key),
             is_configured=bool(settings.radarr_api_key),
@@ -706,6 +717,8 @@ async def serve_weekly_page(request: Request, year: int, week: int):
             # If parsing fails, leave as None
             pass
 
+    policy_snapshot = metadata.get("policy_snapshot")
+
     # Load ignore list
     ignore_list = IgnoreList()
     ignored_tmdb_ids = list(ignore_list.get_ignored_tmdb_ids())
@@ -722,9 +735,11 @@ async def serve_weekly_page(request: Request, year: int, week: int):
                 "sunday": sunday,
                 "movies": movies,
                 "generated_at": generated_at,
+                "policy_snapshot": policy_snapshot,
             },
             market=market,
             provider=provider,
+            market_policy=get_market_policy(settings, market),
             auto_add=settings.boxarr_features_auto_add,
             scheduler_enabled=settings.boxarr_scheduler_enabled,
             previous_week=f"{prev_week['year']}W{prev_week['week']:02d}" if prev_week else None,

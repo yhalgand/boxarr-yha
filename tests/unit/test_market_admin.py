@@ -40,7 +40,7 @@ def test_build_market_definition_infers_defaults_for_new_market():
     assert definition["provider_config"] == {"country": "de"}
     assert definition["auto_tag_text"] == "boxarr-de"
     assert definition["tags"] == ["boxarr", "boxarr-de"]
-    assert definition["cleanup_protect_tag"] == "boxarr-keep"
+    assert definition["cleanup_protect_tag"] == "boxarr-protected"
 
 
 def test_build_market_definition_preserves_existing_fields_on_partial_update():
@@ -57,7 +57,7 @@ def test_build_market_definition_preserves_existing_fields_on_partial_update():
             "auto_add_enabled": True,
             "tags": ["boxarr", "boxarr-de"],
             "auto_tag_text": "boxarr-de",
-            "cleanup_protect_tag": "boxarr-keep",
+            "cleanup_protect_tag": "boxarr-protected",
         },
         create=False,
     )
@@ -71,4 +71,4 @@ def test_build_market_definition_preserves_existing_fields_on_partial_update():
     assert definition["auto_add_enabled"] is True
     assert definition["tags"] == ["boxarr", "boxarr-de"]
     assert definition["auto_tag_text"] == "boxarr-de"
-    assert definition["cleanup_protect_tag"] == "boxarr-keep"
+    assert definition["cleanup_protect_tag"] == "boxarr-protected"

@@ -370,6 +370,162 @@
 {% block scripts %}
 <script>
     window.IGNORED_TMDB_IDS = new Set({{ ignored_tmdb_ids | tojson }});
+    window.BOXARR_MARKET_POLICY = {{ market_policy | default({}) | tojson }};
+    window.BOXARR_WEEK_POLICY_SNAPSHOT = {{ week_data.policy_snapshot | default(None) | tojson }};
+
+    function policyEndpoint(path) {
+        const rootPath = '{{ request.scope.get("root_path", "") }}';
+        const market = (window.BOXARR_MARKET || localStorage.getItem('boxarr-market') || 'us').toLowerCase();
+        return `${rootPath}/api/policy/${encodeURIComponent(market)}${path}`;
+    }
+
+    function currentPolicyValues() {
+        const policy = window.BOXARR_MARKET_POLICY || {};
+        const effective = policy.effective || {};
+        return {
+            box_office_fetch_limit: effective.box_office_fetch_limit,
+            maximum_movies_to_add: effective.maximum_movies_to_add,
+            auto_add_enabled: effective.auto_add_enabled,
+            tags: effective.tags,
+            auto_tag_text: effective.auto_tag_text,
+            cleanup_protect_tag: effective.cleanup_protect_tag,
+        };
+    }
+
+    function promptPolicyUpdates() {
+        const current = currentPolicyValues();
+        const fetchLimit = prompt('Fetch top limit', String(current.box_office_fetch_limit ?? ''));
+        if (fetchLimit === null) return null;
+        const addLimit = prompt('Add to Radarr limit', String(current.maximum_movies_to_add ?? ''));
+        if (addLimit === null) return null;
+        const autoAdd = prompt('Auto-add enabled? (yes/no)', current.auto_add_enabled ? 'yes' : 'no');
+        if (autoAdd === null) return null;
+        return {
+            box_office_fetch_limit: fetchLimit === '' ? null : Number(fetchLimit),
+            maximum_movies_to_add: addLimit === '' ? null : Number(addLimit),
+            auto_add_enabled: ['yes', 'y', 'true', '1'].includes(autoAdd.trim().toLowerCase()),
+            tags: current.tags,
+            auto_tag_text: current.auto_tag_text,
+            cleanup_protect_tag: current.cleanup_protect_tag,
+        };
+    }
+
+    async function fetchJson(url, body) {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body || {}),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.detail || data.message || `HTTP ${response.status}`);
+        }
+        return data;
+    }
+
+    async function changePolicy() {
+        const updates = promptPolicyUpdates();
+        if (!updates) return;
+        const data = await fetchJson(policyEndpoint(''), updates).catch(err => {
+            alert(`Policy update failed: ${err.message}`);
+            return null;
+        });
+        if (data) location.reload();
+    }
+
+    async function dryRunImpact() {
+        const updates = promptPolicyUpdates();
+        if (!updates) return;
+        const data = await fetchJson(policyEndpoint('/impact'), updates).catch(err => {
+            alert(`Policy impact failed: ${err.message}`);
+            return null;
+        });
+        if (data) document.getElementById('policy-result').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function applyPolicy() {
+        const updates = promptPolicyUpdates();
+        if (!updates) return;
+        const data = await fetchJson(policyEndpoint('/apply'), updates).catch(err => {
+            alert(`Apply policy failed: ${err.message}`);
+            return null;
+        });
+        if (data) {
+            document.getElementById('policy-result').textContent = JSON.stringify(data, null, 2);
+            location.reload();
+        }
+    }
+
+    async function backfillMissingAdds() {
+        const current = currentPolicyValues();
+        const payload = {
+            maximum_movies_to_add: current.maximum_movies_to_add,
+            box_office_fetch_limit: current.box_office_fetch_limit,
+            auto_add_enabled: current.auto_add_enabled,
+            tags: current.tags,
+            auto_tag_text: current.auto_tag_text,
+            cleanup_protect_tag: current.cleanup_protect_tag,
+            year_from: {{ week_data.year }},
+            week_from: {{ week_data.week }},
+            year_to: {{ week_data.year }},
+            week_to: {{ week_data.week }},
+            all_stored: false,
+            max_weeks: 1,
+        };
+        const dryRun = await fetchJson(policyEndpoint('/backfill-add/dry-run'), payload).catch(err => {
+            alert(`Backfill dry-run failed: ${err.message}`);
+            return null;
+        });
+        if (!dryRun) return;
+        document.getElementById('policy-result').textContent = JSON.stringify(dryRun, null, 2);
+        if (!confirm('Execute backfill add-only now?')) return;
+        const executed = await fetchJson(policyEndpoint('/backfill-add/execute'), payload).catch(err => {
+            alert(`Backfill execute failed: ${err.message}`);
+            return null;
+        });
+        if (executed) document.getElementById('policy-result').textContent = JSON.stringify(executed, null, 2);
+    }
+
+    async function cleanupOutsidePolicy() {
+        const current = currentPolicyValues();
+        const payload = {
+            maximum_movies_to_add: current.maximum_movies_to_add,
+            cleanup_protect_tag: current.cleanup_protect_tag,
+        };
+        const dryRun = await fetchJson(policyEndpoint('/cleanup/dry-run'), payload).catch(err => {
+            alert(`Cleanup dry-run failed: ${err.message}`);
+            return null;
+        });
+        if (!dryRun) return;
+        document.getElementById('policy-result').textContent = JSON.stringify(dryRun, null, 2);
+        if (!confirm('This will delete movies from Radarr and delete files. Type DELETE to continue.') || prompt('Type DELETE to confirm') !== 'DELETE') {
+            return;
+        }
+        const executed = await fetchJson(policyEndpoint('/cleanup/execute'), payload).catch(err => {
+            alert(`Cleanup execute failed: ${err.message}`);
+            return null;
+        });
+        if (executed) document.getElementById('policy-result').textContent = JSON.stringify(executed, null, 2);
+    }
+
+    async function migrateLegacyTags() {
+        const dryRun = await fetchJson('{{ request.scope.get("root_path", "") }}/api/policy/tags/migrate/dry-run', {
+            market: (window.BOXARR_MARKET || 'us').toLowerCase(),
+        }).catch(err => {
+            alert(`Tag migration dry-run failed: ${err.message}`);
+            return null;
+        });
+        if (!dryRun) return;
+        document.getElementById('policy-result').textContent = JSON.stringify(dryRun, null, 2);
+        if (!confirm('Execute safe tag migration now?')) return;
+        const executed = await fetchJson('{{ request.scope.get("root_path", "") }}/api/policy/tags/migrate/execute', {
+            market: (window.BOXARR_MARKET || 'us').toLowerCase(),
+        }).catch(err => {
+            alert(`Tag migration execute failed: ${err.message}`);
+            return null;
+        });
+        if (executed) document.getElementById('policy-result').textContent = JSON.stringify(executed, null, 2);
+    }
 
     async function regenerateWeek(year, week) {
         if (!confirm(`Regenerate data for ${year}W${String(week).padStart(2, '0')}? This will re-fetch box office data and re-match with Radarr.`)) {
@@ -442,6 +598,36 @@
                 🔘 Auto-add <span style="color: var(--warning-color); font-weight: 600;">DISABLED</span> - Movies must be manually added
             {% endif %}
         </div>
+
+        <!-- Current Market Policy -->
+        <div style="margin: 1rem 0; padding: 1rem; background: rgba(14, 165, 233, 0.06); border: 1px solid rgba(14, 165, 233, 0.18); border-radius: 10px;">
+            <div style="display:flex; justify-content:space-between; gap:1rem; flex-wrap:wrap; align-items:center;">
+                <div>
+                    <h3 style="margin:0 0 0.4rem 0;">Current Market Policy</h3>
+                    <div style="font-size:0.95rem; color: var(--text-secondary);">
+                        <strong>{{ market_policy.label }}</strong> • Provider <code>{{ market_policy.provider }}</code>
+                    </div>
+                </div>
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                    <button class="action-btn" onclick="changePolicy()">Change policy</button>
+                    <button class="action-btn" onclick="dryRunImpact()">Dry-run impact</button>
+                    <button class="action-btn" onclick="applyPolicy()">Apply policy to stored weeks</button>
+                    <button class="action-btn" onclick="backfillMissingAdds()">Backfill missing adds</button>
+                    <button class="action-btn cleanup" onclick="cleanupOutsidePolicy()">Cleanup outside policy</button>
+                    <button class="action-btn" onclick="migrateLegacyTags()">Migrate legacy tags</button>
+                </div>
+            </div>
+            <div style="margin-top: 0.9rem; display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:0.75rem;">
+                <div><strong>Fetch top:</strong> {{ market_policy.effective.box_office_fetch_limit }} <span style="color: var(--text-secondary);">({{ market_policy.sources.box_office_fetch_limit }})</span></div>
+                <div><strong>Add to Radarr:</strong> {{ market_policy.effective.maximum_movies_to_add }} <span style="color: var(--text-secondary);">({{ market_policy.sources.maximum_movies_to_add }})</span></div>
+                <div><strong>Auto-add:</strong> {% if market_policy.effective.auto_add_enabled %}enabled{% else %}disabled{% endif %} <span style="color: var(--text-secondary);">({{ market_policy.sources.auto_add_enabled }})</span></div>
+                <div><strong>Tags:</strong> {{ market_policy.effective.tags | join(', ') }} <span style="color: var(--text-secondary);">({{ market_policy.sources.tags }})</span></div>
+                <div><strong>New tags:</strong> added <code>{{ market_policy.tag_policy.added_tag }}</code>, market <code>{{ market_policy.tag_policy.market_tag }}</code>, existing <code>{{ market_policy.tag_policy.existing_tag }}</code></div>
+                <div><strong>Protected tag:</strong> {{ market_policy.effective.cleanup_protect_tag }} <span style="color: var(--text-secondary);">({{ market_policy.sources.cleanup_protect_tag }})</span></div>
+                <div><strong>Policy snapshot:</strong> {% if week_data.policy_snapshot %}present{% else %}legacy/absent{% endif %}</div>
+            </div>
+        </div>
+        <pre id="policy-result" style="margin-top: 0.75rem; white-space: pre-wrap; background: rgba(var(--primary-rgb), 0.04); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(var(--primary-rgb), 0.15); overflow:auto; max-height: 240px;"></pre>
         
         <!-- Summary Stats -->
         <div class="summary">

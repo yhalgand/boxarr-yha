@@ -277,7 +277,8 @@ class AddLimitCleanupService:
         week_to: Optional[int] = None,
         delete_files: bool = True,
         require_boxarr_tag: bool = True,
-        protect_tag: str = "boxarr-keep",
+        protect_tag: str = "boxarr-protected",
+        required_market_tag: Optional[str] = None,
         execute: bool = False,
     ) -> Dict[str, Any]:
         market_value = _normalize_market_selection(market)
@@ -365,6 +366,7 @@ class AddLimitCleanupService:
                 target_add_limit=target_add_limit,
                 require_boxarr_tag=require_boxarr_tag,
                 protect_tag=protect_tag,
+                required_market_tag=required_market_tag,
             )
             if decision is None:
                 continue
@@ -709,6 +711,7 @@ class AddLimitCleanupService:
         target_add_limit: int,
         require_boxarr_tag: bool,
         protect_tag: str,
+        required_market_tag: Optional[str] = None,
     ) -> Optional[CleanupDecision]:
         tag_ids = _movie_tag_ids(movie)
         tag_labels = {
@@ -722,9 +725,10 @@ class AddLimitCleanupService:
         if not protect_label:
             effective = get_effective_market_settings(settings, market)
             protect_label = str(
-                effective.get("effective", {}).get("cleanup_protect_tag", "boxarr-keep")
+                effective.get("effective", {}).get("cleanup_protect_tag", "boxarr-protected")
             ).strip().lower()
-        required_boxarr_label = "boxarr"
+        required_boxarr_labels = {"boxarr", "boxarr-added"}
+        required_market_label = str(required_market_tag or "").strip().lower()
         movie_keys = self._movie_identity_keys(movie)
         radarr_key = self._format_identity_key(("radarr", movie.id)) if movie.id else None
         identity_source = movie_keys[0][0] if movie_keys else None
@@ -780,7 +784,10 @@ class AddLimitCleanupService:
                 estimated_size_bytes=size_on_disk or 0,
             )
 
-        if protect_label and protect_label in tag_labels:
+        protected_labels = {"boxarr-protected", "boxarr-keep"}
+        if protect_label:
+            protected_labels.add(protect_label)
+        if protected_labels & tag_labels:
             return _base_decision(
                 action="skip",
                 reason=f"protected by tag '{protect_tag}'",
@@ -788,7 +795,7 @@ class AddLimitCleanupService:
                 why_not_eligible="protected by tag",
             )
 
-        has_boxarr_tag = required_boxarr_label in tag_labels
+        has_boxarr_tag = bool(required_boxarr_labels & tag_labels)
         if require_boxarr_tag and not has_boxarr_tag:
             return _base_decision(
                 action="skip",
@@ -796,6 +803,31 @@ class AddLimitCleanupService:
                 eligible_key=None,
                 why_not_eligible="missing required boxarr tag",
             )
+
+        if required_market_label and required_market_label != "all":
+            market_labels = {
+                f"boxarr-market-{required_market_label}",
+                f"boxarr-{required_market_label}",
+            }
+            if not (market_labels & tag_labels):
+                return _base_decision(
+                    action="skip",
+                    reason=f"missing required market tag for {required_market_label}",
+                    eligible_key=None,
+                    why_not_eligible="missing required market tag",
+                )
+            other_market_tags = {
+                label
+                for label in tag_labels
+                if label.startswith("boxarr-market-") or label in {"boxarr-us", "boxarr-fr"}
+            } - market_labels
+            if other_market_tags:
+                return _base_decision(
+                    action="skip",
+                    reason="tagged for other markets",
+                    eligible_key=None,
+                    why_not_eligible="tagged for other markets",
+                )
 
         associated = bool(matched_associated_key)
         if not associated:

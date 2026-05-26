@@ -14,6 +14,7 @@ from ...core.market_admin import (
     build_market_definition,
     load_yaml_config,
     normalize_market_key,
+    persist_market_definition,
     save_yaml_config,
 )
 from ...core.market_settings import get_configured_markets, get_effective_market_settings
@@ -177,6 +178,7 @@ async def get_market_configuration():
             "sources": effective.get("sources", {}),
             "global": effective.get("global", {}),
             "configured": effective.get("configured", False),
+            "tag_policy": effective.get("tag_policy", {}),
         }
 
     return {
@@ -197,9 +199,9 @@ async def get_market_configuration():
             "language_filter_mode": current_settings.boxarr_features_auto_add_language_filter_mode,
             "language_whitelist": current_settings.boxarr_features_auto_add_language_whitelist,
             "language_blacklist": current_settings.boxarr_features_auto_add_language_blacklist,
-            "ignore_rereleases": current_settings.boxarr_features_auto_add_ignore_rereleases,
-            "cleanup_protect_tag": "boxarr-keep",
-        },
+        "ignore_rereleases": current_settings.boxarr_features_auto_add_ignore_rereleases,
+        "cleanup_protect_tag": "boxarr-protected",
+    },
         "markets": markets,
     }
 
@@ -233,29 +235,23 @@ def _persist_market_definition(
     create: bool = False,
 ) -> Dict[str, Any]:
     normalized_market = normalize_market_key(market_key)
-    config_path = _resolve_config_path()
-    config_payload = _load_config_payload(config_path)
-    markets_section = _get_market_section(config_payload)
-
     existing_markets = get_configured_markets(settings)
     market_exists = normalized_market in existing_markets
     if create and market_exists:
-        raise HTTPException(status_code=400, detail=f"Market '{normalized_market}' already exists")
+        raise HTTPException(
+            status_code=400, detail=f"Market '{normalized_market}' already exists"
+        )
     if not create and not market_exists:
         raise HTTPException(status_code=404, detail=f"Market '{normalized_market}' not found")
 
-    existing_definition = markets_section.get(normalized_market, {})
-    updated_definition = build_market_definition(
-        normalized_market,
-        request_payload,
-        existing=existing_definition,
-        create=create,
-    )
-    markets_section[normalized_market] = updated_definition
-    config_payload["markets"] = markets_section
-
-    _save_config_payload(config_path, config_payload)
-    Settings.reload_from_file(config_path)
+    try:
+        result = persist_market_definition(
+            normalized_market,
+            request_payload,
+            create=create,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     refreshed_markets = get_configured_markets(settings)
     refreshed_effective = get_effective_market_settings(settings, normalized_market)
@@ -265,7 +261,7 @@ def _persist_market_definition(
         "effective": refreshed_effective.get("effective", {}),
         "sources": refreshed_effective.get("sources", {}),
         "aliases": refreshed_markets[normalized_market].get("aliases", []),
-        "enabled": refreshed_markets[normalized_market].get("enabled", True),
+        "enabled": result.get("enabled", refreshed_markets[normalized_market].get("enabled", True)),
         "configured": refreshed_markets[normalized_market].get("configured", False),
     }
 

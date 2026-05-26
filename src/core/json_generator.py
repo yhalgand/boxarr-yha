@@ -279,12 +279,14 @@ class WeeklyDataGenerator:
             movies_data.append(movie_data)
 
         # Save metadata with full movie data
+        market_policy = get_market_policy(settings, self.market)
         metadata = {
             "generated_at": datetime.now().isoformat(),
             "market": self.market,
             "provider": self.provider,
             "source": MARKET_DEFINITIONS.get(self.market, {}).get("source", "boxofficemojo"),
             "units": MARKET_DEFINITIONS.get(self.market, {}).get("units", "usd"),
+            "policy_snapshot": build_policy_snapshot(market_policy, year, week),
             "year": year,
             "week": week,
             "friday": friday.isoformat(),

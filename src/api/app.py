@@ -18,6 +18,7 @@ from .routes import (
     boxoffice_router,
     config_router,
     movies_router,
+    policy_router,
     scheduler_router,
     web_router,
 )
@@ -70,6 +71,7 @@ def create_app(scheduler: Optional[BoxarrScheduler] = None) -> FastAPI:
     app.include_router(config_router)
     app.include_router(boxoffice_router)
     app.include_router(movies_router)
+    app.include_router(policy_router)
     app.include_router(scheduler_router)
     app.include_router(web_router)
 

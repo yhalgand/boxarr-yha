@@ -66,7 +66,7 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
             "maximum_movies_to_add": 3,
             "auto_tag_text": "boxarr-de",
             "tags": ["boxarr", "boxarr-de"],
-            "cleanup_protect_tag": "boxarr-keep",
+            "cleanup_protect_tag": "boxarr-protected",
         },
     )
     assert create_resp.status_code == 200
@@ -102,7 +102,7 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
             "auto_add_enabled": True,
             "auto_tag_text": "boxarr-de",
             "tags": ["boxarr", "boxarr-de"],
-            "cleanup_protect_tag": "boxarr-keep",
+            "cleanup_protect_tag": "boxarr-protected",
         },
     )
     assert update_resp.status_code == 200
