@@ -6,8 +6,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-from .boxoffice_provider import DEFAULT_MARKET, SUPPORTED_MARKETS, normalize_market
+from .boxoffice_provider import DEFAULT_MARKET, normalize_market
 from .boxoffice_storage import iter_weekly_page_paths
+from .market_settings import get_configured_markets, get_effective_market_settings
 from .ignore_list import IgnoreList
 from .radarr import RadarrMovie, RadarrService, get_all_movies_with_optional_cache_bypass
 from ..utils.config import settings
@@ -280,8 +281,9 @@ class AddLimitCleanupService:
         execute: bool = False,
     ) -> Dict[str, Any]:
         market_value = _normalize_market_selection(market)
+        configured_markets = get_configured_markets(settings)
         selected_markets = (
-            list(SUPPORTED_MARKETS)
+            [key for key, definition in configured_markets.items() if definition.get("enabled", True)]
             if market_value == "all"
             else [normalize_market(market_value)]
         )
@@ -494,11 +496,11 @@ class AddLimitCleanupService:
                         continue
                     records.append(
                         {
-                            "market": market,
-                            "year": int(payload.get("year") or year),
-                            "week": int(payload.get("week") or week),
-                            "movie": movie,
-                        }
+                "market": market,
+                "year": int(payload.get("year") or year),
+                "week": int(payload.get("week") or week),
+                "movie": movie,
+            }
                     )
 
         return records
@@ -717,6 +719,11 @@ class AddLimitCleanupService:
         tag_labels.discard("")
 
         protect_label = str(protect_tag or "").strip().lower()
+        if not protect_label:
+            effective = get_effective_market_settings(settings, market)
+            protect_label = str(
+                effective.get("effective", {}).get("cleanup_protect_tag", "boxarr-keep")
+            ).strip().lower()
         required_boxarr_label = "boxarr"
         movie_keys = self._movie_identity_keys(movie)
         radarr_key = self._format_identity_key(("radarr", movie.id)) if movie.id else None

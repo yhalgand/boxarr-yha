@@ -7,6 +7,7 @@ from ..utils.logger import get_logger
 from .ignore_list import IgnoreList
 from .movie_identity import resolve_movie_identity
 from .matcher import MatchResult
+from .market_settings import get_effective_market_settings
 from .radarr import RadarrService
 from .root_folder_manager import RootFolderManager
 
@@ -37,7 +38,12 @@ def auto_add_missing_movies(
         return []
 
     # Apply limit if configured
-    limit = settings.boxarr_features_auto_add_limit
+    effective_settings = get_effective_market_settings(settings, market)
+    limit = int(
+        effective_settings.get("effective", {}).get(
+            "maximum_movies_to_add", settings.boxarr_features_auto_add_limit
+        )
+    )
     if limit < len(unmatched):
         logger.info(
             f"Limiting auto-add to top {limit} movies (out of {len(unmatched)} unmatched)"

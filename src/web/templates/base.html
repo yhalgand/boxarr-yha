@@ -245,6 +245,7 @@
         window.BOXARR_BASE_PATH = "{{ request.scope.get('root_path', '') }}";
         window.BOXARR_MARKET = "{{ market|default('us') }}";
         window.BOXARR_PROVIDER = "{{ provider|default('mojo_us') }}";
+        window.BOXARR_MARKETS = {{ configured_markets|default({})|tojson }};
     </script>
     <nav class="navbar">
         <div class="navbar-container">
@@ -258,8 +259,9 @@
             </div>
             <div class="navbar-menu">
                 <div class="market-tabs" aria-label="Market selector">
-                    <a href="#" id="marketTabUs" class="market-tab {% if market == 'us' %}active{% endif %}" onclick="setMarketPreference('us'); return false;">US Box Office</a>
-                    <a href="#" id="marketTabFr" class="market-tab {% if market == 'fr' %}active{% endif %}" onclick="setMarketPreference('fr'); return false;">France Box Office</a>
+                    {% for market_key, market_def in configured_markets.items() %}
+                    <a href="#" id="marketTab{{ market_key|upper }}" class="market-tab {% if market == market_key %}active{% endif %}" onclick="setMarketPreference('{{ market_key }}'); return false;">{{ market_def.label }}</a>
+                    {% endfor %}
                 </div>
                 <a href="{{ request.scope.get('root_path', '') }}/overview?market={{ market }}" class="nav-link {% if request.path.endswith('/overview') %}active{% endif %}">Movies</a>
                 <a href="{{ request.scope.get('root_path', '') }}/weeks?market={{ market }}" class="nav-link {% if request.path.endswith('/dashboard') or request.path.endswith('/weeks') %}active{% endif %}">Weeks</a>

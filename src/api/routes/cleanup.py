@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from ...core.boxoffice_provider import DEFAULT_MARKET, normalize_market
 from ...core.cleanup import AddLimitCleanupService
+from ...core.market_settings import get_effective_market_settings
 from ...core.radarr import RadarrService
 from ...utils.config import settings
 from ...utils.logger import get_logger
@@ -56,6 +57,16 @@ def _run_cleanup(request: AddLimitCleanupRequest, execute: bool) -> dict:
         market = _normalize_cleanup_market(request.market)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if market != "all":
+        try:
+            effective = get_effective_market_settings(settings, market)
+            if not request.protect_tag or request.protect_tag == "boxarr-keep":
+                request.protect_tag = str(
+                    effective.get("effective", {}).get("cleanup_protect_tag", request.protect_tag)
+                )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if (
         request.year_from is not None

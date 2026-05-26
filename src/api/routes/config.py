@@ -9,8 +9,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ... import __version__
+from ...core.boxoffice_provider import DEFAULT_MARKET
+from ...core.market_settings import get_configured_markets, get_effective_market_settings
 from ...core.radarr import RadarrService
-from ...core.boxoffice_provider import DEFAULT_MARKET, MARKET_DEFINITIONS
 from ...utils.config import RootFolderConfig, RootFolderMapping, Settings, settings
 from ...utils.logger import get_logger
 
@@ -104,6 +105,7 @@ async def get_root_folder_configuration():
 async def get_configuration():
     """Get current configuration."""
     current_settings = settings
+    configured_markets = get_configured_markets(current_settings)
     return ConfigResponse(
         radarr_url=str(current_settings.radarr_url),
         radarr_api_key="***" if current_settings.radarr_api_key else "",
@@ -114,10 +116,54 @@ async def get_configuration():
             market: {
                 "label": definition["label"],
                 "provider": definition["provider"],
+                "provider_config": definition.get("provider_config", {}),
+                "enabled": definition.get("enabled", True),
             }
-            for market, definition in MARKET_DEFINITIONS.items()
+            for market, definition in configured_markets.items()
         },
     )
+
+
+@router.get("/markets")
+async def get_market_configuration():
+    """Return configured markets, raw overrides, and effective settings."""
+    current_settings = settings
+    configured_markets = get_configured_markets(current_settings)
+    markets: Dict[str, Any] = {}
+    for market_key, definition in configured_markets.items():
+        effective = get_effective_market_settings(current_settings, market_key)
+        markets[market_key] = {
+            "definition": definition,
+            "overrides": effective.get("overrides", {}),
+            "effective": effective.get("effective", {}),
+            "sources": effective.get("sources", {}),
+            "global": effective.get("global", {}),
+            "configured": effective.get("configured", False),
+        }
+
+    return {
+        "global": {
+            "box_office_fetch_limit": current_settings.boxarr_features_box_office_limit,
+            "maximum_movies_to_add": current_settings.boxarr_features_auto_add_limit,
+            "auto_add_enabled": current_settings.boxarr_features_auto_add,
+            "auto_tag_text": current_settings.boxarr_features_auto_tag_text,
+            "tags": ["boxarr", current_settings.boxarr_features_auto_tag_text],
+            "root_folder": str(current_settings.radarr_root_folder),
+            "quality_profile_default": current_settings.radarr_quality_profile_default,
+            "quality_profile_upgrade": current_settings.radarr_quality_profile_upgrade,
+            "minimum_availability_enabled": current_settings.radarr_minimum_availability_enabled,
+            "minimum_availability": current_settings.radarr_minimum_availability.value,
+            "monitor_option": current_settings.radarr_monitor_option.value,
+            "search_on_add": current_settings.radarr_search_for_movie,
+            "language_filter_enabled": current_settings.boxarr_features_auto_add_language_filter_enabled,
+            "language_filter_mode": current_settings.boxarr_features_auto_add_language_filter_mode,
+            "language_whitelist": current_settings.boxarr_features_auto_add_language_whitelist,
+            "language_blacklist": current_settings.boxarr_features_auto_add_language_blacklist,
+            "ignore_rereleases": current_settings.boxarr_features_auto_add_ignore_rereleases,
+            "cleanup_protect_tag": "boxarr-keep",
+        },
+        "markets": markets,
+    }
 
 
 @router.post("/test")
@@ -309,6 +355,17 @@ async def save_configuration(config: SaveConfigRequest):
                 },
             },
         }
+
+        existing_markets = getattr(current_file_settings, "markets", {}) or {}
+        if existing_markets:
+            config_data["markets"] = {
+                market_key: (
+                    market_value.model_dump(exclude_none=True)
+                    if hasattr(market_value, "model_dump")
+                    else dict(market_value)
+                )
+                for market_key, market_value in existing_markets.items()
+            }
 
         # Save to local.yaml
         import yaml

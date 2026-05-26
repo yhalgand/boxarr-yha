@@ -122,9 +122,72 @@
                 </div>
             </div>
 
-            
-
-            
+            <!-- Market Settings Preview -->
+            <div class="form-section">
+                <h2 class="section-title">Market Settings Preview</h2>
+                <p class="text-muted" style="margin-top: -0.5rem; margin-bottom: 1rem;">
+                    Read-only preview of effective market settings. Blank market values inherit from the global settings.
+                </p>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Market</th>
+                                <th>Provider</th>
+                                <th>Enabled</th>
+                                <th>Fetch Limit</th>
+                                <th>Add Limit</th>
+                                <th>Auto-Add</th>
+                                <th>Tags</th>
+                                <th>Cleanup Protect</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for market_key, preview in market_previews.items() %}
+                            {% set effective = preview.effective %}
+                            {% set sources = preview.sources %}
+                            <tr>
+                                <td>
+                                    <strong>{{ preview.definition.label }}</strong><br>
+                                    <small class="text-muted">{{ market_key }}</small>
+                                </td>
+                                <td>
+                                    <code>{{ preview.definition.provider }}</code><br>
+                                    <small class="text-muted">
+                                        {% for cfg_key, cfg_val in preview.definition.provider_config.items() %}
+                                            {{ cfg_key }}={{ cfg_val }}{% if not loop.last %}, {% endif %}
+                                        {% endfor %}
+                                    </small>
+                                </td>
+                                <td>{{ 'Yes' if preview.definition.enabled else 'No' }}</td>
+                                <td>
+                                    {{ effective.box_office_fetch_limit }}
+                                    <span class="version-badge" style="margin-left: 0.35rem; font-size: 0.7rem;">{{ sources.box_office_fetch_limit }}</span>
+                                </td>
+                                <td>
+                                    {{ effective.maximum_movies_to_add }}
+                                    <span class="version-badge" style="margin-left: 0.35rem; font-size: 0.7rem;">{{ sources.maximum_movies_to_add }}</span>
+                                </td>
+                                <td>
+                                    {{ 'Yes' if effective.auto_add_enabled else 'No' }}
+                                    <span class="version-badge" style="margin-left: 0.35rem; font-size: 0.7rem;">{{ sources.auto_add_enabled }}</span>
+                                </td>
+                                <td>
+                                    {% for tag in effective.tags %}
+                                        <code>{{ tag }}</code>{% if not loop.last %}, {% endif %}
+                                    {% endfor %}
+                                    <span class="version-badge" style="margin-left: 0.35rem; font-size: 0.7rem;">{{ sources.tags }}</span>
+                                </td>
+                                <td>
+                                    <code>{{ effective.cleanup_protect_tag }}</code>
+                                    <span class="version-badge" style="margin-left: 0.35rem; font-size: 0.7rem;">{{ sources.cleanup_protect_tag }}</span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
 
             <!-- Automation Settings Section -->
             <div class="form-section">

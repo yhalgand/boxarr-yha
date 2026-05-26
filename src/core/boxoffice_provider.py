@@ -34,6 +34,17 @@ PROVIDER_TO_MARKET: Dict[str, str] = {
 }
 
 
+def _runtime_market_registry() -> Dict[str, Dict[str, object]]:
+    """Return the configured market registry when settings are available."""
+    try:
+        from ..utils.config import settings
+        from .market_settings import get_configured_markets
+
+        return get_configured_markets(settings)
+    except Exception:
+        return {}
+
+
 def normalize_provider(provider: Optional[str]) -> str:
     """Normalize and validate a provider identifier."""
     if provider is None or str(provider).strip() == "":
@@ -42,6 +53,11 @@ def normalize_provider(provider: Optional[str]) -> str:
     normalized = str(provider).strip().lower()
     if normalized in SUPPORTED_PROVIDERS:
         return normalized
+
+    registry = _runtime_market_registry()
+    for definition in registry.values():
+        if str(definition.get("provider", "")).strip().lower() == normalized:
+            return str(definition.get("provider", "")).strip().lower()
 
     raise ValueError(
         f"Unsupported provider '{provider}'. Supported providers: {', '.join(SUPPORTED_PROVIDERS)}"
@@ -54,20 +70,34 @@ def normalize_market(market: Optional[str]) -> str:
         return DEFAULT_MARKET
 
     normalized = str(market).strip().lower()
+    registry = _runtime_market_registry()
+    if normalized in registry:
+        return normalized
     if normalized in SUPPORTED_MARKETS:
         return normalized
 
     if normalized in SUPPORTED_PROVIDERS:
         return PROVIDER_TO_MARKET[normalize_provider(normalized)]
 
+    for market_key, definition in registry.items():
+        provider = str(definition.get("provider", "")).strip().lower()
+        if provider and provider == normalized:
+            return market_key
+
+    supported_markets = sorted(set(SUPPORTED_MARKETS) | set(registry.keys()))
     raise ValueError(
-        f"Unsupported market '{market}'. Supported markets: {', '.join(SUPPORTED_MARKETS)}"
+        f"Unsupported market '{market}'. Supported markets: {', '.join(supported_markets)}"
     )
 
 
 def provider_for_market(market: Optional[str]) -> str:
     """Map a market identifier to a provider identifier."""
     market_key = normalize_market(market)
+    registry = _runtime_market_registry()
+    if market_key in registry:
+        provider = str(registry[market_key].get("provider", "")).strip().lower()
+        if provider:
+            return provider
     return MARKET_TO_PROVIDER[market_key]
 
 
@@ -86,6 +116,11 @@ def market_for_provider(provider: Optional[str]) -> str:
     if normalized_candidate in SUPPORTED_PROVIDERS:
         return PROVIDER_TO_MARKET[normalize_provider(normalized_candidate)]
 
+    registry = _runtime_market_registry()
+    for market_key, definition in registry.items():
+        if str(definition.get("provider", "")).strip().lower() == normalized_candidate:
+            return market_key
+
     if normalized_candidate in SUPPORTED_MARKETS:
         return normalize_market(normalized_candidate)
 
@@ -102,6 +137,9 @@ def market_from_provider(provider: Optional[str]) -> str:
 def market_label(market: Optional[str]) -> str:
     """Return the display label for a market."""
     market_key = normalize_market(market)
+    registry = _runtime_market_registry()
+    if market_key in registry and registry[market_key].get("label"):
+        return str(registry[market_key]["label"])
     return MARKET_DEFINITIONS[market_key]["label"]
 
 

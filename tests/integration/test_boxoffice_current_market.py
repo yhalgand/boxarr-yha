@@ -76,3 +76,16 @@ def test_current_boxoffice_route_uses_requested_market(tmp_path, monkeypatch):
     assert data[0]["total_gross"] == 3449941
     assert data[0]["weeks_in_release"] == 4
     assert data[0]["theater_count"] == 967
+
+
+def test_current_boxoffice_route_rejects_unknown_market(tmp_path, monkeypatch):
+    config_path = _seed_config(tmp_path)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.get("/api/boxoffice/current?market=bogus")
+    assert resp.status_code == 400
+    assert "Unsupported market" in resp.json()["detail"]

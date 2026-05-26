@@ -126,3 +126,67 @@ def test_save_should_preserve_existing_mappings_when_feature_not_in_use(
         current.get("radarr", {}).get("root_folder_config", {}).get("mappings", [])
     )
     assert mappings and mappings[0].get("root_folder") == "/movies/horror"
+
+
+def test_save_should_preserve_existing_markets_section(tmp_path, monkeypatch):
+    """Saving global settings must keep the markets registry intact."""
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+
+    cfg = {
+        "radarr": {
+            "url": "http://localhost:7878",
+            "api_key": "test-key",
+            "root_folder": "/movies",
+            "quality_profile_default": "HD-1080p",
+        },
+        "boxarr": {
+            "scheduler": {"enabled": False, "cron": "0 23 * * 1"},
+            "features": {"auto_add": False, "quality_upgrade": True},
+            "ui": {"theme": "light"},
+        },
+        "markets": {
+            "us": {
+                "label": "US Box Office",
+                "provider": "mojo_us",
+                "provider_config": {"area": "us"},
+                "enabled": True,
+                "maximum_movies_to_add": 3,
+            }
+        },
+    }
+    (tmp_path / "local.yaml").write_text(yaml.safe_dump(cfg))
+
+    import src.api.routes.config as cfg_routes
+
+    monkeypatch.setattr(cfg_routes, "RadarrService", _FakeRadarrService)
+
+    app = create_app()
+    client = TestClient(app)
+
+    payload = {
+        "radarr_url": "http://localhost:7878",
+        "radarr_api_key": "test-key",
+        "radarr_root_folder": "/movies",
+        "radarr_quality_profile_default": "HD-1080p",
+        "radarr_quality_profile_upgrade": "",
+        "boxarr_scheduler_enabled": False,
+        "boxarr_scheduler_cron": "0 23 * * 1",
+        "boxarr_features_auto_add": False,
+        "boxarr_features_quality_upgrade": True,
+        "boxarr_features_auto_add_limit": 10,
+        "boxarr_features_auto_add_genre_filter_enabled": False,
+        "boxarr_features_auto_add_genre_filter_mode": "blacklist",
+        "boxarr_features_auto_add_genre_whitelist": [],
+        "boxarr_features_auto_add_genre_blacklist": [],
+        "boxarr_features_auto_add_rating_filter_enabled": False,
+        "boxarr_features_auto_add_rating_whitelist": [],
+        "boxarr_ui_theme": "light",
+        "radarr_root_folder_config": {"enabled": False, "mappings": []},
+    }
+
+    resp = client.post("/api/config/save", json=payload)
+    assert resp.status_code == 200
+
+    saved = yaml.safe_load((tmp_path / "local.yaml").read_text()) or {}
+    assert "markets" in saved
+    assert saved["markets"]["us"]["maximum_movies_to_add"] == 3

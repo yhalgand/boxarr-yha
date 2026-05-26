@@ -1225,8 +1225,9 @@
                 <div class="cleanup-field">
                     <label for="cleanupMarket">Market</label>
                     <select id="cleanupMarket">
-                        <option value="us" {% if market == 'us' %}selected{% endif %}>US</option>
-                        <option value="fr" {% if market == 'fr' %}selected{% endif %}>FR</option>
+                        {% for market_key, market_def in configured_markets.items() %}
+                        <option value="{{ market_key }}" {% if market == market_key %}selected{% endif %}>{{ market_def.label }}</option>
+                        {% endfor %}
                         <option value="all">All markets</option>
                     </select>
                 </div>

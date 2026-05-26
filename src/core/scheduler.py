@@ -24,6 +24,7 @@ from .boxoffice_provider import (
     normalize_provider,
     provider_for_market,
 )
+from .market_settings import get_effective_market_settings
 from .boxoffice_storage import (
     iter_history_paths,
     market_history_dir,
@@ -174,6 +175,7 @@ class BoxarrScheduler:
                 f"Starting scheduled box office update for previous week (market={market}, provider={provider})"
             )
         start_time = datetime.now()
+        effective_market_settings = get_effective_market_settings(settings, market)
 
         try:
             # Initialize services if needed
@@ -197,7 +199,12 @@ class BoxarrScheduler:
                 )
 
             # Fetch box office movies
-            limit = settings.boxarr_features_box_office_limit
+            limit = int(
+                effective_market_settings.get("effective", {}).get(
+                    "box_office_fetch_limit",
+                    settings.boxarr_features_box_office_limit,
+                )
+            )
             box_office_movies = await self._run_in_executor(
                 self.boxoffice_service.fetch_weekend_box_office,
                 actual_year,
@@ -219,7 +226,11 @@ class BoxarrScheduler:
 
             # Auto-add missing movies to Radarr with default profile (if enabled)
             added_movies = []
-            if settings.boxarr_features_auto_add:
+            if bool(
+                effective_market_settings.get("effective", {}).get(
+                    "auto_add_enabled", settings.boxarr_features_auto_add
+                )
+            ):
                 logger.info("Auto-add is enabled, adding missing movies to Radarr")
                 added_movies = await self._auto_add_missing_movies(
                     match_results, actual_year, market=market

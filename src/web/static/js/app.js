@@ -8,18 +8,49 @@ const BASE_PATH = window.BOXARR_BASE_PATH || '';
 const DEFAULT_MARKET = String(window.BOXARR_MARKET || 'us').toLowerCase();
 const DEFAULT_PROVIDER = window.BOXARR_PROVIDER || 'mojo_us';
 
+function getConfiguredMarkets() {
+    const markets = window.BOXARR_MARKETS || {};
+    return markets && typeof markets === 'object' ? markets : {};
+}
+
+function getMarketDefinition(market) {
+    const normalized = String(market || '').trim().toLowerCase();
+    const markets = getConfiguredMarkets();
+    return markets[normalized] || null;
+}
+
 function providerForMarket(market) {
+    const definition = getMarketDefinition(market);
+    if (definition && definition.provider) {
+        return String(definition.provider).toLowerCase();
+    }
     return String(market || 'us').toLowerCase() === 'fr' ? 'jpboxoffice_fr' : 'mojo_us';
 }
 
 function marketForProvider(provider) {
-    return String(provider || 'mojo_us').toLowerCase() === 'jpboxoffice_fr' ? 'fr' : 'us';
+    const normalizedProvider = String(provider || 'mojo_us').toLowerCase();
+    const markets = getConfiguredMarkets();
+    for (const [marketKey, definition] of Object.entries(markets)) {
+        if (String(definition?.provider || '').toLowerCase() === normalizedProvider) {
+            return marketKey;
+        }
+    }
+    return normalizedProvider === 'jpboxoffice_fr' ? 'fr' : 'us';
 }
 
 function normalizeMarket(market) {
     const value = String(market || '').trim().toLowerCase();
+    const markets = getConfiguredMarkets();
+    if (markets[value]) {
+        return value;
+    }
     if (value === 'fr' || value === 'us') {
         return value;
+    }
+    for (const [marketKey, definition] of Object.entries(markets)) {
+        if (String(definition?.provider || '').toLowerCase() === value) {
+            return marketKey;
+        }
     }
     return DEFAULT_MARKET;
 }

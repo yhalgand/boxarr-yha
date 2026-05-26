@@ -57,6 +57,77 @@ class RootFolderConfig(BaseModel):
     )
 
 
+class MarketConfig(BaseModel):
+    """Per-market configuration overrides and provider wiring."""
+
+    label: str = Field(description="Display label for the market")
+    provider: str = Field(description="Provider key for the market")
+    provider_config: Dict[str, Any] = Field(
+        default_factory=dict, description="Provider-specific configuration"
+    )
+    enabled: bool = Field(default=True, description="Whether the market is enabled")
+    box_office_fetch_limit: Optional[int] = Field(
+        default=None, description="Override for box office fetch limit"
+    )
+    maximum_movies_to_add: Optional[int] = Field(
+        default=None, description="Override for maximum movies to add"
+    )
+    auto_add_enabled: Optional[bool] = Field(
+        default=None, description="Override for auto-add enabled"
+    )
+    auto_tag_text: Optional[str] = Field(
+        default=None, description="Override for Radarr tag text"
+    )
+    tags: Optional[List[str]] = Field(
+        default=None, description="Override for resolved Radarr tag labels"
+    )
+    root_folder: Optional[str] = Field(
+        default=None, description="Override for Radarr root folder"
+    )
+    quality_profile_default: Optional[str] = Field(
+        default=None, description="Override for default quality profile"
+    )
+    quality_profile_upgrade: Optional[str] = Field(
+        default=None, description="Override for upgrade quality profile"
+    )
+    minimum_availability_enabled: Optional[bool] = Field(
+        default=None, description="Override for minimum availability toggle"
+    )
+    minimum_availability: Optional[str] = Field(
+        default=None, description="Override for minimum availability value"
+    )
+    monitor_option: Optional[str] = Field(
+        default=None, description="Override for Radarr monitor option"
+    )
+    search_on_add: Optional[bool] = Field(
+        default=None, description="Override for search on add"
+    )
+    language_filter_enabled: Optional[bool] = Field(
+        default=None, description="Override for language filter toggle"
+    )
+    language_filter_mode: Optional[str] = Field(
+        default=None, description="Override for language filter mode"
+    )
+    language_whitelist: Optional[List[str]] = Field(
+        default=None, description="Override for allowed languages"
+    )
+    language_blacklist: Optional[List[str]] = Field(
+        default=None, description="Override for blocked languages"
+    )
+    ignore_rereleases: Optional[bool] = Field(
+        default=None, description="Override for rerelease filtering"
+    )
+    cleanup_protect_tag: Optional[str] = Field(
+        default=None, description="Override for cleanup protect tag"
+    )
+    scheduler_enabled: Optional[bool] = Field(
+        default=None, description="Override for market scheduler enablement"
+    )
+    scheduler_cron: Optional[str] = Field(
+        default=None, description="Override for market scheduler cron"
+    )
+
+
 class Settings(BaseSettings):
     """Application settings with environment variable support."""
 
@@ -232,6 +303,11 @@ class Settings(BaseSettings):
     boxarr_features_auto_add_language_blacklist: List[str] = Field(
         default_factory=list,
         description="Languages to exclude (blacklist mode)",
+    )
+
+    # Per-market configuration overrides
+    markets: Dict[str, MarketConfig] = Field(
+        default_factory=dict, description="Configured markets"
     )
 
     # Data Configuration
@@ -439,6 +515,19 @@ class Settings(BaseSettings):
                             attr_name = f"boxarr_{key}"
                             if hasattr(self, attr_name):
                                 _safe_setattr(attr_name, value)
+                elif section == "markets" and isinstance(values, dict):
+                    parsed_markets: Dict[str, MarketConfig] = {}
+                    for market_key, market_value in values.items():
+                        if not isinstance(market_value, dict):
+                            continue
+                        try:
+                            parsed_markets[str(market_key).strip().lower()] = MarketConfig(
+                                **market_value
+                            )
+                        except Exception:
+                            # Ignore malformed market entries so legacy configs keep loading.
+                            continue
+                    _safe_setattr("markets", parsed_markets)
                 else:
                     # Top-level attributes (like log_level)
                     if hasattr(self, section):
@@ -502,18 +591,17 @@ class Settings(BaseSettings):
         (self.boxarr_data_directory / "history").mkdir(parents=True, exist_ok=True)
         (self.boxarr_data_directory / "logs").mkdir(parents=True, exist_ok=True)
         (self.boxarr_data_directory / "weekly_pages").mkdir(parents=True, exist_ok=True)
-        (self.boxarr_data_directory / "weekly_pages" / "us").mkdir(
-            parents=True, exist_ok=True
+        market_keys = {"us", "fr"}
+        market_keys.update(
+            str(market_key).strip().lower() for market_key in self.markets.keys()
         )
-        (self.boxarr_data_directory / "weekly_pages" / "fr").mkdir(
-            parents=True, exist_ok=True
-        )
-        (self.boxarr_data_directory / "history" / "us").mkdir(
-            parents=True, exist_ok=True
-        )
-        (self.boxarr_data_directory / "history" / "fr").mkdir(
-            parents=True, exist_ok=True
-        )
+        for market_key in sorted(market_keys):
+            (self.boxarr_data_directory / "weekly_pages" / market_key).mkdir(
+                parents=True, exist_ok=True
+            )
+            (self.boxarr_data_directory / "history" / market_key).mkdir(
+                parents=True, exist_ok=True
+            )
 
     def to_dict(self, include_sensitive: bool = False) -> Dict:
         """Export settings as dictionary."""

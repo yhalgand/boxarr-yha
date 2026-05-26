@@ -10,13 +10,12 @@ from pydantic import BaseModel
 from ...core.boxoffice import BoxOfficeService
 from ...core.boxoffice_provider import (
     DEFAULT_MARKET,
-    DEFAULT_PROVIDER,
     market_for_provider,
     normalize_market,
-    normalize_provider,
     provider_for_market,
 )
 from ...core.boxoffice_storage import resolve_weekly_page_path
+from ...core.market_settings import get_effective_market_settings
 from ...core.exceptions import BoxOfficeError
 from ...core.matcher import MovieMatcher
 from ...core.radarr import RadarrService
@@ -108,9 +107,16 @@ async def get_current_box_office(
             market = market_for_provider(provider)
         market = normalize_market(market)
         provider = provider_for_market(market)
+        market_effective = get_effective_market_settings(settings, market)
         # Get current week's box office
         boxoffice_service = BoxOfficeService(market=market)
-        movies = boxoffice_service.get_current_week_movies()
+        movies = boxoffice_service.get_current_week_movies(
+            limit=int(
+                market_effective.get("effective", {}).get(
+                    "box_office_fetch_limit", settings.boxarr_features_box_office_limit
+                )
+            )
+        )
 
         # Match with Radarr if configured
         results = []
@@ -194,6 +200,7 @@ async def get_historical_box_office(
         if provider and market == DEFAULT_MARKET:
             market = market_for_provider(provider)
         market = normalize_market(market)
+        market_effective = get_effective_market_settings(settings, market)
         # Validate year and week
         if year < 1982 or year > datetime.now().year:
             raise HTTPException(status_code=400, detail="Invalid year")
@@ -238,7 +245,15 @@ async def get_historical_box_office(
 
         # Fallback to live provider only if no stored file exists.
         boxoffice_service = BoxOfficeService(market=market)
-        movies = boxoffice_service.fetch_weekend_box_office(year, week)
+        movies = boxoffice_service.fetch_weekend_box_office(
+            year,
+            week,
+            limit=int(
+                market_effective.get("effective", {}).get(
+                    "box_office_fetch_limit", settings.boxarr_features_box_office_limit
+                )
+            ),
+        )
         return [
             {
                 "rank": movie.rank,

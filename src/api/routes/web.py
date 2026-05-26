@@ -14,18 +14,18 @@ from pydantic import BaseModel
 from ... import __version__
 from ...core.boxoffice_provider import (
     DEFAULT_MARKET,
-    DEFAULT_PROVIDER,
-    MARKET_DEFINITIONS,
     market_for_provider,
-    market_from_provider,
-    market_label,
     normalize_market,
-    normalize_provider,
     provider_for_market,
 )
 from ...core.boxoffice_storage import (
     iter_weekly_page_paths,
     resolve_weekly_page_path,
+)
+from ...core.market_settings import (
+    get_configured_markets,
+    get_effective_market_settings,
+    get_market_definition,
 )
 from ...core.ignore_list import IgnoreList
 from ...core.models import MovieStatus
@@ -68,10 +68,10 @@ def get_template_context(request: Request, **kwargs) -> dict:
         "market": kwargs.get("market", DEFAULT_MARKET),
         "provider": kwargs.get("provider")
         or provider_for_market(kwargs.get("market", DEFAULT_MARKET)),
-        "market_definition": MARKET_DEFINITIONS.get(
-            normalize_market(kwargs.get("market", DEFAULT_MARKET)),
-            MARKET_DEFINITIONS[DEFAULT_MARKET],
-        ),
+        "configured_markets": kwargs.get("configured_markets")
+        or get_configured_markets(settings),
+        "market_definition": kwargs.get("market_definition")
+        or get_market_definition(settings, kwargs.get("market", DEFAULT_MARKET)),
     }
     context.update(kwargs)
     return context
@@ -216,6 +216,12 @@ async def movie_overview_page(request: Request):
     # Get query parameters for filtering
     market = _selected_market(request)
     provider = provider_for_market(market)
+    configured_markets = get_configured_markets(settings)
+    market_settings_preview = get_effective_market_settings(settings, market)
+    market_previews = {
+        market_key: get_effective_market_settings(settings, market_key)
+        for market_key in configured_markets.keys()
+    }
 
     page = int(request.query_params.get("page", 1))
     per_page = int(request.query_params.get("per_page", 50))
@@ -349,6 +355,8 @@ async def movie_overview_page(request: Request):
             search_query=search_query,
             market=market,
             provider=provider,
+            configured_markets=configured_markets,
+            market_settings_preview=market_settings_preview,
             # Features
             auto_add=settings.boxarr_features_auto_add,
             quality_upgrade=settings.boxarr_features_quality_upgrade,
@@ -373,6 +381,8 @@ async def dashboard_page(request: Request):
     # Get query parameters for pagination and filtering
     market = _selected_market(request)
     provider = provider_for_market(market)
+    configured_markets = get_configured_markets(settings)
+    market_settings_preview = get_effective_market_settings(settings, market)
 
     page = int(request.query_params.get("page", 1))
     per_page = int(request.query_params.get("per_page", 10))
@@ -503,6 +513,9 @@ async def dashboard_page(request: Request):
             total_weeks=total_weeks,
             market=market,
             provider=provider,
+            configured_markets=configured_markets,
+            market_settings_preview=market_settings_preview,
+            market_previews=market_previews,
             radarr_configured=bool(settings.radarr_api_key),
             scheduler_enabled=settings.boxarr_scheduler_enabled,
             auto_add=settings.boxarr_features_auto_add,
@@ -532,6 +545,8 @@ async def setup_page(request: Request):
 
     market = _selected_market(request)
     provider = provider_for_market(market)
+    configured_markets = get_configured_markets(settings)
+    market_settings_preview = get_effective_market_settings(settings, market)
     # Parse current cron for display
     cron = settings.boxarr_scheduler_cron
     import re
@@ -567,6 +582,8 @@ async def setup_page(request: Request):
             request,
             market=market,
             provider=provider,
+            configured_markets=configured_markets,
+            market_settings_preview=market_settings_preview,
             radarr_configured=bool(settings.radarr_api_key),
             is_configured=bool(settings.radarr_api_key),
             # Current settings for prefilling
