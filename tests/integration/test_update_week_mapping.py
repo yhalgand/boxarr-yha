@@ -214,3 +214,4 @@ def test_update_week_fr_uses_provider_wiring(tmp_path, monkeypatch):
     assert payload["movies"][0]["weeks_released"] == 2
     assert payload["movies"][0]["weeks_in_release"] == 2
     assert payload["movies"][0]["theater_count"] == 789
+    assert payload["policy_snapshot"]["tag_policy_used"]["added_tag"] == "boxarr-added"

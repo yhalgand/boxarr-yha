@@ -79,6 +79,30 @@ def _movie_tag_ids(movie: RadarrMovie) -> Set[int]:
     }
 
 
+def _normalize_tag_label(label: Optional[str]) -> str:
+    return str(label or "").strip().lower()
+
+
+def _market_tag_aliases(market: str) -> Set[str]:
+    market_key = _normalize_market_selection(market)
+    if market_key == "all":
+        return set()
+    aliases = {f"boxarr-market-{market_key}"}
+    if market_key in {"us", "fr"}:
+        aliases.add(f"boxarr-{market_key}")
+    return aliases
+
+
+def _all_market_tag_aliases() -> Set[str]:
+    configured_markets = get_configured_markets(settings)
+    aliases: Set[str] = set()
+    for market_key in configured_markets.keys():
+        aliases.add(f"boxarr-market-{market_key}")
+        if market_key in {"us", "fr"}:
+            aliases.add(f"boxarr-{market_key}")
+    return aliases
+
+
 def _movie_original_language(movie_info: Dict[str, Any]) -> Optional[str]:
     value = movie_info.get("originalLanguage")
     if isinstance(value, dict):
@@ -142,6 +166,7 @@ class CleanupDecision:
     best_rank: Optional[int] = None
     eligible_under_target_limit: bool = False
     safe_to_delete: bool = False
+    safe_to_detach: bool = False
     unsafe_to_delete: bool = False
     unsafe_reason: Optional[str] = None
     estimated_size_bytes: int = 0
@@ -176,6 +201,7 @@ class CleanupDecision:
             "best_rank": self.best_rank,
             "eligible_under_target_limit": self.eligible_under_target_limit,
             "safe_to_delete": self.safe_to_delete,
+            "safe_to_detach": self.safe_to_detach,
             "unsafe_to_delete": self.unsafe_to_delete,
             "unsafe_reason": self.unsafe_reason,
             "estimated_size_bytes": self.estimated_size_bytes,
@@ -201,7 +227,12 @@ class CleanupReport:
     eligible_count: int = 0
     associated_count: int = 0
     candidates: List[CleanupDecision] = field(default_factory=list)
+    would_delete: List[CleanupDecision] = field(default_factory=list)
+    would_detach_market_tag_only: List[CleanupDecision] = field(default_factory=list)
+    protected: List[CleanupDecision] = field(default_factory=list)
+    unsafe: List[CleanupDecision] = field(default_factory=list)
     deleted: List[CleanupDecision] = field(default_factory=list)
+    detached: List[CleanupDecision] = field(default_factory=list)
     skipped: List[CleanupDecision] = field(default_factory=list)
     errors: List[Dict[str, Any]] = field(default_factory=list)
     estimated_size_deleted: int = 0
@@ -224,7 +255,13 @@ class CleanupReport:
                 "considered_total": self.considered_total,
                 "eligible_count": self.eligible_count,
                 "associated_count": self.associated_count,
-                "candidates": [item.to_dict() for item in self.candidates],
+                "candidates": [item.to_dict() for item in self.would_delete],
+                "would_delete": [item.to_dict() for item in self.would_delete],
+                "would_detach_market_tag_only": [
+                    item.to_dict() for item in self.would_detach_market_tag_only
+                ],
+                "protected": [item.to_dict() for item in self.protected],
+                "unsafe": [item.to_dict() for item in self.unsafe],
                 "skipped": [item.to_dict() for item in self.skipped],
                 "estimated_size_to_delete": self.estimated_size_deleted,
             }
@@ -243,7 +280,14 @@ class CleanupReport:
             "considered_total": self.considered_total,
             "eligible_count": self.eligible_count,
             "associated_count": self.associated_count,
+            "would_delete": [item.to_dict() for item in self.would_delete],
+            "would_detach_market_tag_only": [
+                item.to_dict() for item in self.would_detach_market_tag_only
+            ],
             "deleted": [item.to_dict() for item in self.deleted],
+            "detached": [item.to_dict() for item in self.detached],
+            "protected": [item.to_dict() for item in self.protected],
+            "unsafe": [item.to_dict() for item in self.unsafe],
             "skipped": [item.to_dict() for item in self.skipped],
             "errors": self.errors,
             "estimated_size_deleted": self.estimated_size_deleted,
@@ -322,8 +366,6 @@ class AddLimitCleanupService:
         for record in weekly_records:
             stored_movie = record["movie"]
             rank = int(stored_movie.get("rank", 0) or 0)
-            if rank <= 0 or rank > target_add_limit:
-                continue
 
             tmdb_id = self._safe_int(stored_movie.get("tmdb_id"))
             radarr_id = self._safe_int(stored_movie.get("radarr_id"))
@@ -333,6 +375,9 @@ class AddLimitCleanupService:
                 known_associated_ids.add(radarr_id)
             for key in self._movie_keys_from_stored_movie(stored_movie):
                 known_associated_keys.add(key)
+
+            if rank <= 0 or rank > target_add_limit:
+                continue
 
             movie_info = self._resolve_movie_info(stored_movie)
             if not movie_info:
@@ -352,8 +397,10 @@ class AddLimitCleanupService:
 
         report.eligible_count = len(eligible_keys)
         report.associated_count = len(known_associated_keys)
+        all_market_tag_labels = _all_market_tag_aliases()
+        current_market_tag_labels = _market_tag_aliases(market_value)
 
-        candidates: List[CleanupDecision] = []
+        decisions: List[CleanupDecision] = []
         for movie in sorted(self._all_radarr_movies(), key=lambda item: item.id):
             decision = self._evaluate_radarr_movie_for_cleanup(
                 movie,
@@ -367,22 +414,25 @@ class AddLimitCleanupService:
                 require_boxarr_tag=require_boxarr_tag,
                 protect_tag=protect_tag,
                 required_market_tag=required_market_tag,
+                current_market_tag_labels=current_market_tag_labels,
+                all_market_tag_labels=all_market_tag_labels,
             )
             if decision is None:
                 continue
-            candidates.append(decision)
+            decisions.append(decision)
 
-        report.candidates = [decision for decision in candidates if decision.safe_to_delete]
-        delete_candidates = [decision for decision in candidates if decision.safe_to_delete]
+        report.candidates = [decision for decision in decisions if decision.action == "delete"]
+        report.would_delete = [decision for decision in decisions if decision.action == "delete"]
+        report.would_detach_market_tag_only = [
+            decision for decision in decisions if decision.action == "detach"
+        ]
+        report.protected = [decision for decision in decisions if decision.action == "protected"]
+        report.unsafe = [decision for decision in decisions if decision.action == "unsafe"]
         report.estimated_size_deleted = sum(
-            item.estimated_size_bytes for item in delete_candidates
+            item.estimated_size_bytes for item in report.would_delete
         )
 
-        for decision in candidates:
-            if not decision.safe_to_delete:
-                report.skipped.append(decision)
-                continue
-
+        for decision in report.would_delete:
             if execute:
                 try:
                     response = self.radarr_service.delete_movie(
@@ -409,6 +459,29 @@ class AddLimitCleanupService:
                             "error": str(exc),
                         }
                     )
+
+        for decision in report.would_detach_market_tag_only:
+            if execute:
+                try:
+                    self._detach_market_tag(decision, market_value)
+                    decision.action = "detached"
+                    report.detached.append(decision)
+                except Exception as exc:
+                    decision.action = "error"
+                    decision.reason = f"Radarr tag update failed: {exc}"
+                    report.errors.append(
+                        {
+                            "title": decision.title,
+                            "radarr_id": decision.radarr_id,
+                            "tmdb_id": decision.tmdb_id,
+                            "error": str(exc),
+                        }
+                    )
+
+        for decision in decisions:
+            if decision.action in {"delete", "detach", "protected", "unsafe", "error"}:
+                continue
+            report.skipped.append(decision)
         if execute:
             # In execute mode, report.deleted contains the successful deletions.
             # Skipped items are already captured, and errors are recorded separately.
@@ -712,6 +785,8 @@ class AddLimitCleanupService:
         require_boxarr_tag: bool,
         protect_tag: str,
         required_market_tag: Optional[str] = None,
+        current_market_tag_labels: Optional[Set[str]] = None,
+        all_market_tag_labels: Optional[Set[str]] = None,
     ) -> Optional[CleanupDecision]:
         tag_ids = _movie_tag_ids(movie)
         tag_labels = {
@@ -720,6 +795,7 @@ class AddLimitCleanupService:
             if tag_id in self._tag_labels_by_id
         }
         tag_labels.discard("")
+        tag_labels = {_normalize_tag_label(label) for label in tag_labels if label}
 
         protect_label = str(protect_tag or "").strip().lower()
         if not protect_label:
@@ -727,7 +803,8 @@ class AddLimitCleanupService:
             protect_label = str(
                 effective.get("effective", {}).get("cleanup_protect_tag", "boxarr-protected")
             ).strip().lower()
-        required_boxarr_labels = {"boxarr", "boxarr-added"}
+        required_boxarr_labels = {"boxarr-added"}
+        legacy_boxarr_labels = {"boxarr"}
         required_market_label = str(required_market_tag or "").strip().lower()
         movie_keys = self._movie_identity_keys(movie)
         radarr_key = self._format_identity_key(("radarr", movie.id)) if movie.id else None
@@ -779,6 +856,7 @@ class AddLimitCleanupService:
                 best_rank=best_rank,
                 eligible_under_target_limit=eligible_under_target_limit,
                 safe_to_delete=safe_to_delete,
+                safe_to_detach=False,
                 unsafe_to_delete=not safe_to_delete,
                 unsafe_reason=unsafe_reason,
                 estimated_size_bytes=size_on_disk or 0,
@@ -789,44 +867,38 @@ class AddLimitCleanupService:
             protected_labels.add(protect_label)
         if protected_labels & tag_labels:
             return _base_decision(
-                action="skip",
+                action="protected",
                 reason=f"protected by tag '{protect_tag}'",
                 eligible_key=None,
                 why_not_eligible="protected by tag",
             )
 
-        has_boxarr_tag = bool(required_boxarr_labels & tag_labels)
-        if require_boxarr_tag and not has_boxarr_tag:
+        has_boxarr_added = "boxarr-added" in tag_labels
+        has_legacy_boxarr = bool(legacy_boxarr_labels & tag_labels)
+        if require_boxarr_tag and not has_boxarr_added:
             return _base_decision(
                 action="skip",
-                reason="missing required boxarr tag",
+                reason=(
+                    "legacy boxarr tag requires migration"
+                    if has_legacy_boxarr
+                    else "missing required boxarr-added tag"
+                ),
                 eligible_key=None,
-                why_not_eligible="missing required boxarr tag",
+                why_not_eligible=(
+                    "legacy boxarr tag requires migration"
+                    if has_legacy_boxarr
+                    else "missing required boxarr-added tag"
+                ),
             )
 
         if required_market_label and required_market_label != "all":
-            market_labels = {
-                f"boxarr-market-{required_market_label}",
-                f"boxarr-{required_market_label}",
-            }
+            market_labels = _market_tag_aliases(required_market_label)
             if not (market_labels & tag_labels):
                 return _base_decision(
                     action="skip",
                     reason=f"missing required market tag for {required_market_label}",
                     eligible_key=None,
                     why_not_eligible="missing required market tag",
-                )
-            other_market_tags = {
-                label
-                for label in tag_labels
-                if label.startswith("boxarr-market-") or label in {"boxarr-us", "boxarr-fr"}
-            } - market_labels
-            if other_market_tags:
-                return _base_decision(
-                    action="skip",
-                    reason="tagged for other markets",
-                    eligible_key=None,
-                    why_not_eligible="tagged for other markets",
                 )
 
         associated = bool(matched_associated_key)
@@ -854,10 +926,45 @@ class AddLimitCleanupService:
                 eligible_key=self._format_identity_key(matched_eligible_key),
             )
 
+        current_market_labels = current_market_tag_labels or _market_tag_aliases(market)
+        all_market_labels = all_market_tag_labels or _all_market_tag_aliases()
+        current_tags_present = sorted(current_market_labels & tag_labels)
+        other_market_tags = sorted((all_market_labels & tag_labels) - current_market_labels)
+
+        if current_tags_present and other_market_tags:
+            return _base_decision(
+                action="detach",
+                reason=(
+                    "tagged for multiple markets; detach current market tag only"
+                ),
+                why_not_eligible="tagged for multiple markets",
+                safe_to_delete=False,
+                safe_to_detach=True,
+            )
+
+        if not current_tags_present:
+            if has_legacy_boxarr:
+                return _base_decision(
+                    action="skip",
+                    reason="legacy boxarr tag requires migration",
+                    why_not_eligible="legacy boxarr tag requires migration",
+                )
+            if other_market_tags:
+                return _base_decision(
+                    action="skip",
+                    reason="tagged for another market",
+                    why_not_eligible="tagged for another market",
+                )
+            return _base_decision(
+                action="skip",
+                reason="missing current market tag",
+                why_not_eligible="missing current market tag",
+            )
+
         safe_to_delete = size_on_disk is not None and size_on_disk > 0
         if not safe_to_delete:
             return _base_decision(
-                action="skip",
+                action="unsafe",
                 reason="unsafe to delete: size_on_disk unknown",
                 why_not_eligible="absent from eligible set",
                 safe_to_delete=False,
@@ -884,6 +991,30 @@ class AddLimitCleanupService:
             safe_to_delete=True,
             unsafe_reason=None,
         )
+
+    def _detach_market_tag(self, decision: CleanupDecision, market: str) -> None:
+        if not decision.radarr_id:
+            raise ValueError("Cannot detach tags without a Radarr movie id")
+
+        movie = self._movies_by_id.get(decision.radarr_id)
+        if movie is None:
+            movie = self.radarr_service.get_movie(decision.radarr_id)
+
+        current_market_labels = _market_tag_aliases(market)
+        current_tag_ids = {
+            tag_id
+            for tag_id in _movie_tag_ids(movie)
+            if self._tag_labels_by_id.get(tag_id, "").lower() in current_market_labels
+        }
+        if not current_tag_ids:
+            return
+
+        current_tags = [tag_id for tag_id in _movie_tag_ids(movie) if tag_id not in current_tag_ids]
+        raw = dict(getattr(movie, "_raw_data", {}) or {})
+        raw["tags"] = current_tags
+        movie._raw_data = raw
+        movie.tags = current_tags
+        self.radarr_service.update_movie(movie)
 
     def _estimate_movie_size(self, movie: RadarrMovie) -> int:
         size_on_disk = self._movie_size_on_disk(movie)

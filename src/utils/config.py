@@ -250,6 +250,12 @@ class Settings(BaseSettings):
         default=False, description="Enable notifications"
     )
 
+    # Explicit safety gate for destructive actions
+    boxarr_enable_dangerous_actions: bool = Field(
+        default=False,
+        description="Allow execute actions that can delete or modify Radarr data",
+    )
+
     # Auto-Tagging for Radarr additions
     boxarr_features_auto_tag_enabled: bool = Field(
         default=True, description="Auto tag movies added to Radarr"

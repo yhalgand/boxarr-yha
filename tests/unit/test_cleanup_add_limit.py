@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 from src.core.cleanup import AddLimitCleanupService
 from src.core.models import MovieStatus
@@ -35,6 +35,25 @@ class _FakeRadarrService:
             if movie.id == movie_id:
                 return movie
         raise KeyError(movie_id)
+
+
+class _StatefulCleanupRadarrService(_FakeRadarrService):
+    def __init__(self, movies, tags):
+        super().__init__(movies, tags)
+        self.update_calls = []
+
+    def delete_movie(self, movie_id: int, delete_files: bool = False):
+        self.delete_calls.append((movie_id, delete_files))
+        self._movies = [movie for movie in self._movies if movie.id != movie_id]
+        return SimpleNamespace(status_code=200)
+
+    def update_movie(self, movie):
+        self.update_calls.append((movie.id, list(getattr(movie, "tags", []))))
+        for idx, existing in enumerate(self._movies):
+            if existing.id == movie.id:
+                self._movies[idx] = movie
+                break
+        return movie
 
 
 def _seed_settings(monkeypatch):
@@ -70,10 +89,7 @@ def _movie(
     movie_has_file = has_file if has_file is not None else bool(size_bytes)
     movie_file = None
     if movie_has_file:
-        movie_file = {
-            "size": size_bytes,
-            "path": path,
-        }
+        movie_file = {"size": size_bytes, "path": path}
     raw_data = {
         "id": movie_id,
         "title": title,
@@ -110,7 +126,8 @@ def _write_week(path: Path, market: str, year: int, week: int, movies: list[dict
             {
                 "generated_at": "2026-05-25T10:00:00",
                 "market": market,
-                "provider": "mojo_us" if market == "us" else "jpboxoffice_fr",
+                "provider": "mojo" if market == "us" else "jpboxoffice",
+                "provider_aliases": ["mojo_us"] if market == "us" else ["jpboxoffice_fr"],
                 "source": "boxofficemojo" if market == "us" else "jpboxoffice",
                 "units": "usd" if market == "us" else "admissions",
                 "year": year,
@@ -122,61 +139,36 @@ def _write_week(path: Path, market: str, year: int, week: int, movies: list[dict
     )
 
 
-def test_cleanup_dry_run_keeps_any_movie_eligible_in_selected_market(tmp_path, monkeypatch):
+def _canonical_tags():
+    return [
+        {"id": 1, "label": "boxarr-added"},
+        {"id": 2, "label": "boxarr-market-fr"},
+        {"id": 3, "label": "boxarr-market-us"},
+        {"id": 4, "label": "boxarr-protected"},
+        {"id": 5, "label": "boxarr-keep"},
+        {"id": 6, "label": "boxarr-existing-fr"},
+        {"id": 7, "label": "boxarr"},
+    ]
+
+
+def test_cleanup_dry_run_reports_delete_detach_protected_and_legacy(
+    tmp_path, monkeypatch
+):
     _seed_settings(monkeypatch)
     monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
 
-    boxarr_tag = {"id": 1, "label": "boxarr"}
-    protected_tag = {"id": 2, "label": "boxarr-protected"}
-    keep_tag = {"id": 3, "label": "boxarr-keep"}
-
-    # FR market pages. Movie 201 is rank 7 in week 1 but rank 2 in week 2, so it stays.
+    # Two weeks so we can prove best_rank is collected across the stored range.
     _write_week(
         tmp_path / "weekly_pages" / "fr" / "2026W01.json",
         "fr",
         2026,
         1,
         [
-            {
-                "rank": 1,
-                "title": "Top Rank",
-                "tmdb_id": 204,
-                "radarr_id": 5,
-                "weekend_gross": 12,
-                "total_gross": 12,
-            },
-            {
-                "rank": 3,
-                "title": "Boundary Rank",
-                "tmdb_id": 205,
-                "radarr_id": 6,
-                "weekend_gross": 11,
-                "total_gross": 11,
-            },
-            {
-                "rank": 7,
-                "title": "Safe Delete",
-                "tmdb_id": 202,
-                "radarr_id": 3,
-                "weekend_gross": 10,
-                "total_gross": 10,
-            },
-            {
-                "rank": 8,
-                "title": "Unsafe Delete",
-                "tmdb_id": 203,
-                "radarr_id": 4,
-                "weekend_gross": 9,
-                "total_gross": 9,
-            },
-            {
-                "rank": 7,
-                "title": "FR Keep",
-                "tmdb_id": 201,
-                "radarr_id": 2,
-                "weekend_gross": 9,
-                "total_gross": 9,
-            },
+            {"rank": 1, "title": "Top Rank", "tmdb_id": 204, "radarr_id": 5},
+            {"rank": 3, "title": "Boundary Rank", "tmdb_id": 205, "radarr_id": 6},
+            {"rank": 7, "title": "Safe Delete", "tmdb_id": 202, "radarr_id": 3},
+            {"rank": 8, "title": "Detach Me", "tmdb_id": 206, "radarr_id": 12},
+            {"rank": 8, "title": "Unsafe Delete", "tmdb_id": 203, "radarr_id": 4},
         ],
     )
     _write_week(
@@ -185,74 +177,36 @@ def test_cleanup_dry_run_keeps_any_movie_eligible_in_selected_market(tmp_path, m
         2026,
         2,
         [
-            {
-                "rank": 1,
-                "title": "Top Rank",
-                "tmdb_id": 204,
-                "radarr_id": 5,
-                "weekend_gross": 13,
-                "total_gross": 25,
-            },
-            {
-                "rank": 3,
-                "title": "Boundary Rank",
-                "tmdb_id": 205,
-                "radarr_id": 6,
-                "weekend_gross": 14,
-                "total_gross": 25,
-            },
-            {
-                "rank": 2,
-                "title": "FR Keep",
-                "tmdb_id": 201,
-                "radarr_id": 2,
-                "weekend_gross": 11,
-                "total_gross": 20,
-            },
-            {
-                "rank": 10,
-                "title": "Safe Delete",
-                "tmdb_id": 202,
-                "radarr_id": 3,
-                "weekend_gross": 8,
-                "total_gross": 18,
-            },
+            {"rank": 1, "title": "Top Rank", "tmdb_id": 204, "radarr_id": 5},
+            {"rank": 3, "title": "Boundary Rank", "tmdb_id": 205, "radarr_id": 6},
+            {"rank": 10, "title": "Safe Delete", "tmdb_id": 202, "radarr_id": 3},
+            {"rank": 9, "title": "Detach Me", "tmdb_id": 206, "radarr_id": 12},
+            {"rank": 9, "title": "Unsafe Delete", "tmdb_id": 203, "radarr_id": 4},
         ],
     )
-
-    # Legacy flat US page should not affect market=fr cleanup.
     _write_week(
         tmp_path / "weekly_pages" / "2026W01.json",
         "us",
         2026,
         1,
-        [
-            {
-                "rank": 1,
-                "title": "US Keep",
-                "tmdb_id": 301,
-                "radarr_id": 4,
-                "weekend_gross": 100,
-                "total_gross": 100,
-            }
-        ],
+        [{"rank": 1, "title": "US Legacy", "tmdb_id": 301, "radarr_id": 8}],
     )
 
     movies = [
         _movie(
             2,
             201,
-            "FR Keep",
-            tags=[1],
+            "US Keep",
+            tags=[1, 3],
             size_bytes=20 * 1024 * 1024 * 1024,
-            path="/movies/FR Keep/FR Keep.mkv",
+            path="/movies/US Keep/US Keep.mkv",
             quality_profile_id=5,
         ),
         _movie(
             3,
             202,
             "Safe Delete",
-            tags=[1],
+            tags=[1, 2],
             size_bytes=30 * 1024 * 1024 * 1024,
             path="/movies/Safe Delete/Safe Delete.mkv",
             quality_profile_id=4,
@@ -261,7 +215,7 @@ def test_cleanup_dry_run_keeps_any_movie_eligible_in_selected_market(tmp_path, m
             4,
             203,
             "Unsafe Delete",
-            tags=[1],
+            tags=[1, 2],
             size_bytes=0,
             path=None,
             has_file=False,
@@ -271,7 +225,7 @@ def test_cleanup_dry_run_keeps_any_movie_eligible_in_selected_market(tmp_path, m
             7,
             402,
             "Legacy Protected",
-            tags=[1, 3],
+            tags=[5],
             size_bytes=4 * 1024 * 1024 * 1024,
             path="/movies/Legacy Protected/Legacy Protected.mkv",
             quality_profile_id=4,
@@ -280,7 +234,7 @@ def test_cleanup_dry_run_keeps_any_movie_eligible_in_selected_market(tmp_path, m
             5,
             204,
             "Top Rank",
-            tags=[1],
+            tags=[1, 2],
             size_bytes=15 * 1024 * 1024 * 1024,
             path="/movies/Top Rank/Top Rank.mkv",
             quality_profile_id=4,
@@ -289,17 +243,46 @@ def test_cleanup_dry_run_keeps_any_movie_eligible_in_selected_market(tmp_path, m
             6,
             205,
             "Boundary Rank",
-            tags=[1],
+            tags=[1, 2],
             size_bytes=16 * 1024 * 1024 * 1024,
             path="/movies/Boundary Rank/Boundary Rank.mkv",
             quality_profile_id=4,
         ),
-        _movie(8, 301, "US Keep", tags=[1], size_bytes=40 * 1024 * 1024 * 1024),
-        _movie(9, 401, "Protected", tags=[1, 2], size_bytes=5 * 1024 * 1024 * 1024),
-        _movie(10, None, "Ambiguous", tags=[1], size_bytes=1 * 1024 * 1024 * 1024),
-        _movie(11, 999, "Manual", tags=[], size_bytes=2 * 1024 * 1024 * 1024),
+        _movie(
+            12,
+            206,
+            "Detach Me",
+            tags=[1, 2, 3],
+            size_bytes=10 * 1024 * 1024 * 1024,
+            path="/movies/Detach Me/Detach Me.mkv",
+            quality_profile_id=4,
+        ),
+        _movie(
+            9,
+            401,
+            "Protected",
+            tags=[1, 4],
+            size_bytes=5 * 1024 * 1024 * 1024,
+            path="/movies/Protected/Protected.mkv",
+        ),
+        _movie(
+            10,
+            None,
+            "Legacy Boxarr",
+            tags=[7],
+            size_bytes=1 * 1024 * 1024 * 1024,
+            path="/movies/Legacy Boxarr/Legacy Boxarr.mkv",
+        ),
+        _movie(
+            11,
+            999,
+            "Manual Existing",
+            tags=[6],
+            size_bytes=2 * 1024 * 1024 * 1024,
+            path="/movies/Manual Existing/Manual Existing.mkv",
+        ),
     ]
-    fake_service = _FakeRadarrService(movies, [boxarr_tag, protected_tag, keep_tag])
+    fake_service = _FakeRadarrService(movies, _canonical_tags())
 
     cleanup = AddLimitCleanupService(fake_service, data_directory=tmp_path)
     report = cleanup.run(
@@ -308,6 +291,7 @@ def test_cleanup_dry_run_keeps_any_movie_eligible_in_selected_market(tmp_path, m
         delete_files=True,
         require_boxarr_tag=True,
         protect_tag="boxarr-protected",
+        required_market_tag="fr",
         execute=False,
     )
 
@@ -324,8 +308,8 @@ def test_cleanup_dry_run_keeps_any_movie_eligible_in_selected_market(tmp_path, m
     assert safe_candidate["has_file"] is True
     assert safe_candidate["monitored"] is True
     assert safe_candidate["quality_profile_id"] == 4
-    assert safe_candidate["tags"] == [1]
-    assert safe_candidate["tag_names"] == ["boxarr"]
+    assert safe_candidate["tags"] == [1, 2]
+    assert safe_candidate["tag_names"] == ["boxarr-added", "boxarr-market-fr"]
     assert safe_candidate["best_rank"] == 7
     assert safe_candidate["weeks_found"] == [
         {"market": "fr", "year": 2026, "week": 1},
@@ -339,22 +323,32 @@ def test_cleanup_dry_run_keeps_any_movie_eligible_in_selected_market(tmp_path, m
     assert safe_candidate["safe_to_delete"] is True
     assert safe_candidate["unsafe_to_delete"] is False
 
+    detach = next(
+        item for item in report["would_detach_market_tag_only"] if item["title"] == "Detach Me"
+    )
+    assert detach["safe_to_detach"] is True
+    assert detach["safe_to_delete"] is False
+    assert detach["reason"] == "tagged for multiple markets; detach current market tag only"
+
+    protected_titles = {item["title"] for item in report["protected"]}
+    assert {"Protected", "Legacy Protected"} <= protected_titles
+
+    unsafe = next(item for item in report["unsafe"] if item["title"] == "Unsafe Delete")
+    assert unsafe["reason"] == "unsafe to delete: size_on_disk unknown"
+    assert unsafe["safe_to_delete"] is False
+
     skipped = {item["title"]: item["reason"] for item in report["skipped"]}
     assert skipped["Top Rank"] == "present in eligible range by best_rank"
     assert skipped["Boundary Rank"] == "present in eligible range by best_rank"
-    assert skipped["FR Keep"] == "present in eligible range by best_rank"
-    assert skipped["Unsafe Delete"] == "unsafe to delete: size_on_disk unknown"
-    assert skipped["US Keep"] == "no reliable Boxarr association"
-    assert skipped["Protected"] == "protected by tag 'boxarr-protected'"
-    assert skipped["Legacy Protected"] == "protected by tag 'boxarr-protected'"
-    assert skipped["Ambiguous"] == "no reliable Boxarr association"
-    assert skipped["Manual"] == "missing required boxarr tag"
+    assert skipped["US Keep"] == "missing required market tag for fr"
+    assert skipped["Legacy Boxarr"] == "legacy boxarr tag requires migration"
+    assert skipped["Manual Existing"] == "missing required boxarr-added tag"
 
     assert fake_service.delete_calls == []
     assert report["estimated_size_to_delete"] == 30 * 1024 * 1024 * 1024
 
 
-def test_cleanup_execute_calls_delete_files_true(tmp_path, monkeypatch):
+def test_cleanup_execute_deletes_and_detaches_once(tmp_path, monkeypatch):
     _seed_settings(monkeypatch)
     monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
 
@@ -364,33 +358,26 @@ def test_cleanup_execute_calls_delete_files_true(tmp_path, monkeypatch):
         2026,
         1,
         [
-            {
-                "rank": 1,
-                "title": "Delete Me",
-                "tmdb_id": 202,
-                "radarr_id": 3,
-                "weekend_gross": 10,
-                "total_gross": 10,
-            },
-            {
-                "rank": 8,
-                "title": "Unsafe Delete",
-                "tmdb_id": 203,
-                "radarr_id": 4,
-                "weekend_gross": 4,
-                "total_gross": 4,
-            }
+            {"rank": 7, "title": "Safe Delete", "tmdb_id": 202, "radarr_id": 3},
+            {"rank": 8, "title": "Detach Me", "tmdb_id": 206, "radarr_id": 12},
+        ],
+    )
+    _write_week(
+        tmp_path / "weekly_pages" / "fr" / "2026W02.json",
+        "fr",
+        2026,
+        2,
+        [
+            {"rank": 10, "title": "Safe Delete", "tmdb_id": 202, "radarr_id": 3},
+            {"rank": 9, "title": "Detach Me", "tmdb_id": 206, "radarr_id": 12},
         ],
     )
 
     movies = [
-        _movie(3, 202, "Delete Me", tags=[1], size_bytes=3 * 1024 * 1024 * 1024),
-        _movie(4, 203, "Unsafe Delete", tags=[1], size_bytes=0, has_file=False),
+        _movie(3, 202, "Safe Delete", tags=[1, 2], size_bytes=3 * 1024 * 1024 * 1024),
+        _movie(12, 206, "Detach Me", tags=[1, 2, 3], size_bytes=4 * 1024 * 1024 * 1024),
     ]
-    fake_service = _FakeRadarrService(
-        movies,
-        [{"id": 1, "label": "boxarr"}, {"id": 2, "label": "boxarr-protected"}],
-    )
+    fake_service = _StatefulCleanupRadarrService(movies, _canonical_tags())
 
     cleanup = AddLimitCleanupService(fake_service, data_directory=tmp_path)
     report = cleanup.run(
@@ -399,14 +386,30 @@ def test_cleanup_execute_calls_delete_files_true(tmp_path, monkeypatch):
         delete_files=True,
         require_boxarr_tag=True,
         protect_tag="boxarr-protected",
+        required_market_tag="fr",
         execute=True,
     )
 
+    assert [item["title"] for item in report["deleted"]] == ["Safe Delete"]
+    assert [item["title"] for item in report["detached"]] == ["Detach Me"]
     assert fake_service.delete_calls == [(3, True)]
-    assert [item["title"] for item in report["deleted"]] == ["Delete Me"]
-    assert all(item["title"] != "Unsafe Delete" for item in report["deleted"])
+    assert fake_service.update_calls == [(12, [1, 3])]
     assert report["actual_size_deleted"] == 3 * 1024 * 1024 * 1024
     assert report["estimated_size_deleted"] == 3 * 1024 * 1024 * 1024
+
+    second = cleanup.run(
+        market="fr",
+        target_add_limit=3,
+        delete_files=True,
+        require_boxarr_tag=True,
+        protect_tag="boxarr-protected",
+        required_market_tag="fr",
+        execute=True,
+    )
+    assert second["deleted"] == []
+    assert second["detached"] == []
+    assert fake_service.delete_calls == [(3, True)]
+    assert fake_service.update_calls == [(12, [1, 3])]
 
 
 def test_cleanup_market_us_reads_legacy_flat_file(tmp_path, monkeypatch):
@@ -431,11 +434,11 @@ def test_cleanup_market_us_reads_legacy_flat_file(tmp_path, monkeypatch):
     )
 
     movies = [
-        _movie(8, 501, "Legacy US Keep", tags=[1], size_bytes=1024),
+        _movie(8, 501, "Legacy US Keep", tags=[1, 3], size_bytes=1024),
     ]
     fake_service = _FakeRadarrService(
         movies,
-        [{"id": 1, "label": "boxarr"}, {"id": 2, "label": "boxarr-protected"}],
+        _canonical_tags(),
     )
 
     cleanup = AddLimitCleanupService(fake_service, data_directory=tmp_path)
@@ -445,10 +448,11 @@ def test_cleanup_market_us_reads_legacy_flat_file(tmp_path, monkeypatch):
         delete_files=True,
         require_boxarr_tag=True,
         protect_tag="boxarr-protected",
+        required_market_tag="us",
         execute=False,
     )
 
     assert report["market"] == "us"
     assert report["eligible_count"] == 1
     assert report["candidates"] == []
-    assert report["skipped"][0]["reason"] == "present in eligible set"
+    assert report["skipped"][0]["reason"] == "present in eligible range by best_rank"

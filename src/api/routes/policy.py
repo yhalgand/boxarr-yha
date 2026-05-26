@@ -31,6 +31,9 @@ from ...utils.logger import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/policy", tags=["policy"])
+_DANGEROUS_ACTIONS_DISABLED_MESSAGE = (
+    "Execute actions are disabled. Enable BOXARR_ENABLE_DANGEROUS_ACTIONS=true to allow this action."
+)
 
 
 class PolicyUpdateRequest(BaseModel):
@@ -401,6 +404,11 @@ def _backfill_add_sync(
     execute: bool,
 ):
     try:
+        if execute and not settings.boxarr_enable_dangerous_actions:
+            raise HTTPException(
+                status_code=403,
+                detail=_DANGEROUS_ACTIONS_DISABLED_MESSAGE,
+            )
         market_key = _ensure_market_active(market)
         policy = get_market_policy(settings, market_key)
         target_add_limit = int(
@@ -514,6 +522,11 @@ async def cleanup_execute(market: str, payload: CleanupRequest):
 
 async def _cleanup(market: str, payload: CleanupRequest, *, execute: bool):
     try:
+        if execute and not settings.boxarr_enable_dangerous_actions:
+            raise HTTPException(
+                status_code=403,
+                detail=_DANGEROUS_ACTIONS_DISABLED_MESSAGE,
+            )
         market_key = _ensure_market_active(market)
         policy = get_market_policy(settings, market_key)
         target_add_limit = int(
@@ -589,6 +602,11 @@ async def migrate_tags_execute(payload: TagMigrationRequest):
 
 async def _migrate_tags(payload: TagMigrationRequest, *, execute: bool):
     try:
+        if execute and not settings.boxarr_enable_dangerous_actions:
+            raise HTTPException(
+                status_code=403,
+                detail=_DANGEROUS_ACTIONS_DISABLED_MESSAGE,
+            )
         market = str(payload.market or "all").strip().lower()
         selected_markets = _market_scope(market)
         radarr_service = RadarrService()

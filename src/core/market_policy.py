@@ -72,6 +72,7 @@ def get_market_policy(settings_obj, market: str) -> Dict[str, Any]:
 def build_policy_snapshot(policy: Dict[str, Any], year: int, week: int) -> Dict[str, Any]:
     """Build a compact policy snapshot stored with weekly JSON files."""
     effective = dict(policy.get("effective", {}) or {})
+    tag_policy = _build_tag_policy(str(policy.get("market") or DEFAULT_MARKET), effective)
     return {
         "market": policy.get("market"),
         "provider": policy.get("provider"),
@@ -82,6 +83,7 @@ def build_policy_snapshot(policy: Dict[str, Any], year: int, week: int) -> Dict[
         "tags_used": effective.get("tags", []),
         "auto_tag_text_used": effective.get("auto_tag_text"),
         "cleanup_protect_tag_used": effective.get("cleanup_protect_tag"),
+        "tag_policy_used": tag_policy,
         "policy_applied_at": datetime.now().isoformat(),
         "policy_version": policy.get("policy_version", 1),
         "year": year,

@@ -102,16 +102,84 @@ class _FakeMigrationRadarrService:
     def __init__(self, tags):
         self._tags = tags
         self.updated_movies = []
+        self._tag_ids_by_label = {}
+        self._next_tag_id = 100
+        for tag in tags:
+            if not isinstance(tag, dict):
+                continue
+            tag_id = tag.get("id")
+            label = tag.get("label") or tag.get("name") or tag.get("title") or tag.get("tag")
+            if isinstance(tag_id, int) and isinstance(label, str):
+                self._tag_ids_by_label[label.lower()] = tag_id
 
     def get_tags(self):
         return self._tags
 
     def ensure_tag(self, label: str):
-        return 1
+        normalized = label.lower()
+        if normalized not in self._tag_ids_by_label:
+            self._tag_ids_by_label[normalized] = self._next_tag_id
+            self._next_tag_id += 1
+        return self._tag_ids_by_label[normalized]
 
     def update_movie(self, movie):
         self.updated_movies.append(movie)
         return movie
+
+
+class _FakeAddMovieQualityProfile:
+    def __init__(self):
+        self.id = 1
+        self.name = "HD-1080p"
+
+
+class _FakeAddedMovie:
+    def __init__(self, tmdb_id, title):
+        self.id = tmdb_id
+        self.title = title
+
+
+class _FakeAddMovieRadarrService:
+    def __init__(self, movies=None):
+        self._movies = movies or []
+        self._tags = [{"id": 1, "label": "boxarr-added"}]
+        self.add_calls = []
+
+    def get_tags(self):
+        return self._tags
+
+    def get_all_movies(self, ignore_cache: bool = False):
+        return self._movies
+
+    def get_quality_profiles(self):
+        return [_FakeAddMovieQualityProfile()]
+
+    def search_movie(self, term: str):
+        return [{"tmdbId": 9001, "title": "Backfill Movie", "year": 2026, "genres": []}]
+
+    def ensure_tag(self, label: str):
+        return 1
+
+    def add_movie(
+        self,
+        tmdb_id: int,
+        quality_profile_id=None,
+        root_folder: str | None = None,
+        monitored: bool = True,
+        search_for_movie: bool = True,
+        additional_tag_labels=None,
+    ):
+        self.add_calls.append(
+            {
+                "tmdb_id": tmdb_id,
+                "quality_profile_id": quality_profile_id,
+                "root_folder": root_folder,
+                "monitored": monitored,
+                "search_for_movie": search_for_movie,
+                "additional_tag_labels": list(additional_tag_labels or []),
+            }
+        )
+        return _FakeAddedMovie(tmdb_id, "Backfill Movie")
 
 
 def test_policy_get_put_apply_and_backfill(tmp_path, monkeypatch):
@@ -183,6 +251,8 @@ def test_policy_get_put_apply_and_backfill(tmp_path, monkeypatch):
     snapshot = json.loads((weekly_dir / "2026W12.json").read_text())
     assert snapshot["policy_snapshot"]["market"] == "us"
     assert snapshot["policy_snapshot"]["add_limit_used"] == 3
+    assert snapshot["policy_snapshot"]["tag_policy_used"]["added_tag"] == "boxarr-added"
+    assert snapshot["policy_snapshot"]["tag_policy_used"]["market_tag"] == "boxarr-market-us"
 
     backfill_resp = client.post(
         "/api/policy/us/backfill-add/dry-run",
@@ -243,6 +313,7 @@ def test_policy_apply_supports_default_markets_without_local_markets_section(tmp
     assert us_snapshot_21["policy_snapshot"]["add_limit_used"] == 3
     assert us_snapshot_21["policy_snapshot"]["fetch_limit_used"] == 10
     assert us_snapshot_21["policy_snapshot"]["cleanup_protect_tag_used"] == "boxarr-protected"
+    assert us_snapshot_21["policy_snapshot"]["tag_policy_used"]["added_tag"] == "boxarr-added"
     assert "policy_snapshot" not in us_snapshot_22
 
     fr_resp = client.post(
@@ -261,6 +332,7 @@ def test_policy_apply_supports_default_markets_without_local_markets_section(tmp
     assert fr_snapshot["policy_snapshot"]["add_limit_used"] == 5
     assert fr_snapshot["policy_snapshot"]["fetch_limit_used"] == 10
     assert fr_snapshot["policy_snapshot"]["cleanup_protect_tag_used"] == "boxarr-protected"
+    assert fr_snapshot["policy_snapshot"]["tag_policy_used"]["market_tag"] == "boxarr-market-fr"
 
 
 def test_policy_apply_rejects_unknown_or_disabled_markets(tmp_path, monkeypatch):
@@ -387,6 +459,136 @@ def test_policy_tag_migration_detects_legacy_tags_and_reports_counts(tmp_path, m
     assert len(body["candidates"]) == 4
     assert any(item["title"] == "Legacy Movie" for item in body["candidates"])
     assert any(item["title"] == "Plain Movie" for item in body["skipped"])
+
+
+def test_policy_execute_endpoints_are_disabled_by_default(tmp_path, monkeypatch):
+    config_path = _seed_config(tmp_path)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    weekly_dir = tmp_path / "weekly_pages" / "us"
+    _write_weekly_page(weekly_dir, 2026, 12, "Backfill Movie")
+
+    import src.api.routes.policy as policy_routes
+
+    monkeypatch.setattr(policy_routes, "RadarrService", _FakeRadarrService)
+    monkeypatch.setattr(
+        policy_routes,
+        "get_all_movies_with_optional_cache_bypass",
+        lambda *_, **__: [],
+    )
+
+    app = create_app()
+    client = TestClient(app)
+
+    backfill_resp = client.post(
+        "/api/policy/us/backfill-add/execute",
+        json={
+            "maximum_movies_to_add": 1,
+            "year_from": 2026,
+            "week_from": 12,
+            "year_to": 2026,
+            "week_to": 12,
+            "all_stored": False,
+            "max_weeks": 1,
+        },
+    )
+    assert backfill_resp.status_code == 403
+
+    cleanup_resp = client.post(
+        "/api/policy/us/cleanup/execute",
+        json={
+            "maximum_movies_to_add": 3,
+            "cleanup_protect_tag": "boxarr-protected",
+        },
+    )
+    assert cleanup_resp.status_code == 403
+
+    migrate_resp = client.post(
+        "/api/policy/tags/migrate/execute",
+        json={"market": "us", "year_from": 2026, "week_from": 12, "year_to": 2026, "week_to": 12},
+    )
+    assert migrate_resp.status_code == 403
+
+
+def test_policy_execute_endpoints_work_with_dangerous_actions_enabled(tmp_path, monkeypatch):
+    config_path = _seed_config(tmp_path)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    monkeypatch.setenv("BOXARR_ENABLE_DANGEROUS_ACTIONS", "true")
+    Settings.reload_from_file(config_path)
+
+    weekly_dir = tmp_path / "weekly_pages" / "us"
+    _write_weekly_page(weekly_dir, 2026, 12, "Backfill Movie")
+
+    import src.api.routes.policy as policy_routes
+
+    add_service = _FakeAddMovieRadarrService()
+    monkeypatch.setattr(policy_routes, "RadarrService", lambda: add_service)
+    monkeypatch.setattr(
+        policy_routes,
+        "get_all_movies_with_optional_cache_bypass",
+        lambda *_, **__: [],
+    )
+
+    app = create_app()
+    client = TestClient(app)
+
+    backfill_resp = client.post(
+        "/api/policy/us/backfill-add/execute",
+        json={
+            "maximum_movies_to_add": 1,
+            "year_from": 2026,
+            "week_from": 12,
+            "year_to": 2026,
+            "week_to": 12,
+            "all_stored": False,
+            "max_weeks": 1,
+        },
+    )
+    assert backfill_resp.status_code == 200
+    backfill = backfill_resp.json()
+    assert backfill["added_count"] == 1
+    assert add_service.add_calls[0]["additional_tag_labels"] == [
+        "boxarr-added",
+        "boxarr-market-us",
+    ]
+
+    # Reuse the same week file so the legacy migration can match against stored pages.
+    _write_weekly_page(weekly_dir, 2026, 12, "Legacy Movie")
+
+    migration_movies = [
+        RadarrMovie(
+            id=1,
+            title="Legacy Movie",
+            tmdbId=1012,
+            year=2026,
+            tags=[1],
+            _raw_data={"tags": [1]},
+        )
+    ]
+    migration_service = _FakeMigrationRadarrService(
+        [
+            {"id": 1, "label": "boxarr"},
+            {"id": 2, "label": "boxarr-keep"},
+            {"id": 3, "label": "boxarr-us"},
+        ]
+    )
+    monkeypatch.setattr(policy_routes, "RadarrService", lambda: migration_service)
+    monkeypatch.setattr(
+        policy_routes,
+        "get_all_movies_with_optional_cache_bypass",
+        lambda *_, **__: migration_movies,
+    )
+
+    migrate_resp = client.post(
+        "/api/policy/tags/migrate/execute",
+        json={"market": "us", "year_from": 2026, "week_from": 12, "year_to": 2026, "week_to": 12},
+    )
+    assert migrate_resp.status_code == 200
+    migrate = migrate_resp.json()
+    assert migrate["migrated"] == 1
+    assert migration_service.updated_movies, "expected safe tag migration to update Radarr"
+    assert len(migration_service.updated_movies[0].tags) == 3
 
 
 def test_policy_backfill_scope_limits_matcher_build_once(tmp_path, monkeypatch):

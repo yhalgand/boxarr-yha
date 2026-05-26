@@ -69,6 +69,25 @@ class _FakeRadarrService:
         raise KeyError(movie_id)
 
 
+class _StatefulCleanupRadarrService(_FakeRadarrService):
+    def __init__(self, movies, tags):
+        super().__init__(movies, tags)
+        self.update_calls = []
+
+    def delete_movie(self, movie_id: int, delete_files: bool = False):
+        self.delete_calls.append((movie_id, delete_files))
+        self._movies = [movie for movie in self._movies if movie.id != movie_id]
+        return SimpleNamespace(status_code=200)
+
+    def update_movie(self, movie):
+        self.update_calls.append((movie.id, list(getattr(movie, "tags", []))))
+        for idx, existing in enumerate(self._movies):
+            if existing.id == movie.id:
+                self._movies[idx] = movie
+                break
+        return movie
+
+
 def _movie(
     movie_id: int,
     tmdb_id: int,
@@ -113,7 +132,17 @@ def _movie(
     )
 
 
-def test_cleanup_routes_dry_run_then_execute(tmp_path, monkeypatch):
+def _canonical_tags():
+    return [
+        {"id": 1, "label": "boxarr-added"},
+        {"id": 2, "label": "boxarr-market-fr"},
+        {"id": 3, "label": "boxarr-market-us"},
+        {"id": 4, "label": "boxarr-protected"},
+        {"id": 5, "label": "boxarr-keep"},
+    ]
+
+
+def test_cleanup_routes_disabled_by_default(tmp_path, monkeypatch):
     config_path = _seed_config(tmp_path)
     monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
     Settings.reload_from_file(config_path)
@@ -144,23 +173,29 @@ def test_cleanup_routes_dry_run_then_execute(tmp_path, monkeypatch):
                     },
                     {
                         "rank": 8,
+                        "title": "Detach Me",
+                        "tmdb_id": 204,
+                        "radarr_id": 5,
+                    },
+                    {
+                        "rank": 8,
                         "title": "Unsafe Delete",
                         "tmdb_id": 203,
                         "radarr_id": 4,
-                    }
+                    },
                 ],
             },
             indent=2,
         )
     )
 
-    fake_service = _FakeRadarrService(
+    fake_service = _StatefulCleanupRadarrService(
         [
             _movie(
                 3,
                 202,
                 "Delete Me",
-                tags=[1],
+                tags=[1, 2],
                 size_bytes=1024 * 1024 * 1024,
                 path="/movies/Delete Me/Delete Me.mkv",
                 quality_profile_id=4,
@@ -169,14 +204,23 @@ def test_cleanup_routes_dry_run_then_execute(tmp_path, monkeypatch):
                 4,
                 203,
                 "Unsafe Delete",
-                tags=[1],
+                tags=[1, 2],
                 size_bytes=0,
                 has_file=False,
                 path=None,
                 quality_profile_id=4,
             ),
+            _movie(
+                5,
+                204,
+                "Detach Me",
+                tags=[1, 2, 3],
+                size_bytes=1024 * 1024 * 1024,
+                path="/movies/Detach Me/Detach Me.mkv",
+                quality_profile_id=4,
+            ),
         ],
-        [{"id": 1, "label": "boxarr"}],
+        _canonical_tags(),
     )
 
     monkeypatch.setattr("src.api.routes.cleanup.RadarrService", lambda: fake_service)
@@ -197,7 +241,7 @@ def test_cleanup_routes_dry_run_then_execute(tmp_path, monkeypatch):
     dry_data = dry_run.json()
     assert dry_data["mode"] == "dry-run"
     assert dry_data["dry_run"] is True
-    assert dry_data["considered_total"] == 2
+    assert dry_data["considered_total"] == 3
     assert dry_data["candidates"][0]["title"] == "Delete Me"
     assert dry_data["candidates"][0]["safe_to_delete"] is True
     assert dry_data["candidates"][0]["eligible_under_target_limit"] is False
@@ -206,6 +250,8 @@ def test_cleanup_routes_dry_run_then_execute(tmp_path, monkeypatch):
     assert dry_data["candidates"][0]["best_rank"] == 7
     assert dry_data["candidates"][0]["weeks_found"] == [{"market": "fr", "year": 2026, "week": 1}]
     assert len(dry_data["candidates"]) == 1
+    assert dry_data["would_detach_market_tag_only"][0]["title"] == "Detach Me"
+    assert dry_data["would_detach_market_tag_only"][0]["safe_to_detach"] is True
     skipped = {item["title"]: item for item in dry_data["skipped"]}
     assert skipped["Unsafe Delete"]["reason"] == "unsafe to delete: size_on_disk unknown"
     assert skipped["Unsafe Delete"]["safe_to_delete"] is False
@@ -213,12 +259,107 @@ def test_cleanup_routes_dry_run_then_execute(tmp_path, monkeypatch):
     assert fake_service.delete_calls == []
 
     execute = client.post("/api/cleanup/add-limit/execute", json=payload)
+    assert execute.status_code == 403
+    assert fake_service.delete_calls == []
+    assert fake_service.update_calls == []
+
+
+def test_cleanup_routes_execute_with_dangerous_actions_enabled(tmp_path, monkeypatch):
+    config_path = _seed_config(tmp_path)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    monkeypatch.setenv("BOXARR_ENABLE_DANGEROUS_ACTIONS", "true")
+    Settings.reload_from_file(config_path)
+
+    weekly_dir = tmp_path / "weekly_pages" / "fr"
+    weekly_dir.mkdir(parents=True)
+    (weekly_dir / "2026W01.json").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-05-25T10:00:00",
+                "market": "fr",
+                "provider": "jpboxoffice",
+                "provider_aliases": ["jpboxoffice_fr"],
+                "source": "jpboxoffice",
+                "units": "admissions",
+                "year": 2026,
+                "week": 1,
+                "movies": [
+                    {
+                        "rank": 7,
+                        "title": "Delete Me",
+                        "tmdb_id": 202,
+                        "radarr_id": 3,
+                    },
+                    {
+                        "rank": 8,
+                        "title": "Detach Me",
+                        "tmdb_id": 204,
+                        "radarr_id": 5,
+                    },
+                ],
+            },
+            indent=2,
+        )
+    )
+
+    fake_service = _StatefulCleanupRadarrService(
+        [
+            _movie(
+                3,
+                202,
+                "Delete Me",
+                tags=[1, 2],
+                size_bytes=1024 * 1024 * 1024,
+                path="/movies/Delete Me/Delete Me.mkv",
+                quality_profile_id=4,
+            ),
+            _movie(
+                5,
+                204,
+                "Detach Me",
+                tags=[1, 2, 3],
+                size_bytes=1024 * 1024 * 1024,
+                path="/movies/Detach Me/Detach Me.mkv",
+                quality_profile_id=4,
+            ),
+        ],
+        _canonical_tags(),
+    )
+
+    monkeypatch.setattr("src.api.routes.cleanup.RadarrService", lambda: fake_service)
+
+    app = create_app()
+    client = TestClient(app)
+
+    payload = {
+        "market": "fr",
+        "target_add_limit": 3,
+        "delete_files": True,
+        "require_boxarr_tag": True,
+        "protect_tag": "boxarr-protected",
+    }
+
+    dry_run = client.post("/api/cleanup/add-limit/dry-run", json=payload)
+    assert dry_run.status_code == 200
+    dry_data = dry_run.json()
+    assert [item["title"] for item in dry_data["candidates"]] == ["Delete Me"]
+    assert [item["title"] for item in dry_data["would_detach_market_tag_only"]] == ["Detach Me"]
+
+    execute = client.post("/api/cleanup/add-limit/execute", json=payload)
     assert execute.status_code == 200
     exec_data = execute.json()
     assert exec_data["mode"] == "execute"
     assert exec_data["dry_run"] is False
     assert exec_data["deleted"][0]["title"] == "Delete Me"
-    assert all(item["title"] != "Unsafe Delete" for item in exec_data["deleted"])
     assert fake_service.delete_calls == [(3, True)]
+    assert fake_service.update_calls == [(5, [1, 3])]
     assert exec_data["estimated_size_deleted"] == 1024 * 1024 * 1024
     assert exec_data["actual_size_deleted"] == 1024 * 1024 * 1024
+
+    second = client.post("/api/cleanup/add-limit/execute", json=payload)
+    assert second.status_code == 200
+    second_data = second.json()
+    assert second_data["deleted"] == []
+    assert second_data["detached"] == []
+    assert fake_service.delete_calls == [(3, True)]
+    assert fake_service.update_calls == [(5, [1, 3])]

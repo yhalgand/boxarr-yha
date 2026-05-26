@@ -27,6 +27,7 @@ boxarr:
     auto_add: true
     quality_upgrade: true
     notifications: false
+  enable_dangerous_actions: false
   
   # UI configuration
   ui:

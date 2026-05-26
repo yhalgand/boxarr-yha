@@ -73,6 +73,9 @@ def get_template_context(request: Request, **kwargs) -> dict:
         or get_configured_markets(settings),
         "market_definition": kwargs.get("market_definition")
         or get_market_definition(settings, kwargs.get("market", DEFAULT_MARKET)),
+        "dangerous_actions_enabled": kwargs.get("dangerous_actions_enabled")
+        if "dangerous_actions_enabled" in kwargs
+        else bool(getattr(settings, "boxarr_enable_dangerous_actions", False)),
     }
     context.update(kwargs)
     return context

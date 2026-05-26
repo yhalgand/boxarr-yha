@@ -14,6 +14,9 @@ from ...utils.logger import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/cleanup", tags=["cleanup"])
+_DANGEROUS_ACTIONS_DISABLED_MESSAGE = (
+    "Execute actions are disabled. Enable BOXARR_ENABLE_DANGEROUS_ACTIONS=true to allow this action."
+)
 
 
 class AddLimitCleanupRequest(BaseModel):
@@ -40,6 +43,12 @@ def _normalize_cleanup_market(market: str) -> str:
 def _run_cleanup(request: AddLimitCleanupRequest, execute: bool) -> dict:
     if not settings.radarr_api_key:
         raise HTTPException(status_code=400, detail="Radarr not configured")
+
+    if execute and not settings.boxarr_enable_dangerous_actions:
+        raise HTTPException(
+            status_code=403,
+            detail=_DANGEROUS_ACTIONS_DISABLED_MESSAGE,
+        )
 
     if execute and not request.delete_files:
         raise HTTPException(

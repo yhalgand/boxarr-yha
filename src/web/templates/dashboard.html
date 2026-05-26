@@ -429,89 +429,256 @@
 .modal {
     display: none;
     position: fixed;
+    inset: 0;
     z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(4px);
+    padding: 1rem;
+    background: rgba(15, 23, 42, 0.7);
+    backdrop-filter: blur(6px);
+    align-items: center;
+    justify-content: center;
 }
 
 .modal.show {
     display: flex;
-    align-items: center;
-    justify-content: center;
 }
 
 .modal-content {
+    width: min(1200px, 100%);
+    max-height: 92vh;
+    overflow: auto;
     background: var(--card-bg);
-    border-radius: 12px;
-    width: 90%;
-    max-width: 500px;
-    max-height: 80vh;
-    overflow-y: auto;
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 18px;
     box-shadow: var(--shadow-lg);
 }
 
+.modal-content.progress-modal {
+    max-width: 620px;
+}
+
 .modal-header {
-    padding: 1.5rem;
-    border-bottom: 1px solid var(--border-color);
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1.1rem 1.25rem;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .modal-header h3 {
-    font-size: 1.25rem;
-    font-weight: 600;
+    margin: 0;
+    font-size: 1.1rem;
 }
 
 .modal-close {
-    background: none;
-    border: none;
-    font-size: 1.5rem;
-    color: var(--text-secondary);
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-color);
+    color: var(--text-primary);
     cursor: pointer;
-    padding: 0;
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    font-size: 1.2rem;
+    line-height: 1;
 }
 
 .modal-body {
-    padding: 1.5rem;
-}
-
-.form-group {
-    margin-bottom: 1.5rem;
-}
-
-.form-group label {
-    display: block;
-    margin-bottom: 0.5rem;
-    font-weight: 500;
-    color: var(--text-primary);
-}
-
-.form-select {
-    width: 100%;
-    padding: 0.75rem;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    background: var(--card-bg);
-    color: var(--text-primary);
-    font-size: 1rem;
+    padding: 1.25rem;
 }
 
 .modal-footer {
-    padding: 1.5rem;
-    border-top: 1px solid var(--border-color);
     display: flex;
     justify-content: flex-end;
+    gap: 0.75rem;
+    padding: 1rem 1.25rem 1.25rem;
+    border-top: 1px solid var(--border-color);
+    flex-wrap: wrap;
+}
+
+.modal-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 1rem;
+}
+
+.modal-grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+@media (max-width: 900px) {
+    .modal-grid,
+    .modal-grid-3 {
+        grid-template-columns: 1fr;
+    }
+}
+
+.modal-section {
+    padding: 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: rgba(var(--primary-rgb), 0.03);
+}
+
+.modal-section h4 {
+    margin: 0 0 0.75rem 0;
+}
+
+.modal-note {
+    margin-bottom: 1rem;
+    padding: 0.85rem 1rem;
+    border-radius: 10px;
+    border: 1px solid rgba(var(--primary-rgb), 0.18);
+    background: rgba(var(--primary-rgb), 0.05);
+    color: var(--text-primary);
+}
+
+.modal-note.warning {
+    border-color: rgba(245, 158, 11, 0.3);
+    background: rgba(245, 158, 11, 0.08);
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    margin-bottom: 0.9rem;
+}
+
+.form-group label {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.form-input,
+.form-select,
+.form-textarea {
+    width: 100%;
+    padding: 0.7rem 0.8rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-color);
+    color: var(--text-primary);
+}
+
+.form-textarea {
+    min-height: 88px;
+    resize: vertical;
+}
+
+.scope-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+}
+
+.scope-option {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.7rem 0.8rem;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    cursor: pointer;
+    background: var(--bg-color);
+}
+
+.scope-option input {
+    margin: 0;
+}
+
+.tag-pill-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.tag-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.28rem 0.55rem;
+    border-radius: 999px;
+    background: rgba(var(--primary-rgb), 0.08);
+    border: 1px solid rgba(var(--primary-rgb), 0.18);
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.tag-pill.legacy {
+    background: rgba(100, 116, 139, 0.08);
+    border-color: rgba(100, 116, 139, 0.18);
+}
+
+.result-panel {
+    margin-top: 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--bg-color);
+}
+
+.result-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.result-summary .metric {
+    padding: 0.65rem 0.75rem;
+    border-radius: 10px;
+    background: rgba(var(--primary-rgb), 0.05);
+}
+
+.result-summary .metric .metric-label {
+    display: block;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    letter-spacing: 0.04em;
+}
+
+.result-summary .metric .metric-value {
+    display: block;
+    margin-top: 0.2rem;
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+@media (max-width: 900px) {
+    .result-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.result-list {
+    padding: 1rem;
+    display: grid;
+    gap: 0.75rem;
+}
+
+.result-list-item {
+    padding: 0.75rem;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    background: rgba(var(--primary-rgb), 0.02);
+}
+
+.result-list-item strong {
+    display: block;
+    margin-bottom: 0.25rem;
+}
+
+.result-json {
+    margin: 0;
+    padding: 1rem;
+    border-top: 1px solid var(--border-color);
+    overflow: auto;
+    max-height: 280px;
+    white-space: pre-wrap;
 }
 
 .action-btn.secondary {
@@ -840,12 +1007,22 @@
                 </div>
             </div>
             <div style="margin-top:0.5rem; font-size:0.9rem;">
-                Tags: <code>{{ market_policy.effective.tags | join(', ') }}</code> • Protected: <code>{{ market_policy.effective.cleanup_protect_tag }}</code>
+                Canonical tags: <code>{{ market_policy.tag_policy.added_tag }}</code>,
+                <code>{{ market_policy.tag_policy.market_tag }}</code>,
+                <code>{{ market_policy.tag_policy.existing_tag }}</code>,
+                <code>{{ market_policy.tag_policy.protected_tag }}</code>
+                • Legacy compat: <code>boxarr</code>, <code>boxarr-keep</code>
+            </div>
+            <div style="margin-top:0.35rem; font-size:0.9rem;">
+                Raw tags: <code>{{ market_policy.effective.tags | join(', ') }}</code> • Protected: <code>{{ market_policy.effective.cleanup_protect_tag }}</code>
             </div>
             <div style="margin-top:0.35rem; font-size:0.9rem; color: var(--text-secondary);">
-                New tags: <code>{{ market_policy.tag_policy.added_tag }}</code>,
-                <code>{{ market_policy.tag_policy.market_tag }}</code>,
-                <code>{{ market_policy.tag_policy.existing_tag }}</code>
+                Policy snapshot tags:
+                {% if market_policy.tag_policy %}
+                    <code>{{ market_policy.tag_policy.added_tag }}</code>,
+                    <code>{{ market_policy.tag_policy.market_tag }}</code>,
+                    <code>{{ market_policy.tag_policy.existing_tag }}</code>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -1238,14 +1415,19 @@
             <button class="modal-close" onclick="closeCleanupModal()">&times;</button>
         </div>
         <div class="modal-body">
-            <div class="cleanup-warning">
+            <div class="modal-note cleanup-warning">
                 <strong>This will delete movies from Radarr and delete files.</strong>
                 <div style="margin-top: 0.5rem; color: var(--text-secondary);">
                     Run a dry-run first. The execute button stays disabled until a dry-run has completed and you type <strong>DELETE</strong>.
                 </div>
+                {% if not dangerous_actions_enabled %}
+                <div style="margin-top: 0.5rem; color: var(--warning-color); font-weight: 600;">
+                    Execute disabled in this build. Dry-run only.
+                </div>
+                {% endif %}
             </div>
 
-            <div class="cleanup-grid">
+            <div class="modal-grid-3 cleanup-grid">
                 <div class="cleanup-field">
                     <label for="cleanupMarket">Market</label>
                     <select id="cleanupMarket">
@@ -1288,17 +1470,17 @@
             <div class="cleanup-confirm">
                 <input id="cleanupConfirmText" type="text" placeholder="Type DELETE to enable execution" autocomplete="off">
                 <button class="action-btn secondary" type="button" onclick="runCleanupDryRun()">Dry-run</button>
-                <button id="cleanupExecuteBtn" class="action-btn cleanup" type="button" onclick="executeCleanup()" disabled>Execute</button>
+                <button id="cleanupExecuteBtn" class="action-btn cleanup" type="button" onclick="executeCleanup()" {% if not dangerous_actions_enabled %}disabled{% endif %}>Execute</button>
             </div>
 
-            <div id="cleanupResults" class="cleanup-results" style="margin-top: 1.25rem;">
+            <div id="cleanupResults" class="cleanup-results result-panel" style="margin-top: 1.25rem;">
                 <div class="cleanup-results-empty">Run a dry-run to preview the candidate list.</div>
             </div>
         </div>
         <div class="modal-footer">
             <button class="action-btn secondary" onclick="closeCleanupModal()">Close</button>
             <button class="action-btn secondary" onclick="runCleanupDryRun()">Dry-run</button>
-            <button id="cleanupExecuteBtnFooter" class="action-btn cleanup" onclick="executeCleanup()" disabled>Execute</button>
+            <button id="cleanupExecuteBtnFooter" class="action-btn cleanup" onclick="executeCleanup()" {% if not dangerous_actions_enabled %}disabled{% endif %}>Execute</button>
         </div>
     </div>
 </div>
@@ -2001,6 +2183,7 @@ async function fixMissingData() {
 
 let cleanupDryRunData = null;
 let cleanupLastPayload = null;
+window.BOXARR_DANGEROUS_ACTIONS_ENABLED = {{ dangerous_actions_enabled | tojson }};
 
 function escapeHtml(value) {
     return String(value ?? '')
@@ -2070,9 +2253,13 @@ function cleanupButtonSetEnabled(enabled) {
     ];
     executeButtons.forEach(btn => {
         if (btn) {
-            btn.disabled = !enabled;
+            btn.disabled = !enabled || !window.BOXARR_DANGEROUS_ACTIONS_ENABLED;
         }
     });
+}
+
+function dangerousActionsEnabled() {
+    return Boolean(window.BOXARR_DANGEROUS_ACTIONS_ENABLED);
 }
 
 function cleanupConfirmSatisfied() {
@@ -2137,49 +2324,46 @@ function renderCleanupResults(data) {
     const results = document.getElementById('cleanupResults');
     if (!results) return;
 
-    const candidateItems = Array.isArray(data.candidates) ? data.candidates : [];
+    const wouldDeleteItems = Array.isArray(data.would_delete) ? data.would_delete : (Array.isArray(data.candidates) ? data.candidates : []);
+    const wouldDetachItems = Array.isArray(data.would_detach_market_tag_only) ? data.would_detach_market_tag_only : (Array.isArray(data.detached) ? data.detached : []);
     const deletedItems = Array.isArray(data.deleted) ? data.deleted : [];
+    const detachedItems = Array.isArray(data.detached) ? data.detached : [];
+    const protectedItems = Array.isArray(data.protected) ? data.protected : [];
+    const unsafeItems = Array.isArray(data.unsafe) ? data.unsafe : [];
     const skippedItems = Array.isArray(data.skipped) ? data.skipped : [];
     const errorItems = Array.isArray(data.errors) ? data.errors : [];
     const title = data.dry_run ? 'Dry-run preview' : 'Cleanup results';
-    const primaryItems = data.dry_run ? candidateItems : deletedItems;
-    const safeCandidates = candidateItems.filter(item => item.safe_to_delete);
 
-    const primaryRows = primaryItems.map(item => `
-        <tr>
-            <td><strong>${escapeHtml(item.title)}</strong></td>
-            <td>${escapeHtml(item.year || 'n/a')}<br><span class="cleanup-reason">Market ${escapeHtml(item.market || data.market || '')}</span></td>
-            <td>
-                TMDB ${escapeHtml(item.tmdb_id ?? 'n/a')} · Radarr ${escapeHtml(item.radarr_id ?? 'n/a')}
-                <br><span class="cleanup-reason">${escapeHtml(formatCleanupTags(item))}</span>
-            </td>
-            <td><span class="cleanup-path">${escapeHtml(item.path || 'n/a')}</span></td>
-            <td>${escapeHtml(item.best_rank || 'n/a')}</td>
-            <td>${escapeHtml(formatCleanupWeeks(item.weeks_found))}</td>
-            <td>${escapeHtml(formatMaybeBytes(item.size_on_disk))}</td>
-            <td><strong>${item.safe_to_delete ? 'yes' : 'no'}</strong>${item.unsafe_reason ? `<br><span class="cleanup-reason">${escapeHtml(item.unsafe_reason)}</span>` : ''}</td>
-            <td>${escapeHtml(item.reason || '')}</td>
-            <td>${escapeHtml(item.action || (data.dry_run ? 'candidate' : 'deleted'))}</td>
-        </tr>
-    `).join('');
+    function rowHtml(item, actionLabel) {
+        return `
+            <tr>
+                <td><strong>${escapeHtml(item.title)}</strong></td>
+                <td>${escapeHtml(item.year || 'n/a')}<br><span class="cleanup-reason">Market ${escapeHtml(item.market || data.market || '')}</span></td>
+                <td>
+                    TMDB ${escapeHtml(item.tmdb_id ?? 'n/a')} · Radarr ${escapeHtml(item.radarr_id ?? 'n/a')}
+                    <br><span class="cleanup-reason">${escapeHtml(formatCleanupTags(item))}</span>
+                </td>
+                <td><span class="cleanup-path">${escapeHtml(item.path || 'n/a')}</span></td>
+                <td>${escapeHtml(item.best_rank || 'n/a')}</td>
+                <td>${escapeHtml(formatCleanupWeeks(item.weeks_found))}</td>
+                <td>${escapeHtml(formatMaybeBytes(item.size_on_disk))}</td>
+                <td>
+                    <strong>${item.safe_to_delete ? 'delete' : item.safe_to_detach ? 'detach' : 'no'}</strong>
+                    ${item.unsafe_reason ? `<br><span class="cleanup-reason">${escapeHtml(item.unsafe_reason)}</span>` : ''}
+                </td>
+                <td>${escapeHtml(item.reason || '')}</td>
+                <td>${escapeHtml(actionLabel || item.action || (data.dry_run ? 'candidate' : 'deleted'))}</td>
+            </tr>
+        `;
+    }
 
-    const skippedRows = skippedItems.map(item => `
-        <tr>
-            <td><strong>${escapeHtml(item.title)}</strong></td>
-            <td>${escapeHtml(item.year || 'n/a')}<br><span class="cleanup-reason">Market ${escapeHtml(item.market || data.market || '')}</span></td>
-            <td>
-                TMDB ${escapeHtml(item.tmdb_id ?? 'n/a')} · Radarr ${escapeHtml(item.radarr_id ?? 'n/a')}
-                <br><span class="cleanup-reason">${escapeHtml(formatCleanupTags(item))}</span>
-            </td>
-            <td><span class="cleanup-path">${escapeHtml(item.path || 'n/a')}</span></td>
-            <td>${escapeHtml(item.best_rank || 'n/a')}</td>
-            <td>${escapeHtml(formatCleanupWeeks(item.weeks_found))}</td>
-            <td>${escapeHtml(formatMaybeBytes(item.size_on_disk))}</td>
-            <td><strong>${item.safe_to_delete ? 'yes' : 'no'}</strong>${item.unsafe_reason ? `<br><span class="cleanup-reason">${escapeHtml(item.unsafe_reason)}</span>` : ''}</td>
-            <td>${escapeHtml(item.reason || '')}</td>
-            <td>skip</td>
-        </tr>
-    `).join('');
+    const wouldDeleteRows = wouldDeleteItems.map(item => rowHtml(item, 'delete')).join('');
+    const wouldDetachRows = wouldDetachItems.map(item => rowHtml(item, 'detach')).join('');
+    const deletedRows = deletedItems.map(item => rowHtml(item, 'deleted')).join('');
+    const detachedRows = detachedItems.map(item => rowHtml(item, 'detached')).join('');
+    const skippedRows = skippedItems.map(item => rowHtml(item, 'skip')).join('');
+    const protectedRows = protectedItems.map(item => rowHtml(item, 'protected')).join('');
+    const unsafeRows = unsafeItems.map(item => rowHtml(item, 'unsafe')).join('');
 
     const errorList = errorItems.length
         ? `<div style="padding: 1rem; border-top: 1px solid var(--border-color);">
@@ -2195,8 +2379,10 @@ function renderCleanupResults(data) {
             <span class="summary-pill"><strong>${escapeHtml(title)}</strong></span>
             <span class="summary-pill">Markets: ${escapeHtml((data.markets_scanned || [data.market]).join(', '))}</span>
             <span class="summary-pill">Considered: ${escapeHtml(data.considered_total || data.movies_scanned || 0)}</span>
-            <span class="summary-pill">${data.dry_run ? 'Candidates' : 'Deleted'}: ${escapeHtml(primaryItems.length)}</span>
-            ${data.dry_run ? `<span class="summary-pill">Safe: ${escapeHtml(safeCandidates.length)}</span>` : ''}
+            <span class="summary-pill">Would delete: ${escapeHtml(wouldDeleteItems.length)}</span>
+            <span class="summary-pill">Would detach: ${escapeHtml(wouldDetachItems.length)}</span>
+            <span class="summary-pill">Protected: ${escapeHtml(protectedItems.length)}</span>
+            <span class="summary-pill">Unsafe: ${escapeHtml(unsafeItems.length)}</span>
             <span class="summary-pill">Skipped: ${escapeHtml(skippedItems.length)}</span>
             <span class="summary-pill">Errors: ${escapeHtml(errorItems.length)}</span>
             <span class="summary-pill">Estimated size: ${escapeHtml(formatBytes(data.estimated_size_to_delete || data.estimated_size_deleted || 0))}</span>
@@ -2207,9 +2393,11 @@ function renderCleanupResults(data) {
                 · Market: <strong>${escapeHtml(data.market)}</strong>
                 · Delete files: <strong>${data.delete_files ? 'yes' : 'no'}</strong>
                 · Protected tag: <strong>${escapeHtml(data.protect_tag || 'boxarr-protected')}</strong>
+                · Execute enabled: <strong>${dangerousActionsEnabled() ? 'yes' : 'no'}</strong>
             </div>
-            <h4 style="margin: 0 0 0.5rem 0;">${escapeHtml(data.dry_run ? 'Candidate deletions' : 'Deleted movies')}</h4>
-            ${primaryItems.length ? `
+            ${data.dry_run ? '<div style="margin-bottom:0.75rem; color: var(--warning-color); font-weight: 600;">No files are deleted in dry-run.</div>' : ''}
+            <h4 style="margin: 0 0 0.5rem 0;">${escapeHtml(data.dry_run ? 'Would delete' : 'Deleted')}</h4>
+            ${wouldDeleteItems.length ? `
                 <table class="cleanup-table">
                     <thead>
                         <tr>
@@ -2220,14 +2408,74 @@ function renderCleanupResults(data) {
                             <th>Best rank</th>
                             <th>Weeks found</th>
                             <th>Size</th>
-                            <th>Safe</th>
-                            <th>Reason</th>
                             <th>Action</th>
+                            <th>Reason</th>
+                            <th>Status</th>
                         </tr>
                     </thead>
-                    <tbody>${primaryRows}</tbody>
+                    <tbody>${wouldDeleteRows}</tbody>
                 </table>
             ` : '<div class="cleanup-results-empty">No delete candidates found.</div>'}
+            <h4 style="margin: 1rem 0 0.5rem 0;">${escapeHtml(data.dry_run ? 'Would detach market tag only' : 'Detached')}</h4>
+            ${wouldDetachItems.length ? `
+                <table class="cleanup-table">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Year</th>
+                            <th>IDs / Tags</th>
+                            <th>Path</th>
+                            <th>Best rank</th>
+                            <th>Weeks found</th>
+                            <th>Size</th>
+                            <th>Action</th>
+                            <th>Reason</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>${wouldDetachRows || detachedRows}</tbody>
+                </table>
+            ` : '<div class="cleanup-results-empty">No detach candidates found.</div>'}
+            <h4 style="margin: 1rem 0 0.5rem 0;">Protected</h4>
+            ${protectedItems.length ? `
+                <table class="cleanup-table">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Year</th>
+                            <th>IDs / Tags</th>
+                            <th>Path</th>
+                            <th>Best rank</th>
+                            <th>Weeks found</th>
+                            <th>Size</th>
+                            <th>Action</th>
+                            <th>Reason</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>${protectedRows}</tbody>
+                </table>
+            ` : '<div class="cleanup-results-empty">No protected items.</div>'}
+            <h4 style="margin: 1rem 0 0.5rem 0;">Unsafe</h4>
+            ${unsafeItems.length ? `
+                <table class="cleanup-table">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Year</th>
+                            <th>IDs / Tags</th>
+                            <th>Path</th>
+                            <th>Best rank</th>
+                            <th>Weeks found</th>
+                            <th>Size</th>
+                            <th>Action</th>
+                            <th>Reason</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>${unsafeRows}</tbody>
+                </table>
+            ` : '<div class="cleanup-results-empty">No unsafe items.</div>'}
             <h4 style="margin: 1rem 0 0.5rem 0;">Skipped</h4>
             ${skippedItems.length ? `
                 <table class="cleanup-table">
@@ -2240,9 +2488,9 @@ function renderCleanupResults(data) {
                             <th>Best rank</th>
                             <th>Weeks found</th>
                             <th>Size</th>
-                            <th>Safe</th>
-                            <th>Reason</th>
                             <th>Action</th>
+                            <th>Reason</th>
+                            <th>Status</th>
                         </tr>
                     </thead>
                     <tbody>${skippedRows}</tbody>
@@ -2281,7 +2529,7 @@ async function runCleanupDryRun() {
         renderCleanupResults(data);
         cleanupButtonSetEnabled(
             cleanupConfirmSatisfied() &&
-            (data.candidates || []).some(item => item.safe_to_delete)
+            (data.would_delete || data.candidates || []).some(item => item.safe_to_delete)
         );
     } catch (error) {
         if (results) {
@@ -2292,12 +2540,17 @@ async function runCleanupDryRun() {
 }
 
 async function executeCleanup() {
+    if (!dangerousActionsEnabled()) {
+        alert('Execute disabled in this build. Dry-run only.');
+        return;
+    }
+
     if (!cleanupDryRunData) {
         alert('Run a dry-run first.');
         return;
     }
 
-    if (!(cleanupDryRunData.candidates || []).some(item => item.safe_to_delete)) {
+    if (!(cleanupDryRunData.would_delete || cleanupDryRunData.candidates || []).some(item => item.safe_to_delete)) {
         alert('No safe candidates to delete.');
         return;
     }
