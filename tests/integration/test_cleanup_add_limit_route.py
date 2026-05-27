@@ -280,6 +280,7 @@ def test_cleanup_routes_disabled_by_default(tmp_path, monkeypatch):
     dry_run = client.post("/api/cleanup/add-limit/dry-run", json=payload)
     assert dry_run.status_code == 200
     dry_data = dry_run.json()
+    assert dry_data["remove_without_files_only"] is False
     assert dry_data["mode"] == "dry-run"
     assert dry_data["dry_run"] is True
     assert dry_data["considered_total"] == 4
@@ -408,6 +409,18 @@ def test_cleanup_routes_execute_with_dangerous_actions_enabled(tmp_path, monkeyp
     )
 
     monkeypatch.setattr("src.api.routes.cleanup.RadarrService", lambda: fake_service)
+    refresh_calls = []
+    import src.api.routes.cleanup as cleanup_routes
+    monkeypatch.setattr(
+        cleanup_routes,
+        "refresh_stored_status_for_market",
+        lambda market: refresh_calls.append(market) or {
+            "weeks_scanned": 0,
+            "weeks_updated": 0,
+            "movies_refreshed": 0,
+            "movies_linked": 0,
+        },
+    )
 
     app = create_app()
     client = TestClient(app)
@@ -450,6 +463,7 @@ def test_cleanup_routes_execute_with_dangerous_actions_enabled(tmp_path, monkeyp
     assert exec_data["would_remove_downloads_count"] == 1
     assert exec_data["estimated_size_deleted"] == 1024 * 1024 * 1024
     assert exec_data["actual_size_deleted"] == 1024 * 1024 * 1024
+    assert refresh_calls == ["fr"]
 
     second = client.post("/api/cleanup/add-limit/execute", json=payload)
     assert second.status_code == 200
@@ -459,6 +473,7 @@ def test_cleanup_routes_execute_with_dangerous_actions_enabled(tmp_path, monkeyp
     assert fake_service.delete_calls == [(3, True), (6, True)]
     assert fake_service.remove_queue_calls == [(91, True)]
     assert fake_service.update_calls == [(5, [1, 3])]
+    assert refresh_calls == ["fr"]
 
 
 def test_cleanup_routes_execute_remove_without_files_only(tmp_path, monkeypatch):
@@ -526,6 +541,18 @@ def test_cleanup_routes_execute_remove_without_files_only(tmp_path, monkeypatch)
     )
 
     monkeypatch.setattr("src.api.routes.cleanup.RadarrService", lambda: fake_service)
+    refresh_calls = []
+    import src.api.routes.cleanup as cleanup_routes
+    monkeypatch.setattr(
+        cleanup_routes,
+        "refresh_stored_status_for_market",
+        lambda market: refresh_calls.append(market) or {
+            "weeks_scanned": 0,
+            "weeks_updated": 0,
+            "movies_refreshed": 0,
+            "movies_linked": 0,
+        },
+    )
 
     app = create_app()
     client = TestClient(app)
@@ -556,3 +583,4 @@ def test_cleanup_routes_execute_remove_without_files_only(tmp_path, monkeypatch)
     assert fake_service.remove_queue_calls == [(91, True)]
     assert fake_service.delete_calls == [(6, True)]
     assert all(call[0] != 3 for call in fake_service.delete_calls)
+    assert refresh_calls == ["fr"]

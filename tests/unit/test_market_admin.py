@@ -7,6 +7,7 @@ from src.core.market_admin import (
     infer_provider_config,
     normalize_market_key,
 )
+from src.utils.config import MarketConfig
 
 
 def test_normalize_market_key_accepts_safe_values():
@@ -94,3 +95,37 @@ def test_build_market_definition_preserves_existing_fields_on_partial_update():
     assert definition["language_filter_enabled"] is True
     assert definition["language_filter_mode"] == "blacklist"
     assert definition["language_blacklist"] == ["Spanish"]
+
+
+def test_build_market_definition_accepts_existing_marketconfig_object():
+    existing = MarketConfig(
+        label="France Box Office",
+        provider="jpboxoffice",
+        provider_config={"country": "fr"},
+        enabled=True,
+        box_office_fetch_limit=10,
+        maximum_movies_to_add=3,
+        auto_add_enabled=True,
+        tags=["boxarr", "boxarr-fr"],
+        auto_tag_text="boxarr-fr",
+        cleanup_protect_tag="boxarr-protected",
+        root_folder="/movies/fr",
+    )
+
+    definition = build_market_definition(
+        "fr",
+        {"maximum_movies_to_add": 5},
+        existing=existing,
+        create=False,
+    )
+
+    assert definition["label"] == "France Box Office"
+    assert definition["provider"] == "jpboxoffice"
+    assert definition["provider_config"] == {"country": "fr"}
+    assert definition["box_office_fetch_limit"] == 10
+    assert definition["maximum_movies_to_add"] == 5
+    assert definition["auto_add_enabled"] is True
+    assert definition["tags"] == ["boxarr", "boxarr-fr"]
+    assert definition["auto_tag_text"] == "boxarr-fr"
+    assert definition["cleanup_protect_tag"] == "boxarr-protected"
+    assert definition["root_folder"] == "/movies/fr"

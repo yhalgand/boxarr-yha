@@ -850,6 +850,22 @@
         return String(value);
     }
 
+    function setPolicyImpactResultTitle(title) {
+        const target = document.getElementById('policyImpactResultTitle');
+        if (target) {
+            target.textContent = title;
+        }
+    }
+
+    function clearPolicyImpactPanels() {
+        const summaryTarget = document.getElementById('policyImpactSummary');
+        const detailsTarget = document.getElementById('policyImpactDetails');
+        const jsonTarget = document.getElementById('policyImpactJson');
+        if (summaryTarget) summaryTarget.innerHTML = '';
+        if (detailsTarget) detailsTarget.innerHTML = '';
+        if (jsonTarget) jsonTarget.innerHTML = '';
+    }
+
     function canonicalTagPills(policy) {
         const tagPolicy = (policy && policy.tag_policy) || {};
         const legacyTags = Array.isArray(tagPolicy.legacy_tags) ? tagPolicy.legacy_tags : ['boxarr', 'boxarr-keep'];
@@ -875,7 +891,7 @@
         getRequiredElement('policyTags').value = Array.isArray(current.tags) ? current.tags.join(', ') : '';
         getRequiredElement('policyAutoTagText').value = current.auto_tag_text ?? '';
         getRequiredElement('policyProtectTag').value = current.cleanup_protect_tag ?? 'boxarr-protected';
-        getRequiredElement('policyScopeFuture').checked = true;
+        getRequiredElement('policyScopeCurrent').checked = true;
         getRequiredElement('policyYearFrom').value = {{ week_data.year }};
         getRequiredElement('policyWeekFrom').value = {{ week_data.week }};
         getRequiredElement('policyYearTo').value = {{ week_data.year }};
@@ -933,6 +949,7 @@
         getRequiredElement('backfillFetchLimit').value = current.box_office_fetch_limit ?? '';
         getRequiredElement('backfillAddLimit').value = current.maximum_movies_to_add ?? '';
         getRequiredElement('backfillAutoAdd').value = current.auto_add_enabled ? 'true' : 'false';
+        getRequiredElement('backfillCurrentLimit').textContent = formatValue(current.maximum_movies_to_add);
         getRequiredElement('backfillAllStored').checked = false;
         getRequiredElement('backfillMaxWeeks').value = '1';
         getRequiredElement('backfillMaxWeeks').disabled = false;
@@ -1041,14 +1058,10 @@
     }
 
     function changePolicyImpactSummary(data) {
+        setPolicyImpactResultTitle('Policy impact');
         const recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
         const changedFields = Array.isArray(data.changed_fields) ? data.changed_fields : [];
-        const summaryTarget = document.getElementById('policyImpactSummary');
-        const detailsTarget = document.getElementById('policyImpactDetails');
-        const jsonTarget = document.getElementById('policyImpactJson');
-        if (summaryTarget) summaryTarget.innerHTML = '';
-        if (detailsTarget) detailsTarget.innerHTML = '';
-        if (jsonTarget) jsonTarget.innerHTML = '';
+        clearPolicyImpactPanels();
         const payload = {
             market: data.market || currentMarketKey(),
             changed_fields: changedFields.length,
@@ -1062,17 +1075,83 @@
         renderListSection('policyImpactDetails', 'Changed fields', changedFields, item => `<strong>${item.field}</strong>: ${formatValue(item.from)} → ${formatValue(item.to)}`);
         renderListSection('policyImpactDetails', 'Recommendations', recommendations, item => `<strong>${item.action || item}</strong>${item.reason ? ` — ${item.reason}` : ''}`);
         renderJsonBlob('policyImpactJson', data);
-        openImpactModal();
+    }
+
+    function policyCleanupImpactView(data) {
+        setPolicyImpactResultTitle('Cleanup impact');
+        clearPolicyImpactPanels();
+        const wouldDelete = Array.isArray(data.would_delete) ? data.would_delete : (Array.isArray(data.candidates) ? data.candidates : []);
+        const wouldDetach = Array.isArray(data.would_detach_market_tag_only) ? data.would_detach_market_tag_only : (Array.isArray(data.detached) ? data.detached : []);
+        const skipped = Array.isArray(data.skipped) ? data.skipped : [];
+        const protectedItems = Array.isArray(data.protected) ? data.protected : [];
+        const unsafe = Array.isArray(data.unsafe) ? data.unsafe : [];
+        renderSummaryMetrics('policyImpactSummary', {
+            considered: data.considered_total ?? data.movies_scanned ?? 0,
+            would_delete: wouldDelete.length,
+            would_detach: wouldDetach.length,
+            protected: protectedItems.length,
+            unsafe: unsafe.length,
+            skipped: skipped.length,
+            estimated_size: formatBytes(data.estimated_size_to_delete || data.estimated_size_deleted || 0),
+        });
+        renderListSection('policyImpactDetails', 'Would delete', wouldDelete, item => `<strong>${item.title}</strong><div>${item.reason || 'delete candidate'}</div>`);
+        renderListSection('policyImpactDetails', 'Would detach market tag only', wouldDetach, item => `<strong>${item.title}</strong><div>${item.reason || 'detach candidate'}</div>`);
+        renderListSection('policyImpactDetails', 'Protected', protectedItems, item => `<strong>${item.title}</strong><div>${item.reason || 'protected'}</div>`);
+        renderListSection('policyImpactDetails', 'Unsafe', unsafe, item => `<strong>${item.title}</strong><div>${item.reason || 'unsafe'}</div>`);
+        renderListSection('policyImpactDetails', 'Skipped', skipped, item => `<strong>${item.title}</strong><div>${item.reason || 'skipped'}</div>`);
+        renderJsonBlob('policyImpactJson', data);
+    }
+
+    function policyBackfillImpactView(data) {
+        setPolicyImpactResultTitle('Backfill impact');
+        clearPolicyImpactPanels();
+        const weeks = Array.isArray(data.weeks) ? data.weeks : [];
+        const refetchRequired = Array.isArray(data.refetch_required) ? data.refetch_required : [];
+        renderSummaryMetrics('policyImpactSummary', {
+            weeks_scanned: weeks.length,
+            would_add: data.would_add_count_total ?? data.added_count ?? data.would_add_count ?? 0,
+            refetch_required: refetchRequired.length,
+            skipped: data.skipped_count_total ?? weeks.reduce((acc, week) => acc + (week.skipped || 0), 0),
+        });
+        renderListSection('policyImpactDetails', 'Weeks scanned', weeks, week => {
+            const refetch = week.needs_refetch ? '<span class="tag-pill legacy">refetch required</span>' : '';
+            return `
+                <strong>${week.week || week.path}</strong>
+                <div>Would add: ${week.would_add_count ?? 0} • Stored: ${week.stored_count ?? 0} ${refetch}</div>
+            `;
+        });
+        renderListSection('policyImpactDetails', 'Refetch required', refetchRequired, item => `<code>${item}</code>`);
+        renderJsonBlob('policyImpactJson', data);
+    }
+
+    function policyNoChangeImpactView(data) {
+        setPolicyImpactResultTitle('No policy change');
+        clearPolicyImpactPanels();
+        renderSummaryMetrics('policyImpactSummary', {
+            market: data.market || currentMarketKey(),
+            current_add_limit: data.current?.effective?.maximum_movies_to_add ?? currentPolicyValues().maximum_movies_to_add ?? 'n/a',
+        });
+        renderListSection('policyImpactDetails', 'Current state', [
+            {
+                field: 'Fetch top',
+                value: data.current?.effective?.box_office_fetch_limit ?? currentPolicyValues().box_office_fetch_limit,
+            },
+            {
+                field: 'Add to Radarr',
+                value: data.current?.effective?.maximum_movies_to_add ?? currentPolicyValues().maximum_movies_to_add,
+            },
+            {
+                field: 'Auto-add',
+                value: data.current?.effective?.auto_add_enabled ?? currentPolicyValues().auto_add_enabled,
+            },
+        ], item => `<strong>${item.field}</strong>: ${formatValue(item.value)}`);
+        renderJsonBlob('policyImpactJson', data);
     }
 
     function applyPolicyResultView(data) {
         const snapshot = data.policy_snapshot || {};
-        const summaryTarget = document.getElementById('policyImpactSummary');
-        const detailsTarget = document.getElementById('policyImpactDetails');
-        const jsonTarget = document.getElementById('policyImpactJson');
-        if (summaryTarget) summaryTarget.innerHTML = '';
-        if (detailsTarget) detailsTarget.innerHTML = '';
-        if (jsonTarget) jsonTarget.innerHTML = '';
+        setPolicyImpactResultTitle('Policy applied');
+        clearPolicyImpactPanels();
         renderSummaryMetrics('policyImpactSummary', {
             market: data.market || currentMarketKey(),
             weeks_updated: snapshot.updated ?? 0,
@@ -1095,7 +1174,6 @@
         ], item => `<strong>${item.field}</strong>: ${formatValue(item.value)}`);
         renderListSection('policyImpactDetails', 'Updated paths', Array.isArray(snapshot.paths) ? snapshot.paths : [], item => `<code>${item}</code>`);
         renderJsonBlob('policyImpactJson', data);
-        openImpactModal();
     }
 
     function backfillResultView(data) {
@@ -1109,9 +1187,9 @@
         if (jsonTarget) jsonTarget.innerHTML = '';
         renderSummaryMetrics('backfillResultSummary', {
             weeks_scanned: weeks.length,
-            would_add: data.added_count ?? data.would_add_count ?? 0,
+            would_add: data.would_add_count_total ?? data.added_count ?? data.would_add_count ?? 0,
             refetch_required: refetchRequired.length,
-            skipped: weeks.reduce((acc, week) => acc + (week.skipped || 0), 0),
+            skipped: data.skipped_count_total ?? weeks.reduce((acc, week) => acc + (week.skipped || 0), 0),
         });
         renderListSection('backfillResultDetails', 'Weeks scanned', weeks, week => {
             const refetch = week.needs_refetch ? '<span class="tag-pill legacy">refetch required</span>' : '';
@@ -1189,14 +1267,70 @@
         renderJsonBlob('migrationResultJson', data);
     }
 
-    async function fetchImpactPreview() {
+    function policyImpactCurrentAddLimit() {
+        return currentPolicyValues().maximum_movies_to_add;
+    }
+
+    function policyImpactSelectedAddLimit() {
         const updates = sanitizePolicyPayload(selectedPolicyFields());
-        const data = await fetchJson(policyEndpoint('/impact'), updates).catch(err => {
-            alert(`Policy impact failed: ${err.message}`);
+        return updates.maximum_movies_to_add ?? policyImpactCurrentAddLimit();
+    }
+
+    async function fetchImpactPreview() {
+        const current = currentPolicyValues();
+        const updates = sanitizePolicyPayload(selectedPolicyFields());
+        const currentLimit = current.maximum_movies_to_add;
+        const newLimit = updates.maximum_movies_to_add ?? currentLimit;
+        const scope = policyScopePayload();
+        const isNumericComparison = typeof currentLimit === 'number' && typeof newLimit === 'number';
+
+        if (!isNumericComparison || newLimit === currentLimit) {
+            const data = await fetchJson(policyEndpoint('/impact'), updates).catch(err => {
+                alert(`Policy impact failed: ${err.message}`);
+                return null;
+            });
+            if (data) {
+                policyNoChangeImpactView(data);
+                openImpactModal();
+            }
+            return;
+        }
+
+        if (newLimit < currentLimit) {
+            const payload = Object.assign({}, updates, scope, {
+                market: currentMarketKey(),
+                maximum_movies_to_add: newLimit,
+                cleanup_protect_tag: updates.cleanup_protect_tag || current.cleanup_protect_tag || 'boxarr-protected',
+                delete_files: true,
+                remove_without_files_only: false,
+                require_boxarr_tag: true,
+            });
+            const data = await fetchJson(policyEndpoint('/cleanup/dry-run'), payload).catch(err => {
+                alert(`Cleanup preview failed: ${err.message}`);
+                return null;
+            });
+            if (data) {
+                policyCleanupImpactView(data);
+                openImpactModal();
+            }
+            return;
+        }
+
+        const payload = Object.assign({}, updates, scope, {
+            maximum_movies_to_add: newLimit,
+            box_office_fetch_limit: updates.box_office_fetch_limit ?? current.box_office_fetch_limit,
+            auto_add_enabled: updates.auto_add_enabled ?? current.auto_add_enabled,
+            tags: current.tags,
+            auto_tag_text: current.auto_tag_text,
+            cleanup_protect_tag: updates.cleanup_protect_tag || current.cleanup_protect_tag || 'boxarr-protected',
+        });
+        const data = await fetchJson(policyEndpoint('/backfill-add/dry-run'), payload).catch(err => {
+            alert(`Backfill preview failed: ${err.message}`);
             return null;
         });
         if (data) {
-            changePolicyImpactSummary(data);
+            policyBackfillImpactView(data);
+            openImpactModal();
         }
     }
 
@@ -1219,6 +1353,7 @@
         });
         if (data) {
             applyPolicyResultView(data);
+            openImpactModal();
         }
     }
 
@@ -1663,10 +1798,11 @@
                 <div class="modal-section">
                     <h4>Current policy</h4>
                     <div class="policy-diff">
-                        <div class="policy-diff-item"><span class="label">Add to Radarr</span><span class="value" id="policyCurrentValueAdd"></span></div>
-                        <div class="policy-diff-item"><span class="label">Fetch top</span><span class="value" id="policyCurrentValueFetch"></span></div>
-                        <div class="policy-diff-item"><span class="label">Auto-add</span><span class="value" id="policyCurrentValueAutoAdd"></span></div>
-                        <div class="policy-diff-item"><span class="label">Cleanup protect tag</span><span class="value" id="policyCurrentValueProtect"></span></div>
+                        <div class="policy-diff-item"><span class="label">Market:</span> <span class="value">{{ market_policy.label }} ({{ market }})</span></div>
+                        <div class="policy-diff-item"><span class="label">Current add limit:</span> <span class="value" id="policyCurrentValueAdd"></span></div>
+                        <div class="policy-diff-item"><span class="label">Current fetch top:</span> <span class="value" id="policyCurrentValueFetch"></span></div>
+                        <div class="policy-diff-item"><span class="label">Auto-add:</span> <span class="value" id="policyCurrentValueAutoAdd"></span></div>
+                        <div class="policy-diff-item"><span class="label">Cleanup protect tag:</span> <span class="value" id="policyCurrentValueProtect"></span></div>
                     </div>
                     <div style="margin-top:0.75rem; color: var(--text-secondary);">
                         Boxarr will compare this policy against stored weekly pages and Radarr. No files are changed during preview.
@@ -1766,15 +1902,16 @@
 
 <!-- Preview Impact Modal -->
 <div id="policyImpactModal" class="modal" onclick="if (event.target === this) closeImpactModal();">
-    <div class="modal-content" style="max-width: 1120px;">
+    <div class="modal-content" style="max-width: 1120px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden;">
         <div class="modal-header">
             <h3>Preview Impact</h3>
             <button class="modal-close" type="button" onclick="closeImpactModal()">&times;</button>
         </div>
-        <div class="modal-body">
+        <div class="modal-body" style="display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
             <div class="modal-note">
                 This preview shows the impact of the policy change before saving or applying it to stored weeks.
             </div>
+            <h4 id="policyImpactResultTitle" style="margin: 0.75rem 0 0.5rem 0;">Policy impact</h4>
             <div id="policyImpactSummary"></div>
             <div id="policyImpactDetails" class="result-scroll"></div>
             <div id="policyImpactJson" class="result-scroll"></div>
@@ -1800,8 +1937,8 @@
                 <div class="modal-section">
                     <h4>Current policy</h4>
                     <div class="policy-diff">
-                        <div class="policy-diff-item"><span class="label">Market</span><span class="value">{{ market_policy.label }}</span></div>
-                        <div class="policy-diff-item"><span class="label">Current add limit</span><span class="value" id="backfillCurrentLimit"></span></div>
+                        <div class="policy-diff-item"><span class="label">Market:</span> <span class="value">{{ market_policy.label }} ({{ market }})</span></div>
+                        <div class="policy-diff-item"><span class="label">Current add limit:</span> <span class="value" id="backfillCurrentLimit"></span></div>
                     </div>
                     <div style="margin-top:0.75rem; color: var(--text-secondary);">
                         Boxarr will compare the current market policy against Radarr. No files are deleted in dry-run.
@@ -1845,7 +1982,7 @@
         <div class="modal-footer">
             <button class="action-btn secondary" type="button" onclick="closeBackfillModal()">Close</button>
             <button class="action-btn secondary" type="button" onclick="runBackfillDryRun()">Preview impact</button>
-            <button id="backfillExecuteBtn" class="action-btn" type="button" onclick="runBackfillExecute()" {% if not dangerous_actions_enabled %}disabled title=\"Execute disabled in this build\"{% endif %}>Execute</button>
+            <button id="backfillExecuteBtn" class="action-btn {% if dangerous_actions_enabled %}primary{% else %}secondary{% endif %}" type="button" onclick="runBackfillExecute()" {% if not dangerous_actions_enabled %}disabled title=\"Execute disabled in this build\"{% endif %}>Execute{% if not dangerous_actions_enabled %} disabled{% endif %}</button>
         </div>
     </div>
 </div>
@@ -1865,10 +2002,10 @@
                 <div class="modal-section">
                     <h4>Current policy</h4>
                     <div class="policy-diff">
-                        <div class="policy-diff-item"><span class="label">Market</span><span class="value">Market: {{ market_policy.label }} ({{ market }})</span></div>
-                        <div class="policy-diff-item"><span class="label">Current add limit</span><span class="value" id="cleanupCurrentLimit">{{ market_policy.effective.maximum_movies_to_add|default(auto_add_limit, true) }}</span></div>
-                        <div class="policy-diff-item"><span class="label">Current fetch top</span><span class="value" id="cleanupCurrentFetch">{{ market_policy.effective.box_office_fetch_limit|default(box_office_limit, true) }}</span></div>
-                        <div class="policy-diff-item"><span class="label">Auto-add</span><span class="value" id="cleanupCurrentAutoAdd">{{ 'enabled' if market_policy.effective.auto_add_enabled else 'disabled' }}</span></div>
+                        <div class="policy-diff-item"><span class="label">Market:</span> <span class="value">{{ market_policy.label }} ({{ market }})</span></div>
+                        <div class="policy-diff-item"><span class="label">Current add limit:</span><span class="value" id="cleanupCurrentLimit">{{ market_policy.effective.maximum_movies_to_add|default(auto_add_limit, true) }}</span></div>
+                        <div class="policy-diff-item"><span class="label">Current fetch top:</span><span class="value" id="cleanupCurrentFetch">{{ market_policy.effective.box_office_fetch_limit|default(box_office_limit, true) }}</span></div>
+                        <div class="policy-diff-item"><span class="label">Auto-add:</span><span class="value" id="cleanupCurrentAutoAdd">{{ 'enabled' if market_policy.effective.auto_add_enabled else 'disabled' }}</span></div>
                     </div>
                     <div style="margin-top:0.75rem; color: var(--text-secondary);">
                         Boxarr will compare this policy against stored weekly pages and Radarr. No files are changed during preview.
@@ -1975,7 +2112,7 @@
         <div class="modal-footer">
             <button class="action-btn secondary" type="button" onclick="closeMigrationModal()">Close</button>
             <button class="action-btn secondary" type="button" onclick="runMigrationDryRun()">Preview legacy tag migration</button>
-            <button id="migrationExecuteBtn" class="action-btn" type="button" onclick="runMigrationExecute()" {% if not dangerous_actions_enabled %}disabled title=\"Execute disabled in this build\"{% endif %}>Execute</button>
+            <button id="migrationExecuteBtn" class="action-btn {% if dangerous_actions_enabled %}primary{% else %}secondary{% endif %}" type="button" onclick="runMigrationExecute()" {% if not dangerous_actions_enabled %}disabled title=\"Execute disabled in this build\"{% endif %}>Execute{% if not dangerous_actions_enabled %} disabled{% endif %}</button>
         </div>
     </div>
 </div>

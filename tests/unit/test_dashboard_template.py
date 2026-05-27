@@ -28,13 +28,14 @@ def test_dashboard_template_contains_cleanup_modal_and_shared_modal_language():
         "boxarr-protected",
         "Execute disabled in this build. Dry-run only.",
         "Review Market Policy Impact",
-        "Current add limit",
-        "Current fetch top",
-        "Auto-add",
+        "Current add limit:",
+        "Current fetch top:",
+        "Auto-add:",
         "Preview impact",
         "value=\"{{ market_policy.effective.maximum_movies_to_add|default(auto_add_limit, true) }}\"",
         "id=\"cleanupCurrentLimit\">{{ market_policy.effective.maximum_movies_to_add|default(auto_add_limit, true) }}</span>",
         "id=\"cleanupCurrentFetch\">{{ market_policy.effective.box_office_fetch_limit|default(box_office_limit, true) }}</span>",
+        "limitInput.value = value;",
         "class=\"action-btn {% if dangerous_actions_enabled %}cleanup{% else %}secondary{% endif %}\"",
     ]
     for snippet in required_snippets:
@@ -46,7 +47,7 @@ def test_dashboard_template_contains_cleanup_modal_and_shared_modal_language():
     modal_end = content.index('{% endblock %}', modal_start)
     modal_block = content[modal_start:modal_end]
     visible_block, advanced_block = modal_block.split('<details class="advanced-options"', 1)
-    assert "Market: {{ market_policy.label }} ({{ market }})" in visible_block
+    assert "Market:</span> <span class=\"value\">{{ market_policy.label }} ({{ market }})</span>" in visible_block
     assert "Default or overridden market policy values" not in visible_block
     for field in [
         'cleanupProtectTag',

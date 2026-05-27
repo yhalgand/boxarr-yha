@@ -52,10 +52,20 @@ def _normalize_key(value: Optional[str]) -> str:
     return str(value or "").strip().lower()
 
 
-def _market_config_to_dict(market_config: MarketConfig | Dict[str, Any]) -> Dict[str, Any]:
+def market_config_to_dict(market_config: Any) -> Dict[str, Any]:
+    """Normalize a market config object or mapping into a plain dict."""
+    if market_config is None:
+        return {}
     if isinstance(market_config, MarketConfig):
-        return market_config.model_dump(exclude_none=True)
-    return dict(market_config or {})
+        return dict(market_config.model_dump(exclude_none=False))
+    if isinstance(market_config, dict):
+        return dict(market_config)
+    if hasattr(market_config, "model_dump"):
+        return dict(market_config.model_dump(exclude_none=False))
+    try:
+        return dict(market_config)
+    except Exception:
+        return {}
 
 
 def _canonicalize_provider_fields(
@@ -79,7 +89,7 @@ def _configured_market_overrides(settings_obj: Settings) -> Dict[str, Dict[str, 
             continue
 
         try:
-            overrides[key] = _market_config_to_dict(market_config)
+            overrides[key] = market_config_to_dict(market_config)
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug("Ignoring malformed market config for %s: %s", key, exc)
             continue

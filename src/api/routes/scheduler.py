@@ -1,5 +1,6 @@
 """Scheduler management routes."""
 
+import asyncio
 import json
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +22,7 @@ from ...core.boxoffice_storage import (
     iter_history_paths,
 )
 from ...core.exceptions import BoxOfficeError
+from .movies import refresh_stored_status_for_market
 from ...utils.config import settings
 from ...utils.logger import get_logger
 
@@ -349,6 +351,7 @@ async def update_specific_week(request: UpdateWeekRequest):  # noqa: C901
         # Match with Radarr
         match_results = []
         added_count = 0
+        radarr_movies = []
 
         if settings.radarr_api_key:
             radarr_service = RadarrService()
@@ -399,6 +402,9 @@ async def update_specific_week(request: UpdateWeekRequest):  # noqa: C901
             week,
             radarr_movies if settings.radarr_api_key else [],
         )
+
+        if added_count > 0:
+            await asyncio.to_thread(refresh_stored_status_for_market, market)
 
         return {
             "success": True,

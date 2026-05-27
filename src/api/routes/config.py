@@ -17,7 +17,11 @@ from ...core.market_admin import (
     persist_market_definition,
     save_yaml_config,
 )
-from ...core.market_settings import get_configured_markets, get_effective_market_settings
+from ...core.market_settings import (
+    get_configured_markets,
+    get_effective_market_settings,
+    market_config_to_dict,
+)
 from ...core.radarr import RadarrService
 from ...utils.config import RootFolderConfig, RootFolderMapping, Settings, settings
 from ...utils.logger import get_logger
@@ -279,14 +283,17 @@ def _persist_market_definition(
 
     refreshed_markets = get_configured_markets(settings)
     refreshed_effective = get_effective_market_settings(settings, normalized_market)
+    refreshed_definition = market_config_to_dict(
+        refreshed_markets.get(normalized_market, result)
+    )
     return {
         "market": normalized_market,
-        "definition": refreshed_markets[normalized_market],
+        "definition": refreshed_definition,
         "effective": refreshed_effective.get("effective", {}),
         "sources": refreshed_effective.get("sources", {}),
-        "aliases": refreshed_markets[normalized_market].get("aliases", []),
-        "enabled": result.get("enabled", refreshed_markets[normalized_market].get("enabled", True)),
-        "configured": refreshed_markets[normalized_market].get("configured", False),
+        "aliases": refreshed_definition.get("aliases", []),
+        "enabled": result.get("enabled", refreshed_definition.get("enabled", True)),
+        "configured": refreshed_definition.get("configured", False),
     }
 
 

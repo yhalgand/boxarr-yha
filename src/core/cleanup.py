@@ -932,6 +932,7 @@ class AddLimitCleanupService:
             eligible_key: Optional[str] = eligible_key_str,
             why_not_eligible: Optional[str] = None,
             safe_to_delete: bool = False,
+            safe_to_detach: bool = False,
             unsafe_reason: Optional[str] = None,
         ) -> CleanupDecision:
             return CleanupDecision(
@@ -965,7 +966,7 @@ class AddLimitCleanupService:
                 would_remove_radarr=action == "delete",
                 would_delete_files=bool(has_file and size_on_disk and size_on_disk > 0),
                 safe_to_delete=safe_to_delete,
-                safe_to_detach=False,
+                safe_to_detach=safe_to_detach,
                 unsafe_to_delete=not safe_to_delete,
                 unsafe_reason=unsafe_reason,
                 estimated_size_bytes=size_on_disk if size_on_disk and size_on_disk > 0 else 0,

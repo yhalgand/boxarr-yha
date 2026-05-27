@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 import yaml
 
 from .boxoffice_provider import DEFAULT_PROVIDER, canonicalize_provider_definition, normalize_provider
+from .market_settings import get_configured_markets, market_config_to_dict
 from ..utils.config import Settings, settings
 
 MARKET_KEY_PATTERN = re.compile(r"^[a-z0-9_-]+$")
@@ -130,7 +131,7 @@ def build_market_definition(
 ) -> Dict[str, Any]:
     """Build a canonical market definition from incoming payload data."""
     normalized_key = normalize_market_key(market_key)
-    base = dict(existing or {})
+    base = market_config_to_dict(existing)
     incoming = dict(payload or {})
 
     if "label" in incoming and incoming.get("label") is not None and not str(incoming.get("label")).strip():
@@ -243,15 +244,22 @@ def persist_market_definition(
     current_markets = getattr(settings, "markets", {}) or {}
     if not isinstance(current_markets, dict):
         current_markets = {}
+    registry_markets = get_configured_markets(settings)
 
-    market_exists = normalized_market in current_markets or normalized_market in markets_section
+    market_exists = (
+        normalized_market in current_markets
+        or normalized_market in markets_section
+        or normalized_market in registry_markets
+    )
     if create and market_exists:
         raise ValueError(f"Market '{normalized_market}' already exists")
     if not create and not market_exists:
         raise ValueError(f"Market '{normalized_market}' not found")
 
-    existing_definition = markets_section.get(normalized_market) or current_markets.get(
-        normalized_market, {}
+    existing_definition = (
+        market_config_to_dict(markets_section.get(normalized_market))
+        or market_config_to_dict(current_markets.get(normalized_market))
+        or market_config_to_dict(registry_markets.get(normalized_market, {}))
     )
     updated_definition = build_market_definition(
         normalized_market,
@@ -265,7 +273,9 @@ def persist_market_definition(
     Settings.reload_from_file(config_path)
 
     refreshed_markets = getattr(settings, "markets", {}) or {}
-    definition = refreshed_markets.get(normalized_market, updated_definition)
+    definition = market_config_to_dict(
+        refreshed_markets.get(normalized_market, updated_definition)
+    )
     return {
         "market": normalized_market,
         "definition": definition,

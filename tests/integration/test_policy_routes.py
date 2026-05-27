@@ -270,6 +270,8 @@ def test_policy_get_put_apply_and_backfill(tmp_path, monkeypatch):
     backfill = backfill_resp.json()
     assert backfill["market"] == "us"
     assert backfill["weeks"][0]["needs_refetch"] is True
+    assert backfill["would_add_count_total"] == 1
+    assert backfill["skipped_count_total"] == 0
 
     no_scope_resp = client.post(
         "/api/policy/us/backfill-add/dry-run",
@@ -529,6 +531,12 @@ def test_policy_execute_endpoints_work_with_dangerous_actions_enabled(tmp_path, 
         "get_all_movies_with_optional_cache_bypass",
         lambda *_, **__: [],
     )
+    refresh_calls = []
+    monkeypatch.setattr(
+        policy_routes,
+        "refresh_stored_status_for_market",
+        lambda market: refresh_calls.append(market) or {"weeks_scanned": 0, "weeks_updated": 0, "movies_refreshed": 0, "movies_linked": 0},
+    )
 
     app = create_app()
     client = TestClient(app)
@@ -548,10 +556,13 @@ def test_policy_execute_endpoints_work_with_dangerous_actions_enabled(tmp_path, 
     assert backfill_resp.status_code == 200
     backfill = backfill_resp.json()
     assert backfill["added_count"] == 1
+    assert backfill["would_add_count_total"] == 1
+    assert backfill["skipped_count_total"] == 0
     assert add_service.add_calls[0]["additional_tag_labels"] == [
         "boxarr-added",
         "boxarr-market-us",
     ]
+    assert refresh_calls == ["us"]
 
     # Reuse the same week file so the legacy migration can match against stored pages.
     _write_weekly_page(weekly_dir, 2026, 12, "Legacy Movie")
@@ -590,6 +601,7 @@ def test_policy_execute_endpoints_work_with_dangerous_actions_enabled(tmp_path, 
     assert migrate["already_migrated_count"] == 0
     assert migration_service.updated_movies, "expected safe tag migration to update Radarr"
     assert len(migration_service.updated_movies[0].tags) == 3
+    assert refresh_calls == ["us", "us"]
 
     migrate_again_resp = client.post(
         "/api/policy/tags/migrate/execute",
@@ -600,6 +612,7 @@ def test_policy_execute_endpoints_work_with_dangerous_actions_enabled(tmp_path, 
     assert migrate_again["migrated"] == 0
     assert migrate_again["already_migrated_count"] == 1
     assert len(migrate_again["already_migrated"]) == 1
+    assert refresh_calls == ["us", "us"]
 
     migrate_dry_run_resp = client.post(
         "/api/policy/tags/migrate/dry-run",

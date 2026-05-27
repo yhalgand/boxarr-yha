@@ -86,6 +86,23 @@ class IgnoreMovieRequest(BaseModel):
     title: str
 
 
+def refresh_stored_status_for_market(
+    market: str = DEFAULT_MARKET, provider: Optional[str] = None
+):
+    """Refresh stored weekly movie data for a market from Radarr."""
+    if provider and market == DEFAULT_MARKET:
+        market = market_for_provider(provider)
+    market = normalize_market(market)
+    provider = provider_for_market(market)
+    if not settings.radarr_api_key:
+        raise HTTPException(status_code=400, detail="Radarr not configured")
+    return refresh_weekly_data_from_radarr(
+        ignore_cache=True,
+        market=market,
+        provider=provider,
+    )
+
+
 @router.get("/root-folders/available")
 async def get_available_root_folders():
     """Get list of available root folders from Radarr."""
@@ -190,18 +207,10 @@ async def unignore_movie(tmdb_id: int):
 async def refresh_stored_status(market: str = DEFAULT_MARKET, provider: Optional[str] = None):
     """Refresh stored weekly movie data using current Radarr state."""
     try:
-        if provider and market == DEFAULT_MARKET:
-            market = market_for_provider(provider)
-        market = normalize_market(market)
-        provider = provider_for_market(market)
-        if not settings.radarr_api_key:
-            raise HTTPException(status_code=400, detail="Radarr not configured")
-
         results = await asyncio.to_thread(
-            refresh_weekly_data_from_radarr,
-            ignore_cache=True,
-            market=market,
-            provider=provider,
+            refresh_stored_status_for_market,
+            market,
+            provider,
         )
         return RefreshStoredStatusResponse(
             success=True,
@@ -363,6 +372,7 @@ async def upgrade_movie_quality(movie_id: int):
         if updated_movie:
             # Trigger search for new quality
             radarr_service.trigger_movie_search(movie_id)
+            regenerate_weeks_with_movie(movie.title)
 
             return UpgradeResponse(
                 success=True,

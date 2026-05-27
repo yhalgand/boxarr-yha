@@ -6,7 +6,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from src.api.app import create_app
-from src.utils.config import Settings
+from src.utils.config import MarketConfig, Settings, settings
 
 
 def _seed_config(dir_path: Path) -> Path:
@@ -50,6 +50,7 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     config_path = _seed_config(tmp_path)
     monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
     Settings.reload_from_file(config_path)
+    assert isinstance(settings.markets["fr"], MarketConfig)
 
     app = create_app()
     client = TestClient(app)
@@ -186,6 +187,111 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     current_enabled = client.get("/api/boxoffice/current?market=de")
     assert current_enabled.status_code == 501
     assert "not implemented yet" in current_enabled.json()["detail"].lower()
+
+
+def test_default_market_override_save_persists_for_us_and_fr(tmp_path, monkeypatch):
+    config_path = _seed_config(tmp_path)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+    assert isinstance(settings.markets["fr"], MarketConfig)
+
+    app = create_app()
+    client = TestClient(app)
+
+    fr_resp = client.put(
+        "/api/config/markets/fr",
+        json={
+            "maximum_movies_to_add": 3,
+            "box_office_fetch_limit": 10,
+            "auto_add_enabled": True,
+            "tags": ["boxarr", "boxarr-fr"],
+            "cleanup_protect_tag": "boxarr-protected",
+        },
+    )
+    assert fr_resp.status_code == 200
+    fr_data = fr_resp.json()
+    assert fr_data["market"] == "fr"
+    assert fr_data["definition"]["maximum_movies_to_add"] == 3
+    assert fr_data["definition"]["box_office_fetch_limit"] == 10
+    assert fr_data["definition"]["tags"] == ["boxarr", "boxarr-fr"]
+    assert fr_data["effective"]["maximum_movies_to_add"] == 3
+    assert fr_data["effective"]["box_office_fetch_limit"] == 10
+    assert fr_data["effective"]["tags"] == ["boxarr", "boxarr-fr"]
+
+    us_resp = client.put(
+        "/api/config/markets/us",
+        json={
+            "maximum_movies_to_add": 4,
+            "box_office_fetch_limit": 12,
+            "auto_add_enabled": False,
+            "tags": ["boxarr", "boxarr-us"],
+            "cleanup_protect_tag": "boxarr-protected",
+        },
+    )
+    assert us_resp.status_code == 200
+    us_data = us_resp.json()
+    assert us_data["market"] == "us"
+    assert us_data["definition"]["maximum_movies_to_add"] == 4
+    assert us_data["definition"]["box_office_fetch_limit"] == 12
+    assert us_data["definition"]["tags"] == ["boxarr", "boxarr-us"]
+
+    saved_yaml = yaml.safe_load(config_path.read_text())
+    assert saved_yaml["markets"]["fr"]["maximum_movies_to_add"] == 3
+    assert saved_yaml["markets"]["fr"]["box_office_fetch_limit"] == 10
+    assert saved_yaml["markets"]["fr"]["tags"] == ["boxarr", "boxarr-fr"]
+    assert saved_yaml["markets"]["us"]["maximum_movies_to_add"] == 4
+    assert saved_yaml["markets"]["us"]["box_office_fetch_limit"] == 12
+    assert saved_yaml["markets"]["us"]["tags"] == ["boxarr", "boxarr-us"]
+
+
+def test_update_existing_marketconfig_object_does_not_crash(tmp_path, monkeypatch):
+    config_path = _seed_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text())
+    config["markets"] = {
+        "fr": {
+            "label": "France Box Office",
+            "provider": "jpboxoffice",
+            "provider_config": {"country": "fr"},
+            "enabled": True,
+            "box_office_fetch_limit": 10,
+            "maximum_movies_to_add": 3,
+            "auto_add_enabled": True,
+            "tags": ["boxarr", "boxarr-fr"],
+            "auto_tag_text": "boxarr-fr",
+            "cleanup_protect_tag": "boxarr-protected",
+            "root_folder": "/movies/fr",
+        }
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False))
+
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.put(
+        "/api/config/markets/fr",
+        json={
+            "maximum_movies_to_add": 3,
+            "box_office_fetch_limit": 12,
+            "auto_add_enabled": False,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["market"] == "fr"
+    assert data["definition"]["maximum_movies_to_add"] == 3
+    assert data["definition"]["box_office_fetch_limit"] == 12
+    assert data["definition"]["auto_add_enabled"] is False
+    assert data["definition"]["tags"] == ["boxarr", "boxarr-fr"]
+    assert data["effective"]["maximum_movies_to_add"] == 5
+    assert data["effective"]["box_office_fetch_limit"] == 12
+
+    saved_yaml = yaml.safe_load(config_path.read_text())
+    assert saved_yaml["markets"]["fr"]["maximum_movies_to_add"] == 3
+    assert saved_yaml["markets"]["fr"]["box_office_fetch_limit"] == 12
+    assert saved_yaml["markets"]["fr"]["tags"] == ["boxarr", "boxarr-fr"]
 
 
 def test_market_admin_rejects_invalid_or_existing_keys(tmp_path, monkeypatch):

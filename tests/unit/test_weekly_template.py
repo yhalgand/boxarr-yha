@@ -18,6 +18,7 @@ def test_weekly_template_contains_policy_wizard_modals():
     required_snippets = [
         "id=\"changePolicyModal\"",
         "id=\"policyImpactModal\"",
+        "id=\"policyImpactResultTitle\"",
         "id=\"backfillModal\"",
         "id=\"cleanupPolicyModal\"",
         "id=\"migrationModal\"",
@@ -49,6 +50,7 @@ def test_weekly_template_contains_policy_wizard_modals():
         "id=\"backfillResultSummary\"",
         "id=\"backfillResultDetails\"",
         "id=\"backfillResultJson\"",
+        "id=\"backfillCurrentLimit\"",
         "id=\"cleanupResult\"",
         "id=\"cleanupResultSummary\"",
         "id=\"cleanupResultDetails\"",
@@ -71,6 +73,14 @@ def test_weekly_template_contains_policy_wizard_modals():
         "id=\"cleanupCurrentLimit\">{{ market_policy.effective.maximum_movies_to_add|default(auto_add_limit, true) }}</span>",
         "id=\"cleanupCurrentFetch\">{{ market_policy.effective.box_office_fetch_limit|default(box_office_limit, true) }}</span>",
         "value=\"{{ market_policy.effective.maximum_movies_to_add|default(auto_add_limit, true) }}\"",
+        "getRequiredElement('cleanupTargetLimit').value = current.maximum_movies_to_add ?? '';",
+        "getRequiredElement('backfillCurrentLimit').textContent = formatValue(current.maximum_movies_to_add);",
+        "getRequiredElement('policyScopeCurrent').checked = true;",
+        "backfill-add/dry-run",
+        "cleanup/dry-run",
+        "No policy change",
+        "would_add_count_total",
+        "skipped_count_total",
     ]
     for snippet in required_snippets:
         assert snippet in content, f"missing weekly template snippet: {snippet}"
@@ -100,11 +110,13 @@ def test_weekly_template_contains_policy_wizard_modals():
     assert "for=\"cleanupYearFrom\"" in advanced_cleanup_block
     assert "for=\"cleanupWeekFrom\"" in advanced_cleanup_block
     assert "cleanupWithoutFilesOnly" in advanced_cleanup_block
-    assert "Current add limit" in visible_cleanup_block
-    assert "Current fetch top" in visible_cleanup_block
-    assert "Auto-add" in visible_cleanup_block
-    assert "Market: {{ market_policy.label }} ({{ market }})" in visible_cleanup_block
+    assert "Current add limit:" in visible_cleanup_block
+    assert "Current fetch top:" in visible_cleanup_block
+    assert "Auto-add:" in visible_cleanup_block
+    assert "Market:</span> <span class=\"value\">{{ market_policy.label }} ({{ market }})</span>" in visible_cleanup_block
     assert "Cleanup Boxarr-added movies" not in visible_cleanup_block
+    assert "class=\"action-btn {% if dangerous_actions_enabled %}primary{% else %}secondary{% endif %}\"" in content
+    assert "id=\"migrationExecuteBtn\" class=\"action-btn {% if dangerous_actions_enabled %}primary{% else %}secondary{% endif %}\"" in content
 
 
 def test_weekly_template_js_ids_are_rendered():

@@ -23,6 +23,7 @@ from ...core.market_policy import (
     get_market_policy,
     update_weekly_policy_snapshot,
 )
+from .movies import refresh_stored_status_for_market
 from ...core.market_settings import ensure_market_enabled, get_configured_markets
 from ...core.matcher import MovieMatcher
 from ...core.radarr import RadarrMovie, RadarrService, get_all_movies_with_optional_cache_bypass
@@ -429,6 +430,8 @@ def _backfill_add_sync(
         week_paths = _resolve_backfill_paths(market_key, payload)
         weeks_report = []
         total_added = 0
+        total_would_add = 0
+        total_skipped = 0
         refetch_required = []
         for path in week_paths:
             week_payload = _load_week_payload(path)
@@ -451,6 +454,8 @@ def _backfill_add_sync(
             )
             unmatched = [r for r in match_results if not r.is_matched]
             would_add = min(len(unmatched), target_add_limit)
+            total_would_add += would_add
+            total_skipped += len(match_results) - len(unmatched)
             week_result = {
                 "week": f"{int(week_payload.get('year') or 0)}W{int(week_payload.get('week') or 0):02d}",
                 "path": str(path),
@@ -487,7 +492,7 @@ def _backfill_add_sync(
                         matcher.build_movie_index(radarr_movies)
             weeks_report.append(week_result)
 
-        return {
+        result = {
             "success": True,
             "mode": "execute" if execute else "dry-run",
             "market": market_key,
@@ -503,9 +508,14 @@ def _backfill_add_sync(
             "target_add_limit": target_add_limit,
             "refetch_required": refetch_required,
             "weeks": weeks_report,
+            "would_add_count_total": total_would_add,
+            "skipped_count_total": total_skipped,
             "added_count": total_added,
             "dry_run": not execute,
         }
+        if execute and total_added > 0:
+            result["status_refresh"] = refresh_stored_status_for_market(market_key)
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -557,6 +567,16 @@ async def _cleanup(market: str, payload: CleanupRequest, *, execute: bool):
             execute=execute,
         )
         result["policy"] = policy
+        if execute and (
+            result.get("deleted")
+            or result.get("detached")
+            or result.get("would_delete")
+            or result.get("would_detach_market_tag_only")
+        ):
+            result["status_refresh"] = await asyncio.to_thread(
+                refresh_stored_status_for_market,
+                market_key,
+            )
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -786,7 +806,7 @@ async def _migrate_tags(payload: TagMigrationRequest, *, execute: bool):
         else:
             message = None
 
-        return {
+        result = {
             "success": True,
             "mode": "execute" if execute else "dry-run",
             "dry_run": not execute,
@@ -807,5 +827,11 @@ async def _migrate_tags(payload: TagMigrationRequest, *, execute: bool):
             "migrated": sum(1 for item in candidates if item.get("safe")),
             "already_migrated_count": len(already_migrated),
         }
+        if execute and result["migrated"] > 0:
+            result["status_refresh"] = await asyncio.to_thread(
+                refresh_stored_status_for_market,
+                market,
+            )
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

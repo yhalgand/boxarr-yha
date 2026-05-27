@@ -1451,10 +1451,10 @@
                 <div class="modal-section">
                     <h4>Current policy</h4>
                     <div class="policy-diff">
-                        <div class="policy-diff-item"><span class="label">Market</span><span class="value">Market: {{ market_policy.label }} ({{ market }})</span></div>
-                        <div class="policy-diff-item"><span class="label">Current add limit</span><span class="value" id="cleanupCurrentLimit">{{ market_policy.effective.maximum_movies_to_add|default(auto_add_limit, true) }}</span></div>
-                        <div class="policy-diff-item"><span class="label">Current fetch top</span><span class="value" id="cleanupCurrentFetch">{{ market_policy.effective.box_office_fetch_limit|default(box_office_limit, true) }}</span></div>
-                        <div class="policy-diff-item"><span class="label">Auto-add</span><span class="value" id="cleanupCurrentAutoAdd">{{ 'enabled' if market_policy.effective.auto_add_enabled else 'disabled' }}</span></div>
+                        <div class="policy-diff-item"><span class="label">Market:</span> <span class="value">{{ market_policy.label }} ({{ market }})</span></div>
+                        <div class="policy-diff-item"><span class="label">Current add limit:</span> <span class="value" id="cleanupCurrentLimit">{{ market_policy.effective.maximum_movies_to_add|default(auto_add_limit, true) }}</span></div>
+                        <div class="policy-diff-item"><span class="label">Current fetch top:</span> <span class="value" id="cleanupCurrentFetch">{{ market_policy.effective.box_office_fetch_limit|default(box_office_limit, true) }}</span></div>
+                        <div class="policy-diff-item"><span class="label">Auto-add:</span> <span class="value" id="cleanupCurrentAutoAdd">{{ 'enabled' if market_policy.effective.auto_add_enabled else 'disabled' }}</span></div>
                     </div>
                     <div style="margin-top:0.75rem; color: var(--text-secondary);">
                         Boxarr will compare this policy against stored weekly pages and Radarr. No files are changed during preview.
@@ -2364,6 +2364,14 @@ function showCleanupModal() {
         const marketSelect = document.getElementById('cleanupMarket');
         if (marketSelect && typeof getCurrentMarket === 'function') {
             marketSelect.value = getCurrentMarket();
+        }
+        const currentLimit = document.getElementById('cleanupCurrentLimit');
+        const limitInput = document.getElementById('cleanupLimit');
+        if (currentLimit && limitInput) {
+            const value = (currentLimit.textContent || '').trim();
+            if (value) {
+                limitInput.value = value;
+            }
         }
         modal.style.display = 'flex';
     }

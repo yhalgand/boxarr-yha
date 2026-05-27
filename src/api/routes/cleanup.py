@@ -1,5 +1,6 @@
 """Cleanup routes for Boxarr-added Radarr movies."""
 
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -7,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from ...core.boxoffice_provider import DEFAULT_MARKET, normalize_market
 from ...core.cleanup import AddLimitCleanupService
+from .movies import refresh_stored_status_for_market
 from ...core.market_settings import get_effective_market_settings
 from ...core.radarr import RadarrService
 from ...utils.config import settings
@@ -41,7 +43,7 @@ def _normalize_cleanup_market(market: str) -> str:
     return normalize_market(value)
 
 
-def _run_cleanup(request: AddLimitCleanupRequest, execute: bool) -> dict:
+async def _run_cleanup(request: AddLimitCleanupRequest, execute: bool) -> dict:
     if not settings.radarr_api_key:
         raise HTTPException(status_code=400, detail="Radarr not configured")
 
@@ -92,7 +94,7 @@ def _run_cleanup(request: AddLimitCleanupRequest, execute: bool) -> dict:
     try:
         radarr_service = RadarrService()
         cleanup_service = AddLimitCleanupService(radarr_service)
-        return cleanup_service.run(
+        result = cleanup_service.run(
             market=market,
             target_add_limit=request.target_add_limit,
             year_from=request.year_from,
@@ -105,6 +107,17 @@ def _run_cleanup(request: AddLimitCleanupRequest, execute: bool) -> dict:
             protect_tag=request.protect_tag,
             execute=execute,
         )
+        if execute and (
+            result.get("deleted")
+            or result.get("detached")
+            or result.get("would_delete")
+            or result.get("would_detach_market_tag_only")
+        ):
+            result["status_refresh"] = await asyncio.to_thread(
+                refresh_stored_status_for_market,
+                market,
+            )
+        return result
     except HTTPException:
         raise
     except ValueError as exc:
@@ -118,10 +131,10 @@ def _run_cleanup(request: AddLimitCleanupRequest, execute: bool) -> dict:
 @router.post("/add-limit/dry-run")
 async def dry_run_add_limit_cleanup(request: AddLimitCleanupRequest):
     """Preview movies that would be deleted by an add-limit reduction."""
-    return _run_cleanup(request, execute=False)
+    return await _run_cleanup(request, execute=False)
 
 
 @router.post("/add-limit/execute")
 async def execute_add_limit_cleanup(request: AddLimitCleanupRequest):
     """Delete movies from Radarr that are no longer eligible under the new limit."""
-    return _run_cleanup(request, execute=True)
+    return await _run_cleanup(request, execute=True)
