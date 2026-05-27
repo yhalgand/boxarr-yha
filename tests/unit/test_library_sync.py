@@ -105,6 +105,30 @@ def test_refresh_weekly_data_from_radarr_updates_stale_entries(tmp_path, monkeyp
                         "imdb_id": None,
                         "original_language": None,
                     },
+                    {
+                        "title": "Stale Deleted",
+                        "radarr_id": 303,
+                        "tmdb_id": 1003,
+                        "status": "Downloaded",
+                        "status_color": "#48bb78",
+                        "status_icon": "✅",
+                        "quality_profile_id": 1,
+                        "quality_profile_name": "HD-1080p",
+                        "has_file": True,
+                        "movie_file": {"size": 123456789, "path": "/movies/Stale Deleted/Stale Deleted.mkv"},
+                        "size_on_disk": 123456789,
+                        "radarr_title": "Stale Deleted",
+                        "radarr_status": "released",
+                        "radarr_has_file": True,
+                        "can_upgrade_quality": False,
+                        "poster": None,
+                        "year": 2024,
+                        "genres": None,
+                        "overview": None,
+                        "imdb_id": None,
+                        "original_language": None,
+                        "path": "/movies/Stale Deleted/Stale Deleted.mkv",
+                    },
                 ],
             },
             f,
@@ -154,7 +178,7 @@ def test_refresh_weekly_data_from_radarr_updates_stale_entries(tmp_path, monkeyp
     assert results == {
         "weeks_scanned": 1,
         "weeks_updated": 1,
-        "movies_refreshed": 2,
+        "movies_refreshed": 3,
         "movies_linked": 1,
     }
 
@@ -176,6 +200,19 @@ def test_refresh_weekly_data_from_radarr_updates_stale_entries(tmp_path, monkeyp
     assert linked["status"] == "Missing"
     assert linked["can_upgrade_quality"] is True
     assert linked["poster"] == "https://example.com/202.jpg"
+
+    stale = refreshed["movies"][2]
+    assert stale["radarr_id"] is None
+    assert stale["radarr_title"] is None
+    assert stale["radarr_status"] is None
+    assert stale["radarr_has_file"] is False
+    assert stale["has_file"] is False
+    assert stale["movie_file"] is None
+    assert stale["size_on_disk"] is None
+    assert stale["path"] is None
+    assert stale["status"] == "Not in Radarr"
+    assert stale["status_color"] == "#718096"
+    assert stale["status_icon"] == "➕"
 
     assert refreshed["matched_movies"] == 2
     assert "status_refreshed_at" in refreshed

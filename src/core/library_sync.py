@@ -85,6 +85,27 @@ def _build_movie_update(
     }
 
 
+def _build_stale_movie_clear(movie: Optional[RadarrMovie] = None) -> Dict[str, Any]:
+    """Build the persisted JSON fields that should be cleared when Radarr loses a movie."""
+    return {
+        "radarr_id": None,
+        "radarr_title": None,
+        "radarr_status": None,
+        "status": "Not in Radarr",
+        "status_color": "#718096",
+        "status_icon": "➕",
+        "quality_profile_id": None,
+        "quality_profile_name": None,
+        "has_file": False,
+        "radarr_has_file": False,
+        "movie_file": None,
+        "movieFile": None,
+        "size_on_disk": None,
+        "path": None,
+        "can_upgrade_quality": False,
+    }
+
+
 def refresh_weekly_data_from_radarr(
     radarr_service: Optional[RadarrService] = None,
     data_directory: Optional[Path] = None,
@@ -151,6 +172,37 @@ def refresh_weekly_data_from_radarr(
                 radarr_movie = movies_by_tmdb_id.get(stored_tmdb_id)
 
             if not radarr_movie:
+                stale_fields_present = any(
+                    stored_movie.get(field) is not None
+                    for field in (
+                        "radarr_id",
+                        "radarr_title",
+                        "quality_profile_id",
+                        "quality_profile_name",
+                        "movie_file",
+                        "movieFile",
+                        "size_on_disk",
+                        "path",
+                    )
+                ) or bool(
+                    stored_movie.get("has_file")
+                    or stored_movie.get("radarr_has_file")
+                    or stored_movie.get("status")
+                    and stored_movie.get("status") != "Not in Radarr"
+                )
+                if not stale_fields_present:
+                    continue
+
+                updates = _build_stale_movie_clear()
+                changed = False
+                for key, value in updates.items():
+                    if stored_movie.get(key) != value:
+                        stored_movie[key] = value
+                        changed = True
+
+                if changed:
+                    movies_refreshed += 1
+                    file_updated = True
                 continue
 
             was_unmatched = not existing_radarr_id
