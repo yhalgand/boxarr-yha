@@ -68,6 +68,10 @@ def test_get_config_markets_returns_effective_values(tmp_path, monkeypatch):
     assert body["markets"]["fr"]["sources"]["maximum_movies_to_add"] == "global"
     assert body["markets"]["us"]["definition"]["aliases"] == ["mojo_us"]
     assert body["markets"]["fr"]["definition"]["aliases"] == ["jpboxoffice_fr"]
+    assert body["markets"]["fr"]["capabilities"]["jpboxoffice_view"] == 2
+    assert body["markets"]["fr"]["capabilities"]["historical"]["supports_historical_update"] is True
+    assert body["markets"]["fr"]["capabilities"]["historical"]["min_year"] == 1993
+    assert body["markets"]["fr"]["capabilities"]["historical"]["max_year"] >= 2026
     assert body["markets"]["us"]["effective"]["cleanup_protect_tag"] == "boxarr-protected"
     assert body["markets"]["us"]["tag_policy"]["added_tag"] == "boxarr-added"
     assert body["markets"]["us"]["tag_policy"]["market_tag"] == "boxarr-market-us"

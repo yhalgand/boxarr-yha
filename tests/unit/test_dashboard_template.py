@@ -37,6 +37,9 @@ def test_dashboard_template_contains_cleanup_modal_and_shared_modal_language():
         "id=\"cleanupCurrentFetch\">{{ market_policy.effective.box_office_fetch_limit|default(box_office_limit, true) }}</span>",
         "limitInput.value = value;",
         "class=\"action-btn {% if dangerous_actions_enabled %}cleanup{% else %}secondary{% endif %}\"",
+        "range(historical_max_year, historical_min_year - 1, -1)",
+        "historical_min_year",
+        "historical_max_year",
     ]
     for snippet in required_snippets:
         assert snippet in content, f"missing dashboard template snippet: {snippet}"

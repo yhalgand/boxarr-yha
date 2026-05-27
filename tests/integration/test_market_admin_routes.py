@@ -285,13 +285,19 @@ def test_update_existing_marketconfig_object_does_not_crash(tmp_path, monkeypatc
     assert data["definition"]["box_office_fetch_limit"] == 12
     assert data["definition"]["auto_add_enabled"] is False
     assert data["definition"]["tags"] == ["boxarr", "boxarr-fr"]
-    assert data["effective"]["maximum_movies_to_add"] == 5
+    assert data["effective"]["maximum_movies_to_add"] == 3
     assert data["effective"]["box_office_fetch_limit"] == 12
 
     saved_yaml = yaml.safe_load(config_path.read_text())
     assert saved_yaml["markets"]["fr"]["maximum_movies_to_add"] == 3
     assert saved_yaml["markets"]["fr"]["box_office_fetch_limit"] == 12
     assert saved_yaml["markets"]["fr"]["tags"] == ["boxarr", "boxarr-fr"]
+
+    markets_resp = client.get("/api/config/markets")
+    assert markets_resp.status_code == 200
+    markets_body = markets_resp.json()
+    assert markets_body["markets"]["fr"]["effective"]["maximum_movies_to_add"] == 3
+    assert markets_body["markets"]["fr"]["sources"]["maximum_movies_to_add"] == "market"
 
 
 def test_market_admin_rejects_invalid_or_existing_keys(tmp_path, monkeypatch):

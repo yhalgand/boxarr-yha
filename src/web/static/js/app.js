@@ -19,6 +19,15 @@ function getMarketDefinition(market) {
     return markets[normalized] || null;
 }
 
+function getHistoricalCapabilities(market = getCurrentMarket()) {
+    const definition = getMarketDefinition(market) || {};
+    const historical = definition?.capabilities?.historical || {};
+    const currentYear = new Date().getFullYear();
+    const minYear = Number.isFinite(Number(historical.min_year)) ? Number(historical.min_year) : 1982;
+    const maxYear = Number.isFinite(Number(historical.max_year)) ? Number(historical.max_year) : currentYear;
+    return { minYear, maxYear };
+}
+
 function providerForMarket(market) {
     const definition = getMarketDefinition(market);
     if (definition && definition.provider) {
@@ -1550,6 +1559,31 @@ function reloadScheduler() {
         return JSON.parse(text);
     }
 
+    function getJpboxofficeCountrySpecs() {
+        const countries = window.BOXARR_JPBOXOFFICE_COUNTRIES || {};
+        return countries && typeof countries === 'object' ? countries : {};
+    }
+
+    function getJpboxofficeCountryLabel(country) {
+        const spec = getJpboxofficeCountrySpecs()[String(country || '').trim().toLowerCase()];
+        return spec && spec.label ? spec.label : String(country || '').trim().toUpperCase();
+    }
+
+    function syncJpboxofficeCountryProviderConfig(providerConfigInput, country) {
+        if (!providerConfigInput) return;
+        const normalizedCountry = String(country || '').trim().toLowerCase();
+        if (!normalizedCountry) return;
+
+        let parsed = {};
+        try {
+            parsed = parseProviderConfigInput(providerConfigInput.value);
+        } catch (_) {
+            parsed = {};
+        }
+        parsed.country = normalizedCountry;
+        providerConfigInput.value = JSON.stringify(parsed, null, 2);
+    }
+
     function toggleMarketModal(show) {
         const modal = document.getElementById('marketModal');
         if (!modal) return;
@@ -1582,6 +1616,8 @@ function reloadScheduler() {
         const keyInput = document.getElementById('marketKeyInput');
         const labelInput = document.getElementById('marketLabelInput');
         const providerInput = document.getElementById('marketProviderInput');
+        const countryGroup = document.getElementById('marketJpboxofficeCountryGroup');
+        const countryInput = document.getElementById('marketJpboxofficeCountryInput');
         const enabledInput = document.getElementById('marketEnabledInput');
         const providerConfigInput = document.getElementById('marketProviderConfigInput');
         const fetchLimitInput = document.getElementById('marketFetchLimitInput');
@@ -1616,6 +1652,19 @@ function reloadScheduler() {
         }
         if (labelInput) labelInput.value = definition.label || '';
         if (providerInput) providerInput.value = definition.provider || 'mojo';
+        if (countryInput) {
+            const providerCountry = definition.provider_config && definition.provider_config.country
+                ? String(definition.provider_config.country).trim().toLowerCase()
+                : '';
+            if (providerCountry && getJpboxofficeCountrySpecs()[providerCountry]) {
+                countryInput.value = providerCountry;
+            } else if (providerInput && providerInput.value === 'jpboxoffice' && !countryInput.value) {
+                countryInput.value = 'fr';
+            }
+        }
+        if (countryGroup) {
+            countryGroup.style.display = providerInput && providerInput.value === 'jpboxoffice' ? 'block' : 'none';
+        }
         if (enabledInput) enabledInput.value = String(definition.enabled !== false);
         if (providerConfigInput) {
             providerConfigInput.value = definition.provider_config
@@ -1667,6 +1716,33 @@ function reloadScheduler() {
             ignoreRereleasesInput.value = normalizeOptionalBooleanSelect(overrides.ignore_rereleases);
         }
 
+        if (providerInput) {
+            providerInput.onchange = function() {
+                if (!countryGroup || !countryInput || !providerConfigInput) return;
+                const isJpboxoffice = providerInput.value === 'jpboxoffice';
+                countryGroup.style.display = isJpboxoffice ? 'block' : 'none';
+                if (isJpboxoffice) {
+                    if (!countryInput.value) {
+                        countryInput.value = 'fr';
+                    }
+                    syncJpboxofficeCountryProviderConfig(providerConfigInput, countryInput.value);
+                    if (isEdit && !labelInput.value.trim()) {
+                        labelInput.value = `${getJpboxofficeCountryLabel(countryInput.value)} Box Office`;
+                    }
+                }
+            };
+        }
+        if (countryInput) {
+            countryInput.onchange = function() {
+                if (providerInput && providerInput.value === 'jpboxoffice' && providerConfigInput) {
+                    syncJpboxofficeCountryProviderConfig(providerConfigInput, countryInput.value);
+                    if (isEdit && !labelInput.value.trim()) {
+                        labelInput.value = `${getJpboxofficeCountryLabel(countryInput.value)} Box Office`;
+                    }
+                }
+            };
+        }
+
         toggleMarketModal(true);
     };
 
@@ -1678,6 +1754,7 @@ function reloadScheduler() {
         const marketKey = (document.getElementById('marketKeyInput')?.value || modal.dataset.market || '').trim().toLowerCase();
         const label = (document.getElementById('marketLabelInput')?.value || '').trim();
         const provider = document.getElementById('marketProviderInput')?.value || 'mojo';
+        const country = document.getElementById('marketJpboxofficeCountryInput')?.value || '';
         const enabled = document.getElementById('marketEnabledInput')?.value === 'true';
         const providerConfigRaw = document.getElementById('marketProviderConfigInput')?.value || '';
         const fetchLimitRaw = document.getElementById('marketFetchLimitInput')?.value || '';
@@ -1729,12 +1806,15 @@ function reloadScheduler() {
         if (providerConfigRaw.trim()) {
             try {
                 payload.provider_config = parseProviderConfigInput(providerConfigRaw);
+                if (provider === 'jpboxoffice' && country) {
+                    payload.provider_config.country = country;
+                }
             } catch (error) {
                 setMarketModalMessage('Provider config must be valid JSON.', 'error');
                 return;
             }
         } else if (mode === 'create') {
-            payload.provider_config = {};
+            payload.provider_config = provider === 'jpboxoffice' && country ? { country } : {};
         }
 
         if (fetchLimitRaw !== '') {

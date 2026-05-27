@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -12,6 +13,64 @@ SUPPORTED_MARKETS: Tuple[str, ...] = ("us", "fr")
 SUPPORTED_PROVIDERS: Tuple[str, ...] = ("mojo", "jpboxoffice", "mojo_us", "jpboxoffice_fr")
 DEFAULT_MARKET = "us"
 DEFAULT_PROVIDER = "mojo"
+JPBOXOFFICE_COUNTRY_SPECS: Dict[str, Dict[str, Any]] = {
+    "fr": {
+        "label": "France",
+        "view": 2,
+        "min_year": 1993,
+        "supports_historical_update": True,
+        "supports_live_fetch": True,
+    },
+    "de": {
+        "label": "Germany / Allemagne",
+        "view": 4,
+        "min_year": 1976,
+        "supports_historical_update": True,
+        "supports_live_fetch": True,
+    },
+    "br": {
+        "label": "Brazil / Brésil",
+        "view": 36,
+        "min_year": 1976,
+        "supports_historical_update": True,
+        "supports_live_fetch": True,
+    },
+    "cn": {
+        "label": "China / Chine",
+        "view": 30,
+        "min_year": 2002,
+        "supports_historical_update": True,
+        "supports_live_fetch": True,
+    },
+    "kr": {
+        "label": "South Korea / Corée du Sud",
+        "view": 34,
+        "min_year": 1976,
+        "supports_historical_update": True,
+        "supports_live_fetch": True,
+    },
+    "es": {
+        "label": "Spain / Espagne",
+        "view": 33,
+        "min_year": 1976,
+        "supports_historical_update": True,
+        "supports_live_fetch": True,
+    },
+    "it": {
+        "label": "Italy / Italie",
+        "view": 32,
+        "min_year": 1976,
+        "supports_historical_update": True,
+        "supports_live_fetch": True,
+    },
+    "ru": {
+        "label": "Russia / Russie",
+        "view": 35,
+        "min_year": 1997,
+        "supports_historical_update": True,
+        "supports_live_fetch": True,
+    },
+}
 MARKET_DEFINITIONS: Dict[str, Dict[str, str]] = {
     "us": {
         "label": "US Box Office",
@@ -40,6 +99,83 @@ PROVIDER_FAMILY_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "mojo": {"area": "us"},
     "jpboxoffice": {"country": "fr"},
 }
+
+
+def get_supported_jpboxoffice_countries() -> Dict[str, Dict[str, Any]]:
+    """Return a copy of the supported JPBoxOffice country registry."""
+    return deepcopy(JPBOXOFFICE_COUNTRY_SPECS)
+
+
+def get_jpboxoffice_country_spec(country: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Return the configured JPBoxOffice country spec, if supported."""
+    normalized = str(country or "").strip().lower()
+    if not normalized:
+        return None
+    spec = JPBOXOFFICE_COUNTRY_SPECS.get(normalized)
+    return deepcopy(spec) if spec else None
+
+
+def get_boxoffice_provider_capabilities(
+    provider: Optional[str], provider_config: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Return provider capability metadata without making any network calls."""
+    normalized_provider = normalize_provider(provider)
+    current_year = datetime.now().year
+
+    if normalized_provider == "mojo":
+        return {
+            "provider": "mojo",
+            "live": {"supports_live_fetch": True},
+            "historical": {
+                "supports_historical_update": True,
+                "min_year": 1982,
+                "max_year": current_year,
+            },
+        }
+
+    if normalized_provider == "jpboxoffice":
+        normalized_config = normalize_provider_config(normalized_provider, provider_config)
+        country = str(normalized_config.get("country", "fr")).strip().lower()
+        spec = JPBOXOFFICE_COUNTRY_SPECS.get(country)
+        if not spec:
+            return {
+                "provider": "jpboxoffice",
+                "country": country,
+                "jpboxoffice_view": None,
+                "live": {"supports_live_fetch": False},
+                "historical": {
+                    "supports_historical_update": False,
+                    "min_year": None,
+                    "max_year": current_year,
+                },
+            }
+
+        return {
+            "provider": "jpboxoffice",
+            "country": country,
+            "country_label": spec.get("label"),
+            "jpboxoffice_view": spec.get("view"),
+            "live": {
+                "supports_live_fetch": bool(spec.get("supports_live_fetch", False))
+            },
+            "historical": {
+                "supports_historical_update": bool(
+                    spec.get("supports_historical_update", False)
+                ),
+                "min_year": spec.get("min_year"),
+                "max_year": current_year,
+            },
+        }
+
+    return {
+        "provider": normalized_provider,
+        "live": {"supports_live_fetch": False},
+        "historical": {
+            "supports_historical_update": False,
+            "min_year": None,
+            "max_year": current_year,
+        },
+    }
 
 
 def normalize_provider_config(

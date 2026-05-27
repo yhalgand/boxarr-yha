@@ -8,6 +8,8 @@ from src.core.market_settings import (
     get_configured_markets,
     get_effective_market_settings,
     get_market_definition,
+    get_market_capabilities,
+    get_supported_market_jpboxoffice_countries,
 )
 from src.core.boxoffice_provider import market_for_provider, normalize_market, provider_for_market
 from src.utils.config import MarketConfig, Settings
@@ -32,6 +34,21 @@ def test_default_markets_fallback_to_us_and_fr():
     assert effective_us["effective"]["box_office_fetch_limit"] == settings.boxarr_features_box_office_limit
     assert effective_us["sources"]["box_office_fetch_limit"] == "global"
     assert effective_us["effective"]["cleanup_protect_tag"] == "boxarr-protected"
+    assert effective_us["capabilities"]["historical"]["supports_historical_update"] is True
+    assert effective_us["capabilities"]["historical"]["min_year"] == 1982
+    assert effective_us["capabilities"]["historical"]["max_year"] >= 2026
+
+
+def test_supported_jpboxoffice_countries_expose_capabilities():
+    countries = get_supported_market_jpboxoffice_countries()
+    assert countries["fr"]["view"] == 2
+    assert countries["de"]["view"] == 4
+    assert countries["br"]["view"] == 36
+    assert countries["cn"]["view"] == 30
+    assert countries["kr"]["view"] == 34
+    assert countries["es"]["view"] == 33
+    assert countries["it"]["view"] == 32
+    assert countries["ru"]["view"] == 35
 
 
 def test_market_overrides_take_precedence_and_sources_reflect_market():
@@ -104,6 +121,10 @@ def test_dynamic_market_registry_accepts_custom_market(monkeypatch):
     configured = get_configured_markets(settings)
     assert "de" in configured
     assert get_market_definition(settings, "de")["provider_config"] == {"country": "de"}
+    capabilities = get_market_capabilities(settings, "de")
+    assert capabilities["jpboxoffice_view"] == 4
+    assert capabilities["historical"]["supports_historical_update"] is True
+    assert capabilities["historical"]["min_year"] == 1976
     monkeypatch.setattr(
         "src.core.boxoffice_provider._runtime_market_registry", lambda: configured
     )

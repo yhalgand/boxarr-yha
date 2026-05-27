@@ -26,6 +26,8 @@ from ...core.market_settings import (
     get_configured_markets,
     get_effective_market_settings,
     get_market_definition,
+    get_market_capabilities,
+    get_supported_market_jpboxoffice_countries,
 )
 from ...core.market_policy import get_market_policy
 from ...core.ignore_list import IgnoreList
@@ -117,10 +119,12 @@ def _build_market_preview(settings_obj, market_key: str) -> Dict[str, Any]:
             "enabled": bool(definition.get("enabled", True)),
             "configured": bool(definition.get("configured", False)),
             "overrides": dict(definition.get("overrides", {}) or {}),
+            "capabilities": dict(definition.get("capabilities", {}) or {}),
         },
         "effective": dict(effective.get("effective", {}) or {}),
         "sources": dict(effective.get("sources", {}) or {}),
         "tag_policy": dict(policy.get("tag_policy", {}) or {}),
+        "capabilities": dict(definition.get("capabilities", {}) or {}),
         "configured": bool(definition.get("configured", False)),
         "overrides": dict(effective.get("overrides", {}) or {}),
         "global": dict(effective.get("global", {}) or {}),
@@ -262,6 +266,7 @@ async def movie_overview_page(request: Request):
     provider = provider_for_market(market)
     configured_markets = get_configured_markets(settings)
     market_settings_preview = get_effective_market_settings(settings, market)
+    market_capabilities = get_market_capabilities(settings, market)
     market_policy = get_market_policy(settings, market)
     market_previews = {
         market_key: get_effective_market_settings(settings, market_key)
@@ -402,6 +407,7 @@ async def movie_overview_page(request: Request):
             provider=provider,
             configured_markets=configured_markets,
             market_settings_preview=market_settings_preview,
+            market_capabilities=market_capabilities,
             market_policy=market_policy,
             # Features
             auto_add=settings.boxarr_features_auto_add,
@@ -429,6 +435,7 @@ async def dashboard_page(request: Request):
     provider = provider_for_market(market)
     configured_markets = get_configured_markets(settings)
     market_settings_preview = get_effective_market_settings(settings, market)
+    market_capabilities = get_market_capabilities(settings, market)
     market_policy = get_market_policy(settings, market)
     market_previews = {
         market_key: get_effective_market_settings(settings, market_key)
@@ -566,6 +573,7 @@ async def dashboard_page(request: Request):
             provider=provider,
             configured_markets=configured_markets,
             market_settings_preview=market_settings_preview,
+            market_capabilities=market_capabilities,
             market_policy=market_policy,
             market_previews=market_previews,
             radarr_configured=bool(settings.radarr_api_key),
@@ -599,6 +607,7 @@ async def setup_page(request: Request):
     provider = provider_for_market(market)
     configured_markets = get_configured_markets(settings)
     market_settings_preview = _build_market_preview(settings, market)
+    market_capabilities = get_market_capabilities(settings, market)
     market_policy = get_market_policy(settings, market)
     market_previews = _build_market_previews(settings)
     # Parse current cron for display
@@ -638,6 +647,7 @@ async def setup_page(request: Request):
             provider=provider,
             configured_markets=configured_markets,
             market_settings_preview=market_settings_preview,
+            market_capabilities=market_capabilities,
             market_policy=market_policy,
             market_previews=market_previews,
             radarr_configured=bool(settings.radarr_api_key),
@@ -688,6 +698,7 @@ async def setup_page(request: Request):
             language_blacklist=settings.boxarr_features_auto_add_language_blacklist,
             # URL base for reverse proxy support
             url_base=settings.boxarr_url_base,
+            jpboxoffice_countries=get_supported_market_jpboxoffice_countries(),
         ),
     )
 

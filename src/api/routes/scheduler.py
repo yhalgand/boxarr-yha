@@ -22,6 +22,7 @@ from ...core.boxoffice_storage import (
     iter_history_paths,
 )
 from ...core.exceptions import BoxOfficeError
+from ...core.market_settings import get_market_capabilities
 from .movies import refresh_stored_status_for_market
 from ...utils.config import settings
 from ...utils.logger import get_logger
@@ -322,10 +323,26 @@ async def update_specific_week(request: UpdateWeekRequest):  # noqa: C901
     provider = provider_for_market(market)
     try:
         # Validate inputs
-        if year < 1982 or year > datetime.now().year:
-            raise HTTPException(status_code=400, detail="Invalid year")
         if week < 1 or week > 53:
             raise HTTPException(status_code=400, detail="Invalid week number")
+
+        capabilities = get_market_capabilities(settings, market)
+        historical = dict(capabilities.get("historical", {}) or {})
+        min_year = historical.get("min_year")
+        max_year = historical.get("max_year", datetime.now().year)
+        if not historical.get("supports_historical_update", False) or min_year is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Market {market} does not support historical updates",
+            )
+        if year < int(min_year) or year > int(max_year):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Market {market} supports historical updates from "
+                    f"{int(min_year)} to {int(max_year)}"
+                ),
+            )
 
         from ...core.boxoffice import BoxOfficeService
         from ...core.json_generator import WeeklyDataGenerator

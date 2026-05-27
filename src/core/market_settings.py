@@ -7,7 +7,12 @@ from typing import Any, Dict, List, Optional
 
 from ..utils.config import MarketConfig, Settings
 from ..utils.logger import get_logger
-from .boxoffice_provider import DEFAULT_MARKET, canonicalize_provider_definition
+from .boxoffice_provider import (
+    DEFAULT_MARKET,
+    canonicalize_provider_definition,
+    get_boxoffice_provider_capabilities,
+    get_supported_jpboxoffice_countries,
+)
 
 logger = get_logger(__name__)
 
@@ -77,6 +82,22 @@ def _canonicalize_provider_fields(
     return canonicalize_provider_definition(provider_value, provider_config)
 
 
+def _market_capabilities(
+    provider: Any, provider_config: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    capabilities = deepcopy(
+        get_boxoffice_provider_capabilities(provider, provider_config)
+    )
+    return {
+        "provider": capabilities.get("provider"),
+        "country": capabilities.get("country"),
+        "country_label": capabilities.get("country_label"),
+        "jpboxoffice_view": capabilities.get("jpboxoffice_view"),
+        "live": dict(capabilities.get("live", {})),
+        "historical": dict(capabilities.get("historical", {})),
+    }
+
+
 def _configured_market_overrides(settings_obj: Settings) -> Dict[str, Dict[str, Any]]:
     overrides: Dict[str, Dict[str, Any]] = {}
     markets = getattr(settings_obj, "markets", {}) or {}
@@ -118,6 +139,9 @@ def _merged_market_registry(settings_obj: Settings) -> Dict[str, Dict[str, Any]]
             "enabled": value.get("enabled", True),
             "configured": False,
             "overrides": {},
+            "capabilities": _market_capabilities(
+                value.get("provider"), value.get("provider_config", {})
+            ),
         }
         for key, value in _DEFAULT_MARKET_CONFIGS.items()
     }
@@ -137,6 +161,9 @@ def _merged_market_registry(settings_obj: Settings) -> Dict[str, Dict[str, Any]]
                 "enabled": True,
                 "configured": False,
                 "overrides": {},
+                "capabilities": _market_capabilities(
+                    canonical["provider"], canonical.get("provider_config", {})
+                ),
             },
         )
         merged = {
@@ -152,6 +179,13 @@ def _merged_market_registry(settings_obj: Settings) -> Dict[str, Dict[str, Any]]
             "enabled": override.get("enabled", base.get("enabled", True)),
             "configured": True,
             "overrides": override,
+            "capabilities": _market_capabilities(
+                canonical["provider"] or base.get("provider"),
+                {
+                    **deepcopy(base.get("provider_config", {})),
+                    **deepcopy(canonical.get("provider_config", {})),
+                },
+            ),
         }
         registry[key] = merged
 
@@ -177,7 +211,7 @@ def get_market_definition(settings_obj: Settings, market: str) -> Dict[str, Any]
         raise ValueError(
             f"Unsupported market '{market}'. Supported markets: {', '.join(sorted(registry.keys()))}"
         )
-    return registry[market_key]
+    return market_config_to_dict(registry[market_key])
 
 
 def ensure_market_enabled(settings_obj: Settings, market: str) -> Dict[str, Any]:
@@ -217,7 +251,7 @@ def _resolve_with_source(
 def get_effective_market_settings(settings_obj: Settings, market: str) -> Dict[str, Any]:
     """Return the effective settings for a market with per-field provenance."""
 
-    definition = get_market_definition(settings_obj, market)
+    definition = market_config_to_dict(get_market_definition(settings_obj, market))
     overrides = dict(definition.get("overrides", {}) or {})
 
     effective: Dict[str, Any] = {}
@@ -257,6 +291,7 @@ def get_effective_market_settings(settings_obj: Settings, market: str) -> Dict[s
         "enabled": bool(definition.get("enabled", True)),
         "configured": bool(definition.get("configured", False)),
         "overrides": overrides,
+        "capabilities": deepcopy(definition.get("capabilities", {})),
         "global": {
             field_name: _global_value(settings_obj, global_field)
             for field_name, global_field in _EFFECTIVE_FIELD_MAP.items()
@@ -264,3 +299,19 @@ def get_effective_market_settings(settings_obj: Settings, market: str) -> Dict[s
         "effective": effective,
         "sources": sources,
     }
+
+
+def get_market_capabilities(settings_obj: Settings, market: str) -> Dict[str, Any]:
+    """Return provider capability metadata for a market."""
+    definition = market_config_to_dict(get_market_definition(settings_obj, market))
+    return deepcopy(
+        definition.get("capabilities")
+        or _market_capabilities(
+            definition.get("provider"), definition.get("provider_config", {})
+        )
+    )
+
+
+def get_supported_market_jpboxoffice_countries() -> Dict[str, Dict[str, Any]]:
+    """Return the supported JPBoxOffice countries for UI selectors."""
+    return get_supported_jpboxoffice_countries()

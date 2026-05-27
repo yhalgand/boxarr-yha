@@ -106,6 +106,16 @@ def test_setup_template_renders_with_raw_market_preview_without_definition():
                 },
             },
         },
+        jpboxoffice_countries={
+            "fr": {"label": "France"},
+            "de": {"label": "Germany / Allemagne"},
+            "br": {"label": "Brazil / Brésil"},
+            "cn": {"label": "China / Chine"},
+            "kr": {"label": "South Korea / Corée du Sud"},
+            "es": {"label": "Spain / Espagne"},
+            "it": {"label": "Italy / Italie"},
+            "ru": {"label": "Russia / Russie"},
+        },
         radarr_configured=False,
         is_configured=False,
         radarr_url="http://localhost:7878",
@@ -157,6 +167,10 @@ def test_setup_template_renders_with_raw_market_preview_without_definition():
     assert "boxarr-added" in html
     assert "boxarr-protected" in html
     assert "boxarr-keep" in html
+    assert 'option value="de"' in html
+    assert 'option value="fr"' in html
+    assert 'option value="ru"' in html
+    assert 'option value="world"' not in html
     assert "Language filter uses TMDB original language" in html
     assert "Preview legacy tag migration" in html
     assert "Edit overrides" in html
@@ -252,6 +266,10 @@ def test_setup_template_renders_legacy_migration_execute_only_when_enabled():
         language_whitelist=[],
         language_blacklist=[],
         url_base="",
+        jpboxoffice_countries={
+            "fr": {"label": "France"},
+            "de": {"label": "Germany / Allemagne"},
+        },
     )
 
     html_disabled = _render_setup_template(

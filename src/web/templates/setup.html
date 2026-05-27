@@ -258,6 +258,7 @@
         window.BOXARR_PROVIDER = "{{ provider|default('mojo') }}";
         window.BOXARR_MARKETS = {{ configured_markets|default({})|tojson }};
         window.BOXARR_MARKET_PREVIEWS = {{ market_previews|default({})|tojson }};
+        window.BOXARR_JPBOXOFFICE_COUNTRIES = {{ jpboxoffice_countries|default({})|tojson }};
     </script>
     <div class="setup-container">
         <div class="setup-header">
@@ -521,6 +522,15 @@
                                 <option value="mojo">mojo</option>
                                 <option value="jpboxoffice">jpboxoffice</option>
                             </select>
+                        </div>
+                        <div class="form-group" id="marketJpboxofficeCountryGroup" style="display:none;">
+                            <label for="marketJpboxofficeCountryInput" class="form-label">JPBoxOffice country</label>
+                            <select id="marketJpboxofficeCountryInput" class="form-select">
+                                {% for country_key, country_def in jpboxoffice_countries.items() %}
+                                <option value="{{ country_key }}">{{ country_def.label }} ({{ country_key }})</option>
+                                {% endfor %}
+                            </select>
+                            <small class="text-muted">Supported JPBoxOffice countries only. The provider config JSON is kept in sync automatically.</small>
                         </div>
                         <div class="form-group">
                             <label for="marketEnabledInput" class="form-label">Enabled</label>

@@ -16,6 +16,7 @@ from ...core.boxoffice_provider import (
 )
 from ...core.boxoffice_storage import resolve_weekly_page_path
 from ...core.market_settings import get_effective_market_settings
+from ...core.market_settings import get_market_capabilities
 from ...core.exceptions import BoxOfficeError
 from ...core.matcher import MovieMatcher
 from ...core.radarr import RadarrService
@@ -24,6 +25,11 @@ from ...utils.logger import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/boxoffice", tags=["boxoffice"])
+
+
+def _is_parse_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "parse error" in message or "no ranking rows parsed" in message or "partial ranking parse" in message
 
 
 class BoxOfficeMovieResponse(BaseModel):
@@ -182,6 +188,8 @@ async def get_current_box_office(
         logger.error(f"Invalid market/provider for box office current: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except BoxOfficeError as e:
+        if _is_parse_error(e):
+            raise HTTPException(status_code=500, detail=str(e))
         raise HTTPException(status_code=501, detail=str(e))
     except Exception as e:
         logger.error(f"Error getting box office: {e}")
@@ -201,11 +209,26 @@ async def get_historical_box_office(
             market = market_for_provider(provider)
         market = normalize_market(market)
         market_effective = get_effective_market_settings(settings, market)
+        market_capabilities = get_market_capabilities(settings, market)
         # Validate year and week
-        if year < 1982 or year > datetime.now().year:
-            raise HTTPException(status_code=400, detail="Invalid year")
         if week < 1 or week > 53:
             raise HTTPException(status_code=400, detail="Invalid week number")
+        historical = dict(market_capabilities.get("historical", {}) or {})
+        min_year = historical.get("min_year")
+        max_year = historical.get("max_year", datetime.now().year)
+        if not historical.get("supports_historical_update", False) or min_year is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Market {market} does not support historical updates",
+            )
+        if year < int(min_year) or year > int(max_year):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Market {market} supports historical updates from "
+                    f"{int(min_year)} to {int(max_year)}"
+                ),
+            )
 
         stored_path = resolve_weekly_page_path(settings.boxarr_data_directory, market, year, week)
         if stored_path.exists():
@@ -245,15 +268,28 @@ async def get_historical_box_office(
 
         # Fallback to live provider only if no stored file exists.
         boxoffice_service = BoxOfficeService(market=market)
-        movies = boxoffice_service.fetch_weekend_box_office(
-            year,
-            week,
-            limit=int(
-                market_effective.get("effective", {}).get(
-                    "box_office_fetch_limit", settings.boxarr_features_box_office_limit
-                )
-            ),
-        )
+        try:
+            movies = boxoffice_service.fetch_weekend_box_office(
+                year,
+                week,
+                limit=int(
+                    market_effective.get("effective", {}).get(
+                        "box_office_fetch_limit",
+                        settings.boxarr_features_box_office_limit,
+                    )
+                ),
+            )
+        except BoxOfficeError as exc:
+            logger.warning(
+                "Historical live fetch failed for market=%s year=%s week=%s: %s",
+                market,
+                year,
+                week,
+                exc,
+            )
+            if _is_parse_error(exc):
+                raise HTTPException(status_code=500, detail=str(exc))
+            return []
         return [
             {
                 "rank": movie.rank,
@@ -277,7 +313,10 @@ async def get_historical_box_office(
         logger.error(f"Invalid market/provider for historical box office: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except BoxOfficeError as e:
-        raise HTTPException(status_code=501, detail=str(e))
+        if _is_parse_error(e):
+            raise HTTPException(status_code=500, detail=str(e))
+        logger.warning(f"Historical box office fetch returned no data: {e}")
+        return []
     except HTTPException:
         raise
     except Exception as e:

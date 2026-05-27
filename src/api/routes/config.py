@@ -172,22 +172,25 @@ async def get_configuration():
     """Get current configuration."""
     current_settings = settings
     configured_markets = get_configured_markets(current_settings)
+    markets: Dict[str, Any] = {}
+    for market, definition in configured_markets.items():
+        definition_dict = market_config_to_dict(definition)
+        markets[market] = {
+            "label": definition_dict.get("label"),
+            "provider": definition_dict.get("provider"),
+            "provider_config": definition_dict.get("provider_config", {}),
+            "aliases": definition_dict.get("aliases", []),
+            "enabled": definition_dict.get("enabled", True),
+            "capabilities": definition_dict.get("capabilities", {}),
+        }
+
     return ConfigResponse(
         radarr_url=str(current_settings.radarr_url),
         radarr_api_key="***" if current_settings.radarr_api_key else "",
         radarr_configured=bool(current_settings.radarr_api_key),
         scheduler_enabled=current_settings.boxarr_scheduler_enabled,
         auto_add=current_settings.boxarr_features_auto_add,
-        markets={
-            market: {
-                "label": definition["label"],
-                "provider": definition["provider"],
-                "provider_config": definition.get("provider_config", {}),
-                "aliases": definition.get("aliases", []),
-                "enabled": definition.get("enabled", True),
-            }
-            for market, definition in configured_markets.items()
-        },
+        markets=markets,
     )
 
 
@@ -199,14 +202,16 @@ async def get_market_configuration():
     markets: Dict[str, Any] = {}
     for market_key, definition in configured_markets.items():
         effective = get_effective_market_settings(current_settings, market_key)
+        definition_dict = market_config_to_dict(definition)
         markets[market_key] = {
-            "definition": definition,
+            "definition": definition_dict,
             "overrides": effective.get("overrides", {}),
             "effective": effective.get("effective", {}),
             "sources": effective.get("sources", {}),
             "global": effective.get("global", {}),
             "configured": effective.get("configured", False),
             "tag_policy": effective.get("tag_policy", {}),
+            "capabilities": definition_dict.get("capabilities", {}),
         }
 
     return {

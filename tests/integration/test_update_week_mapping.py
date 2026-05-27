@@ -6,8 +6,10 @@ genre-based root folder mapping as the main scheduler/manual add paths.
 
 from pathlib import Path
 import json
+from datetime import datetime
 
 import yaml
+import pytest
 from fastapi.testclient import TestClient
 
 from src.api.app import create_app
@@ -46,6 +48,42 @@ def _seed_config(dir_path: Path) -> Path:
                 },
             },
             "ui": {"theme": "light"},
+        },
+    }
+    p = dir_path / "local.yaml"
+    with open(p, "w") as f:
+        yaml.safe_dump(cfg, f)
+    return p
+
+
+def _seed_historical_market_config(dir_path: Path, market: str, country: str) -> Path:
+    cfg = {
+        "radarr": {
+            "url": "http://localhost:7878",
+            "api_key": "",
+            "root_folder": "/movies",
+            "quality_profile_default": "HD-1080p",
+        },
+        "boxarr": {
+            "scheduler": {"enabled": False, "cron": "0 23 * * 1"},
+            "features": {
+                "auto_add": False,
+                "quality_upgrade": False,
+                "auto_add_options": {
+                    "limit": 10,
+                    "genre_filter_enabled": False,
+                    "rating_filter_enabled": False,
+                },
+            },
+            "ui": {"theme": "light"},
+        },
+        "markets": {
+            market: {
+                "label": f"{market.upper()} Box Office",
+                "provider": "jpboxoffice",
+                "provider_config": {"country": country},
+                "enabled": True,
+            }
         },
     }
     p = dir_path / "local.yaml"
@@ -123,6 +161,52 @@ class _FakeBoxOfficeService:
                 theater_count=789,
             )
         ]  # Horror via TMDB stub
+
+
+@pytest.mark.parametrize(
+    "market,country,min_year",
+    [
+        ("fr", "fr", 1993),
+        ("de", "de", 1976),
+        ("br", "br", 1976),
+        ("cn", "cn", 2002),
+        ("kr", "kr", 1976),
+        ("es", "es", 1976),
+        ("it", "it", 1976),
+        ("ru", "ru", 1997),
+    ],
+)
+def test_update_week_historical_year_bounds_follow_market_capabilities(
+    tmp_path, monkeypatch, market, country, min_year
+):
+    config_path = _seed_historical_market_config(tmp_path, market, country)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    import src.core.boxoffice as core_boxoffice
+
+    monkeypatch.setattr(core_boxoffice, "BoxOfficeService", _FakeBoxOfficeService)
+
+    app = create_app()
+    client = TestClient(app)
+
+    ok_resp = client.post(
+        "/api/scheduler/update-week",
+        json={"year": min_year, "week": 10, "market": market},
+    )
+    assert ok_resp.status_code == 200
+    assert ok_resp.json()["success"] is True
+    assert ok_resp.json()["market"] == market
+
+    bad_resp = client.post(
+        "/api/scheduler/update-week",
+        json={"year": min_year - 1, "week": 10, "market": market},
+    )
+    assert bad_resp.status_code == 400
+    assert (
+        bad_resp.json()["detail"]
+        == f"Market {market} supports historical updates from {min_year} to {datetime.now().year}"
+    )
 
 
 def test_update_week_respects_genre_mapping(tmp_path, monkeypatch):

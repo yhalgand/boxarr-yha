@@ -2,11 +2,16 @@
 
 from pathlib import Path
 import json
+from datetime import datetime
+from unittest.mock import MagicMock
 
 import yaml
+import pytest
+import httpx
 from fastapi.testclient import TestClient
 
 from src.api.app import create_app
+from src.core.boxoffice import BoxOfficeError, BoxOfficeMovie, BoxOfficeService
 from src.utils.config import Settings
 
 
@@ -36,6 +41,51 @@ def _seed_config(dir_path: Path) -> Path:
     with open(p, "w") as f:
         yaml.safe_dump(cfg, f)
     return p
+
+
+def _seed_historical_market_config(dir_path: Path, market: str, country: str) -> Path:
+    cfg = {
+        "radarr": {
+            "url": "http://localhost:7878",
+            "api_key": "",
+            "root_folder": "/movies",
+            "quality_profile_default": "HD-1080p",
+        },
+        "boxarr": {
+            "scheduler": {"enabled": False, "cron": "0 23 * * 1"},
+            "features": {
+                "auto_add": False,
+                "quality_upgrade": False,
+                "auto_add_options": {
+                    "limit": 10,
+                    "genre_filter_enabled": False,
+                    "rating_filter_enabled": False,
+                },
+            },
+            "ui": {"theme": "light"},
+        },
+        "markets": {
+            market: {
+                "label": f"{market.upper()} Box Office",
+                "provider": "jpboxoffice",
+                "provider_config": {"country": country},
+                "enabled": True,
+            }
+        },
+    }
+    p = dir_path / "local.yaml"
+    with open(p, "w") as f:
+        yaml.safe_dump(cfg, f)
+    return p
+
+
+def _response(url: str, html: str) -> httpx.Response:
+    request = httpx.Request("GET", url)
+    return httpx.Response(200, request=request, content=html.encode("utf-8"))
+
+
+def _country_fixture_html(html: str, view: int) -> str:
+    return html.replace("view=2", f"view={view}")
 
 
 def test_history_boxoffice_route_reads_market_file_and_keeps_radarr_fields(
@@ -152,3 +202,225 @@ def test_history_boxoffice_route_reads_market_file_and_keeps_radarr_fields(
     assert data[1]["match_confidence"] == 0.97
     assert data[1]["original_title"] == "Avatar: Fire and Ash"
     assert data[1]["source_year"] == 2026
+
+
+@pytest.mark.parametrize(
+    "market,country,view,min_year",
+    [
+        ("fr", "fr", 2, 1993),
+        ("de", "de", 4, 1976),
+    ],
+)
+def test_history_boxoffice_route_smoke_fetches_supported_jpboxoffice_countries(
+    tmp_path, monkeypatch, market, country, view, min_year
+):
+    config_path = _seed_historical_market_config(tmp_path, market, country)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    year_html = _country_fixture_html(
+        (Path(__file__).resolve().parents[1] / "fixtures" / "jpboxoffice_fr_year_2026.html").read_text(encoding="utf-8"),
+        view,
+    )
+    weekly_html = _country_fixture_html(
+        (Path(__file__).resolve().parents[1] / "fixtures" / "jpboxoffice_fr_week_2026w02.html").read_text(encoding="utf-8"),
+        view,
+    )
+
+    client = MagicMock()
+
+    def fake_get(url: str):
+        if f"v9_hebdomadaire.php?view={view}&year={min_year}" in url or f"v9_hebdomadaire.php?view={view}&year=2026" in url:
+            return _response(url, year_html)
+        if f"v9_tophebdo.php?idsem=2926&view={view}" in url:
+            return _response(url, weekly_html)
+        if f"fichfilm.php?id=12345&view={view}" in url:
+            return _response(
+                url,
+                "<html><body><a href='https://pro.imdb.com/title/tt1234567/'>IMDb</a></body></html>",
+            )
+        if f"fichfilm.php?id=23456&view={view}" in url:
+            return _response(
+                url,
+                "<html><body><a href='https://pro.imdb.com/title/tt7654321/'>IMDb</a></body></html>",
+            )
+        if f"fichfilm.php?id=24858&view={view}" in url:
+            return _response(
+                url,
+                "<html><body><a href='https://pro.imdb.com/title/tt1234567/'>IMDb</a></body></html>",
+            )
+        return _response(url, "<html><body></body></html>")
+
+    client.get.side_effect = fake_get
+    client.close = MagicMock()
+
+    real_service = BoxOfficeService(http_client=client, market=market)
+    import src.core.boxoffice as core_boxoffice
+
+    monkeypatch.setattr(core_boxoffice, "BoxOfficeService", lambda *_, **__: real_service)
+
+    app = create_app()
+    test_client = TestClient(app)
+
+    resp = test_client.get(f"/api/boxoffice/history/{min_year}/W04?market={market}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) >= 10
+    assert data[0]["title"] == "La Femme de ménage"
+    assert data[0]["radarr_has_file"] is True
+    assert data[0]["match_confidence"] == 0.98
+
+    bad_resp = test_client.get(f"/api/boxoffice/history/{min_year - 1}/W04?market={market}")
+    assert bad_resp.status_code == 400
+    assert f"supports historical updates from {min_year} to " in bad_resp.json()["detail"]
+
+
+def test_history_boxoffice_route_de_returns_200_with_mocked_live_fetch(
+    tmp_path, monkeypatch
+):
+    config_path = _seed_historical_market_config(tmp_path, "de", "de")
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    class _FakeDeBoxOfficeService:
+        def __init__(self, *_, **__):
+            pass
+
+        def fetch_weekend_box_office(self, year, week, limit=10):
+            assert year == 1976
+            assert week == 1
+            assert limit == 10
+            return [
+                BoxOfficeMovie(
+                    rank=1,
+                    title="German Movie",
+                    weekend_gross=123.0,
+                    total_gross=456.0,
+                    weeks_released=1,
+                    theater_count=100,
+                )
+            ]
+
+    import src.api.routes.boxoffice as boxoffice_routes
+
+    monkeypatch.setattr(boxoffice_routes, "BoxOfficeService", _FakeDeBoxOfficeService)
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.get("/api/boxoffice/history/1976/W01?market=de")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["title"] == "German Movie"
+    assert data[0]["weeks_released"] == 1
+    assert data[0]["is_new_release"] is True
+
+
+def test_history_boxoffice_route_de_returns_200_on_live_fetch_error(tmp_path, monkeypatch):
+    config_path = _seed_historical_market_config(tmp_path, "de", "de")
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    class _ErroringDeBoxOfficeService:
+        def __init__(self, *_, **__):
+            pass
+
+        def fetch_weekend_box_office(self, year, week, limit=10):
+            raise BoxOfficeError("JPBoxOffice country 'de' is not implemented yet")
+
+    import src.api.routes.boxoffice as boxoffice_routes
+
+    monkeypatch.setattr(boxoffice_routes, "BoxOfficeService", _ErroringDeBoxOfficeService)
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.get("/api/boxoffice/history/1976/W01?market=de")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_history_boxoffice_route_de_returns_500_on_parse_error(tmp_path, monkeypatch):
+    config_path = _seed_historical_market_config(tmp_path, "de", "de")
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    class _ParseErrorDeBoxOfficeService:
+        def __init__(self, *_, **__):
+            pass
+
+        def fetch_weekend_box_office(self, year, week, limit=10):
+            raise BoxOfficeError(
+                "JPBoxOffice parse error: partial ranking parse "
+                "(source_url=https://example.test, country=de, view=4, rows_seen=10, rows_parsed=8)"
+            )
+
+    import src.api.routes.boxoffice as boxoffice_routes
+
+    monkeypatch.setattr(boxoffice_routes, "BoxOfficeService", _ParseErrorDeBoxOfficeService)
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.get("/api/boxoffice/history/1976/W01?market=de")
+    assert resp.status_code == 500
+    assert "JPBoxOffice parse error" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "market,country,min_year",
+    [
+        ("fr", "fr", 1993),
+        ("de", "de", 1976),
+        ("br", "br", 1976),
+        ("cn", "cn", 2002),
+        ("kr", "kr", 1976),
+        ("es", "es", 1976),
+        ("it", "it", 1976),
+        ("ru", "ru", 1997),
+    ],
+)
+def test_history_boxoffice_route_uses_market_historical_bounds(
+    tmp_path, monkeypatch, market, country, min_year
+):
+    config_path = _seed_historical_market_config(tmp_path, market, country)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    market_dir = tmp_path / "weekly_pages" / market
+    market_dir.mkdir(parents=True, exist_ok=True)
+    with open(market_dir / f"{min_year}W21.json", "w") as f:
+        json.dump(
+            {
+                "generated_at": "2026-05-25T10:00:00",
+                "market": market,
+                "provider": "jpboxoffice",
+                "provider_config": {"country": country},
+                "year": min_year,
+                "week": 21,
+                "movies": [
+                    {
+                        "rank": 1,
+                        "title": f"{market.upper()} Historical Movie",
+                        "radarr_id": None,
+                    }
+                ],
+            },
+            f,
+            indent=2,
+        )
+
+    app = create_app()
+    client = TestClient(app)
+
+    ok_resp = client.get(f"/api/boxoffice/history/{min_year}/W21?market={market}")
+    assert ok_resp.status_code == 200
+    assert ok_resp.json()[0]["title"] == f"{market.upper()} Historical Movie"
+
+    bad_resp = client.get(f"/api/boxoffice/history/{min_year - 1}/W21?market={market}")
+    assert bad_resp.status_code == 400
+    assert (
+        bad_resp.json()["detail"]
+        == f"Market {market} supports historical updates from {min_year} to {datetime.now().year}"
+    )

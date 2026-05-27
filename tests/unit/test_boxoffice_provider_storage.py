@@ -124,6 +124,21 @@ def test_generic_providers_accept_canonical_config():
     fr = create_provider("jpboxoffice", provider_config={"country": "fr"})
     assert isinstance(fr, JPBoxOfficeFRProvider)
 
+    supported = {
+        "fr": 2,
+        "de": 4,
+        "br": 36,
+        "cn": 30,
+        "kr": 34,
+        "es": 33,
+        "it": 32,
+        "ru": 35,
+    }
+    for country, expected_view in supported.items():
+        provider = create_provider("jpboxoffice", provider_config={"country": country})
+        assert provider.country == country
+        assert provider.view == expected_view
+
     with pytest.raises(BoxOfficeError) as exc:
-        create_provider("jpboxoffice", provider_config={"country": "de"})
+        create_provider("jpboxoffice", provider_config={"country": "world"})
     assert "not implemented yet" in str(exc.value)

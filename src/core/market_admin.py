@@ -240,10 +240,20 @@ def persist_market_definition(
     markets_section = config_payload.get("markets", {}) or {}
     if not isinstance(markets_section, dict):
         markets_section = {}
+    markets_section = {
+        normalize_market_key(key): market_config_to_dict(value)
+        for key, value in markets_section.items()
+        if str(key or "").strip()
+    }
 
     current_markets = getattr(settings, "markets", {}) or {}
     if not isinstance(current_markets, dict):
         current_markets = {}
+    current_markets = {
+        normalize_market_key(key): market_config_to_dict(value)
+        for key, value in current_markets.items()
+        if str(key or "").strip()
+    }
     registry_markets = get_configured_markets(settings)
 
     market_exists = (
@@ -273,9 +283,14 @@ def persist_market_definition(
     Settings.reload_from_file(config_path)
 
     refreshed_markets = getattr(settings, "markets", {}) or {}
-    definition = market_config_to_dict(
-        refreshed_markets.get(normalized_market, updated_definition)
-    )
+    if not isinstance(refreshed_markets, dict):
+        refreshed_markets = {}
+    refreshed_markets = {
+        normalize_market_key(key): market_config_to_dict(value)
+        for key, value in refreshed_markets.items()
+        if str(key or "").strip()
+    }
+    definition = market_config_to_dict(refreshed_markets.get(normalized_market, updated_definition))
     return {
         "market": normalized_market,
         "definition": definition,

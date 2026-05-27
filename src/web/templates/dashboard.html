@@ -1189,6 +1189,9 @@
 
 <!-- Historical Update Modal -->
 <div id="historicalModal" class="modal">
+    {% set historical_capabilities = market_settings_preview.get('capabilities', {}).get('historical', {}) %}
+    {% set historical_min_year = historical_capabilities.get('min_year', 1982) %}
+    {% set historical_max_year = historical_capabilities.get('max_year', current_year) %}
     <div class="modal-content">
         <div class="modal-header">
             <h3>Update Historical Data</h3>
@@ -1207,7 +1210,7 @@
                 <div class="form-group">
                     <label for="historicalYear">Year</label>
                     <select id="historicalYear" class="form-select">
-                        {% for year in range(current_year, 2019, -1) %}
+                        {% for year in range(historical_max_year, historical_min_year - 1, -1) %}
                         <option value="{{ year }}" {% if year == current_year %}selected{% endif %}>{{ year }}</option>
                         {% endfor %}
                     </select>
@@ -1229,7 +1232,7 @@
                         <label>From</label>
                         <div class="range-selects">
                             <select id="startYear" class="form-select">
-                                {% for year in range(current_year, 2019, -1) %}
+                                {% for year in range(historical_max_year, historical_min_year - 1, -1) %}
                                 <option value="{{ year }}" {% if year == current_year %}selected{% endif %}>{{ year }}</option>
                                 {% endfor %}
                             </select>
@@ -1244,7 +1247,7 @@
                         <label>To</label>
                         <div class="range-selects">
                             <select id="endYear" class="form-select">
-                                {% for year in range(current_year, 2019, -1) %}
+                                {% for year in range(historical_max_year, historical_min_year - 1, -1) %}
                                 <option value="{{ year }}" {% if year == current_year %}selected{% endif %}>{{ year }}</option>
                                 {% endfor %}
                             </select>
@@ -1792,10 +1795,38 @@ function updateRangeSummary() {
 }
 
 // Quick presets
+function getHistoricalCapabilities() {
+    const market = getCurrentMarket ? getCurrentMarket() : (window.BOXARR_MARKET || 'us');
+    const definition = (typeof getMarketDefinition === 'function') ? getMarketDefinition(market) : null;
+    const historical = definition?.capabilities?.historical || {};
+    const currentYear = new Date().getFullYear();
+    return {
+        minYear: Number.isFinite(Number(historical.min_year)) ? Number(historical.min_year) : 1982,
+        maxYear: Number.isFinite(Number(historical.max_year)) ? Number(historical.max_year) : currentYear,
+    };
+}
+
+function limitHistoricalYears(yearSelectId) {
+    const yearSelect = document.getElementById(yearSelectId);
+    if (!yearSelect) return;
+
+    const { minYear } = getHistoricalCapabilities();
+    for (let i = 0; i < yearSelect.options.length; i++) {
+        const option = yearSelect.options[i];
+        const yearValue = parseInt(option.value, 10);
+        const disabled = Number.isFinite(yearValue) && yearValue < minYear;
+        option.disabled = disabled;
+        if (disabled && option.selected) {
+            yearSelect.value = String(minYear);
+        }
+    }
+}
+
 function setPreset(preset) {
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentWeek = rangeProcessor.getWeekNumber(now);
+    const { minYear } = getHistoricalCapabilities();
     
     let startYear, startWeek, endYear, endWeek;
     
@@ -1845,6 +1876,19 @@ function setPreset(preset) {
             startYear = endYear;
             startWeek = Math.max(1, endWeek - 12);
             break;
+    }
+
+    if (startYear < minYear) {
+        startYear = minYear;
+        startWeek = 1;
+    }
+    if (endYear < minYear) {
+        endYear = minYear;
+        endWeek = 1;
+    }
+    if (startYear > endYear || (startYear === endYear && startWeek > endWeek)) {
+        startYear = endYear;
+        startWeek = endWeek;
     }
     
     // Set the values
@@ -1901,6 +1945,9 @@ document.addEventListener('DOMContentLoaded', function() {
             yearEl.addEventListener('change', () => limitFutureWeeks(yearId, weekId));
             // Apply on load for the default selection
             limitFutureWeeks(yearId, weekId);
+            if (yearId === 'historicalYear' || yearId === 'startYear' || yearId === 'endYear') {
+                limitHistoricalYears(yearId);
+            }
         }
     });
 
