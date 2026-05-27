@@ -7,7 +7,8 @@ def _extract_js_ids(content: str) -> set[str]:
 
 
 def _extract_html_ids(content: str) -> set[str]:
-    return set(re.findall(r'\bid="([^"]+)"', content))
+    # Match standalone id="..." attributes only; ignore data-*-id and other composites.
+    return set(re.findall(r'(?<![-\w])id="([^"]+)"', content))
 
 
 def test_weekly_template_contains_policy_wizard_modals():
@@ -26,13 +27,9 @@ def test_weekly_template_contains_policy_wizard_modals():
         "Cleanup Outside Policy",
         "Legacy Tag Migration",
         "Canonical tags",
-        "Legacy compatibility",
-        "{% if not dangerous_actions_enabled %}disabled{% endif %}",
-        "id=\"policyCurrentValueFetch\"",
+        "Legacy compat:",
+        "title=\\\"Execute disabled in this build\\\"",
         "id=\"policyCurrentValueAdd\"",
-        "id=\"policyCurrentValueAutoAdd\"",
-        "id=\"policyCurrentValueTags\"",
-        "id=\"policyCurrentValueProtect\"",
         "id=\"policyFetchLimit\"",
         "id=\"policyAddLimit\"",
         "id=\"policyAutoAdd\"",
@@ -78,7 +75,6 @@ def test_weekly_template_js_ids_are_rendered():
 
     assert not missing, f"weekly template JS references missing ids: {missing}"
     # Informational only: unused ids are expected for modal containers and anchors.
-    assert "policyCurrentValueTags" in html_ids
     assert "backfillResult" in html_ids
     assert "cleanupResult" in html_ids
     assert "migrationResult" in html_ids

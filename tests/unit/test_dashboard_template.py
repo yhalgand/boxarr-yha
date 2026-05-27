@@ -7,7 +7,8 @@ def _extract_js_ids(content: str) -> set[str]:
 
 
 def _extract_html_ids(content: str) -> set[str]:
-    return set(re.findall(r'\bid="([^"]+)"', content))
+    # Match standalone id="..." attributes only; ignore data-*-id and similar attribute names.
+    return set(re.findall(r'(?<![-\w])id="([^"]+)"', content))
 
 
 def test_dashboard_template_contains_cleanup_modal_and_shared_modal_language():

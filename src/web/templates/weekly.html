@@ -629,6 +629,11 @@
     gap: 0.75rem;
 }
 
+.result-scroll {
+    max-height: 42vh;
+    overflow: auto;
+}
+
 .result-list-item {
     padding: 0.75rem;
     border-radius: 10px;
@@ -648,6 +653,45 @@
     overflow: auto;
     max-height: 280px;
     white-space: pre-wrap;
+}
+
+.advanced-options {
+    margin-top: 1rem;
+    border: 1px dashed var(--border-color);
+    border-radius: 12px;
+    padding: 0.85rem 1rem;
+    background: rgba(var(--primary-rgb), 0.02);
+}
+
+.advanced-options > summary {
+    cursor: pointer;
+    font-weight: 700;
+    color: var(--text-primary);
+    list-style: none;
+}
+
+.advanced-options > summary::-webkit-details-marker {
+    display: none;
+}
+
+.advanced-options[open] > summary {
+    margin-bottom: 0.9rem;
+}
+
+.modal-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.9rem;
+    align-items: center;
+}
+
+.action-btn:disabled,
+.action-btn[disabled] {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none !important;
+    box-shadow: none !important;
 }
 </style>
 {% endblock %}
@@ -710,6 +754,14 @@
     function closeModal(id) {
         const modal = modalElement(id);
         if (modal) modal.classList.remove('show');
+    }
+
+    function collapseAdvancedOptions(modalId) {
+        const modal = modalElement(modalId);
+        if (!modal) return;
+        modal.querySelectorAll('details.advanced-options').forEach(detail => {
+            detail.open = false;
+        });
     }
 
     function parseNullableInt(value) {
@@ -822,11 +874,7 @@
         getRequiredElement('policyWeekFrom').value = {{ week_data.week }};
         getRequiredElement('policyYearTo').value = {{ week_data.year }};
         getRequiredElement('policyWeekTo').value = {{ week_data.week }};
-        getRequiredElement('policyCurrentValueFetch').textContent = formatValue(effective.box_office_fetch_limit);
         getRequiredElement('policyCurrentValueAdd').textContent = formatValue(effective.maximum_movies_to_add);
-        getRequiredElement('policyCurrentValueAutoAdd').textContent = formatValue(effective.auto_add_enabled);
-        getRequiredElement('policyCurrentValueTags').textContent = formatValue(effective.tags);
-        getRequiredElement('policyCurrentValueProtect').textContent = formatValue(effective.cleanup_protect_tag);
         getRequiredElement('policyCanonicalTags').innerHTML = canonicalTagPills(marketPolicy).canonical
             .map(tag => `<span class="tag-pill">${tag}</span>`)
             .join('');
@@ -834,6 +882,7 @@
             .map(tag => `<span class="tag-pill legacy">${tag}</span>`)
             .join('');
         updatePolicyScopeControls();
+        collapseAdvancedOptions('changePolicyModal');
     }
 
     function updatePolicyScopeControls() {
@@ -883,6 +932,7 @@
         getRequiredElement('backfillYearTo').value = {{ week_data.year }};
         getRequiredElement('backfillWeekTo').value = {{ week_data.week }};
         getRequiredElement('backfillResult').innerHTML = '<div class="modal-note">Run a dry-run to preview would_add and refetch_required.</div>';
+        collapseAdvancedOptions('backfillModal');
         showModal('backfillModal');
     }
 
@@ -893,6 +943,7 @@
     function openCleanupModal() {
         const current = currentPolicyValues();
         getRequiredElement('cleanupTargetLimit').value = current.maximum_movies_to_add ?? '';
+        getRequiredElement('cleanupCurrentLimit').textContent = formatValue(current.maximum_movies_to_add);
         getRequiredElement('cleanupProtectTag').value = current.cleanup_protect_tag ?? 'boxarr-protected';
         getRequiredElement('cleanupConfirmText').value = '';
         getRequiredElement('cleanupYearFrom').value = {{ week_data.year }};
@@ -900,6 +951,7 @@
         getRequiredElement('cleanupYearTo').value = {{ week_data.year }};
         getRequiredElement('cleanupWeekTo').value = {{ week_data.week }};
         getRequiredElement('cleanupResult').innerHTML = '<div class="modal-note">No files are deleted in dry-run.</div>';
+        collapseAdvancedOptions('cleanupPolicyModal');
         showModal('cleanupPolicyModal');
     }
 
@@ -914,6 +966,7 @@
         getRequiredElement('migrationYearTo').value = {{ week_data.year }};
         getRequiredElement('migrationWeekTo').value = {{ week_data.week }};
         getRequiredElement('migrationResult').innerHTML = '<div class="modal-note">Run a dry-run to inspect legacy tag candidates and ambiguous movies.</div>';
+        collapseAdvancedOptions('migrationModal');
         showModal('migrationModal');
     }
 
@@ -1400,11 +1453,11 @@
                     </div>
                 </div>
                 <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-                    <button class="action-btn" onclick="openChangePolicyModal()">Change policy</button>
+                    <button class="action-btn" onclick="openChangePolicyModal()">Review policy</button>
                     <button class="action-btn" onclick="openImpactModal(); fetchImpactPreview()">Preview impact</button>
                     <button class="action-btn" onclick="openBackfillModal()">Backfill missing adds</button>
-                    <button class="action-btn cleanup" onclick="openCleanupModal()">Cleanup outside policy</button>
-                    <button class="action-btn" onclick="openMigrationModal()">Legacy tag migration</button>
+                    <button class="action-btn cleanup" onclick="openCleanupModal()">Review cleanup impact</button>
+                    <button class="action-btn" onclick="openMigrationModal()">Preview legacy tag migration</button>
                 </div>
             </div>
             {% if not dangerous_actions_enabled %}
@@ -1413,13 +1466,9 @@
             </div>
             {% endif %}
             <div style="margin-top: 0.9rem; display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:0.75rem;">
-                <div><strong>Fetch top:</strong> {{ market_policy.effective.box_office_fetch_limit }} <span style="color: var(--text-secondary);">({{ market_policy.sources.box_office_fetch_limit }})</span></div>
-                <div><strong>Add to Radarr:</strong> {{ market_policy.effective.maximum_movies_to_add }} <span style="color: var(--text-secondary);">({{ market_policy.sources.maximum_movies_to_add }})</span></div>
-                <div><strong>Auto-add:</strong> {% if market_policy.effective.auto_add_enabled %}enabled{% else %}disabled{% endif %} <span style="color: var(--text-secondary);">({{ market_policy.sources.auto_add_enabled }})</span></div>
-                <div><strong>Canonical tags:</strong> added <code>{{ market_policy.tag_policy.added_tag }}</code>, market <code>{{ market_policy.tag_policy.market_tag }}</code>, existing <code>{{ market_policy.tag_policy.existing_tag }}</code>, protected <code>{{ market_policy.tag_policy.protected_tag }}</code></div>
+                <div><strong>Add limit:</strong> {{ market_policy.effective.maximum_movies_to_add }} <span style="color: var(--text-secondary);">({{ market_policy.sources.maximum_movies_to_add }})</span></div>
+                <div><strong>Canonical tags:</strong> <code>{{ market_policy.tag_policy.added_tag }}</code>, <code>{{ market_policy.tag_policy.market_tag }}</code>, <code>{{ market_policy.tag_policy.existing_tag }}</code>, <code>{{ market_policy.tag_policy.protected_tag }}</code></div>
                 <div><strong>Legacy compat:</strong> <code>boxarr</code>, <code>boxarr-keep</code></div>
-                <div><strong>Protected tag:</strong> {{ market_policy.effective.cleanup_protect_tag }} <span style="color: var(--text-secondary);">({{ market_policy.sources.cleanup_protect_tag }})</span></div>
-                <div><strong>Configured tags (compat):</strong> {{ market_policy.effective.tags | join(', ') }} <span style="color: var(--text-secondary);">({{ market_policy.sources.tags }})</span></div>
                 <div><strong>Policy snapshot:</strong> {% if week_data.policy_snapshot %}present{% else %}legacy/absent{% endif %}</div>
                 <div><strong>Snapshot tag policy:</strong>
                     {% if week_data.policy_snapshot and week_data.policy_snapshot.tag_policy_used %}
@@ -1589,95 +1638,94 @@
         <div class="modal-body">
             <div class="modal-note">
                 Current market: <strong>{{ market_policy.label }}</strong> • Provider <code>{{ market_policy.provider }}</code><br>
-                Use this flow to preview and save policy changes safely. Apply to stored weeks is explicit and scope-based.
+                Compare the current market add limit against a proposed new limit. Apply to stored weeks is explicit and scope-based.
             </div>
             <div class="modal-grid">
                 <div class="modal-section">
                     <h4>Current policy</h4>
                     <div class="policy-diff">
-                        <div class="policy-diff-item"><span class="label">Fetch top</span><span class="value" id="policyCurrentValueFetch"></span></div>
                         <div class="policy-diff-item"><span class="label">Add to Radarr</span><span class="value" id="policyCurrentValueAdd"></span></div>
-                        <div class="policy-diff-item"><span class="label">Auto-add</span><span class="value" id="policyCurrentValueAutoAdd"></span></div>
-                        <div class="policy-diff-item"><span class="label">Tags</span><span class="value" id="policyCurrentValueTags"></span></div>
-                        <div class="policy-diff-item"><span class="label">Protected tag</span><span class="value" id="policyCurrentValueProtect"></span></div>
                     </div>
-                    <div style="margin-top: 0.9rem;">
-                        <strong>Canonical tags</strong>
-                        <div id="policyCanonicalTags" class="tag-pill-list" style="margin-top: 0.45rem;"></div>
-                    </div>
-                    <div style="margin-top: 0.9rem;">
-                        <strong>Legacy compatibility</strong>
-                        <div id="policyLegacyTags" class="tag-pill-list" style="margin-top: 0.45rem;"></div>
+                    <div style="margin-top:0.75rem; color: var(--text-secondary);">
+                        Boxarr will compare this policy against Radarr. No files are deleted in dry-run.
                     </div>
                 </div>
                 <div class="modal-section">
-                    <h4>New policy</h4>
-                    <div class="form-group">
-                        <label for="policyFetchLimit">Fetch top</label>
-                        <input id="policyFetchLimit" class="form-input" type="number" min="1" max="100">
-                    </div>
+                    <h4>New add limit</h4>
                     <div class="form-group">
                         <label for="policyAddLimit">Add to Radarr</label>
                         <input id="policyAddLimit" class="form-input" type="number" min="1" max="30">
                     </div>
-                    <div class="form-group">
-                        <label for="policyAutoAdd">Auto-add</label>
-                        <select id="policyAutoAdd" class="form-select">
-                            <option value="true">enabled</option>
-                            <option value="false">disabled</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="policyTags">Tags override</label>
-                        <textarea id="policyTags" class="form-textarea" placeholder="Comma-separated tags"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label for="policyAutoTagText">Auto-tag text</label>
-                        <input id="policyAutoTagText" class="form-input" type="text" placeholder="boxarr">
-                    </div>
-                    <div class="form-group">
-                        <label for="policyProtectTag">Cleanup protect tag</label>
-                        <input id="policyProtectTag" class="form-input" type="text" placeholder="boxarr-protected">
-                    </div>
                 </div>
             </div>
 
-            <div class="modal-section" style="margin-top: 1rem;">
-                <h4>Scope</h4>
-                <div class="scope-options">
-                    <label class="scope-option"><input type="radio" name="policyScope" id="policyScopeFuture" value="future" checked onchange="updatePolicyScopeControls()">Future only</label>
-                    <label class="scope-option"><input type="radio" name="policyScope" id="policyScopeCurrent" value="current" onchange="updatePolicyScopeControls()">Current week</label>
-                    <label class="scope-option"><input type="radio" name="policyScope" id="policyScopeRange" value="range" onchange="updatePolicyScopeControls()">Selected range</label>
-                    <label class="scope-option"><input type="radio" name="policyScope" id="policyScopeAll" value="all" onchange="updatePolicyScopeControls()">All stored</label>
+            <details class="advanced-options">
+                <summary>Advanced options</summary>
+                <div class="modal-grid">
+                    <div class="modal-section">
+                        <div class="form-group">
+                            <label for="policyFetchLimit">Fetch top</label>
+                            <input id="policyFetchLimit" class="form-input" type="number" min="1" max="100">
+                        </div>
+                        <div class="form-group">
+                            <label for="policyAutoAdd">Auto-add</label>
+                            <select id="policyAutoAdd" class="form-select">
+                                <option value="true">enabled</option>
+                                <option value="false">disabled</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="policyTags">Tags override</label>
+                            <textarea id="policyTags" class="form-textarea" placeholder="Comma-separated tags"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-section">
+                        <div class="form-group">
+                            <label for="policyAutoTagText">Auto-tag text</label>
+                            <input id="policyAutoTagText" class="form-input" type="text" placeholder="boxarr">
+                        </div>
+                        <div class="form-group">
+                            <label for="policyProtectTag">Cleanup protect tag</label>
+                            <input id="policyProtectTag" class="form-input" type="text" placeholder="boxarr-protected">
+                        </div>
+                        <div class="form-group">
+                            <label>Scope</label>
+                            <div class="scope-options">
+                                <label class="scope-option"><input type="radio" name="policyScope" id="policyScopeFuture" value="future" checked onchange="updatePolicyScopeControls()">Future only</label>
+                                <label class="scope-option"><input type="radio" name="policyScope" id="policyScopeCurrent" value="current" onchange="updatePolicyScopeControls()">Current week</label>
+                                <label class="scope-option"><input type="radio" name="policyScope" id="policyScopeRange" value="range" onchange="updatePolicyScopeControls()">Selected range</label>
+                                <label class="scope-option"><input type="radio" name="policyScope" id="policyScopeAll" value="all" onchange="updatePolicyScopeControls()">All stored</label>
+                            </div>
+                        </div>
+                        <div class="modal-grid-3" style="margin-top: 0.5rem;">
+                            <div class="form-group">
+                                <label for="policyYearFrom">Year from</label>
+                                <input id="policyYearFrom" class="form-input" type="number" min="1982">
+                            </div>
+                            <div class="form-group">
+                                <label for="policyWeekFrom">Week from</label>
+                                <input id="policyWeekFrom" class="form-input" type="number" min="1" max="53">
+                            </div>
+                            <div class="form-group">
+                                <label for="policyYearTo">Year to</label>
+                                <input id="policyYearTo" class="form-input" type="number" min="1982">
+                            </div>
+                            <div class="form-group">
+                                <label for="policyWeekTo">Week to</label>
+                                <input id="policyWeekTo" class="form-input" type="number" min="1" max="53">
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="modal-grid-3" style="margin-top: 0.85rem;">
-                    <div class="form-group">
-                        <label for="policyYearFrom">Year from</label>
-                        <input id="policyYearFrom" class="form-input" type="number" min="1982">
-                    </div>
-                    <div class="form-group">
-                        <label for="policyWeekFrom">Week from</label>
-                        <input id="policyWeekFrom" class="form-input" type="number" min="1" max="53">
-                    </div>
-                    <div class="form-group">
-                        <label for="policyYearTo">Year to</label>
-                        <input id="policyYearTo" class="form-input" type="number" min="1982">
-                    </div>
-                    <div class="form-group">
-                        <label for="policyWeekTo">Week to</label>
-                        <input id="policyWeekTo" class="form-input" type="number" min="1" max="53">
-                    </div>
+                <div class="modal-action-row">
+                    <button id="policyApplyBtn" class="action-btn" type="button" onclick="applyPolicyFromModal()">Apply to stored weeks</button>
                 </div>
-                <div style="margin-top: 0.75rem; color: var(--text-secondary);">
-                    Future only affects future fetches. Stored weeks are only updated when you use Apply to stored weeks.
-                </div>
-            </div>
+            </details>
         </div>
         <div class="modal-footer">
             <button class="action-btn secondary" type="button" onclick="closeChangePolicyModal()">Close</button>
             <button class="action-btn secondary" type="button" onclick="fetchImpactPreview()">Preview impact</button>
             <button class="action-btn primary" type="button" onclick="savePolicyFromModal()">Save policy</button>
-            <button id="policyApplyBtn" class="action-btn" type="button" onclick="applyPolicyFromModal()">Apply to stored weeks</button>
         </div>
     </div>
 </div>
@@ -1694,8 +1742,8 @@
                 This preview shows the impact of the policy change before saving or applying it to stored weeks.
             </div>
             <div id="policyImpactSummary"></div>
-            <div id="policyImpactDetails"></div>
-            <div id="policyImpactJson"></div>
+            <div id="policyImpactDetails" class="result-scroll"></div>
+            <div id="policyImpactJson" class="result-scroll"></div>
         </div>
         <div class="modal-footer">
             <button class="action-btn secondary" type="button" onclick="closeImpactModal()">Close</button>
@@ -1714,33 +1762,56 @@
             <div class="modal-note">
                 Dry-run first. The execute action is protected by <code>BOXARR_ENABLE_DANGEROUS_ACTIONS</code>.
             </div>
-            <div class="modal-grid-3">
-                <div class="form-group"><label for="backfillFetchLimit">Fetch top</label><input id="backfillFetchLimit" class="form-input" type="number" min="1" max="100"></div>
-                <div class="form-group"><label for="backfillAddLimit">Add to Radarr</label><input id="backfillAddLimit" class="form-input" type="number" min="1" max="30"></div>
-                <div class="form-group"><label for="backfillAutoAdd">Auto-add</label><select id="backfillAutoAdd" class="form-select"><option value="true">enabled</option><option value="false">disabled</option></select></div>
-                <div class="form-group"><label for="backfillYearFrom">Year from</label><input id="backfillYearFrom" class="form-input" type="number" min="1982"></div>
-                <div class="form-group"><label for="backfillWeekFrom">Week from</label><input id="backfillWeekFrom" class="form-input" type="number" min="1" max="53"></div>
-                <div class="form-group"><label for="backfillYearTo">Year to</label><input id="backfillYearTo" class="form-input" type="number" min="1982"></div>
-                <div class="form-group"><label for="backfillWeekTo">Week to</label><input id="backfillWeekTo" class="form-input" type="number" min="1" max="53"></div>
-                <div class="form-group"><label for="backfillMaxWeeks">Max weeks</label><input id="backfillMaxWeeks" class="form-input" type="number" min="1" max="52"></div>
-                <div class="form-group" style="align-self:end;">
-                    <label><input id="backfillAllStored" type="checkbox" onchange="document.getElementById('backfillMaxWeeks').disabled = this.checked;"> All stored</label>
+            <div class="modal-grid">
+                <div class="modal-section">
+                    <h4>Current policy</h4>
+                    <div class="policy-diff">
+                        <div class="policy-diff-item"><span class="label">Market</span><span class="value">{{ market_policy.label }}</span></div>
+                        <div class="policy-diff-item"><span class="label">Current add limit</span><span class="value" id="backfillCurrentLimit"></span></div>
+                    </div>
+                    <div style="margin-top:0.75rem; color: var(--text-secondary);">
+                        Boxarr will compare the current market policy against Radarr. No files are deleted in dry-run.
+                    </div>
+                </div>
+                <div class="modal-section">
+                    <h4>New add limit</h4>
+                    <div class="form-group">
+                        <label for="backfillAddLimit">Add to Radarr</label>
+                        <input id="backfillAddLimit" class="form-input" type="number" min="1" max="30">
+                    </div>
                 </div>
             </div>
+
+            <details class="advanced-options">
+                <summary>Advanced options</summary>
+                <div class="modal-grid-3">
+                    <div class="form-group"><label for="backfillFetchLimit">Fetch top</label><input id="backfillFetchLimit" class="form-input" type="number" min="1" max="100"></div>
+                    <div class="form-group"><label for="backfillAutoAdd">Auto-add</label><select id="backfillAutoAdd" class="form-select"><option value="true">enabled</option><option value="false">disabled</option></select></div>
+                    <div class="form-group"><label for="backfillMaxWeeks">Max weeks</label><input id="backfillMaxWeeks" class="form-input" type="number" min="1" max="52"></div>
+                    <div class="form-group"><label for="backfillYearFrom">Year from</label><input id="backfillYearFrom" class="form-input" type="number" min="1982"></div>
+                    <div class="form-group"><label for="backfillWeekFrom">Week from</label><input id="backfillWeekFrom" class="form-input" type="number" min="1" max="53"></div>
+                    <div class="form-group"><label for="backfillYearTo">Year to</label><input id="backfillYearTo" class="form-input" type="number" min="1982"></div>
+                    <div class="form-group"><label for="backfillWeekTo">Week to</label><input id="backfillWeekTo" class="form-input" type="number" min="1" max="53"></div>
+                    <div class="form-group" style="align-self:end;">
+                        <label><input id="backfillAllStored" type="checkbox" onchange="document.getElementById('backfillMaxWeeks').disabled = this.checked;"> All stored</label>
+                    </div>
+                </div>
+            </details>
+
             <div class="modal-note warning" style="margin-top:1rem;">
-                Scope is required. Use the current week or a limited range for quick dry-runs.
+                Scope defaults to the current week on the weekly page. More weeks stay behind Advanced options.
             </div>
-            <div id="backfillResult" class="modal-section" style="margin-top: 1rem;">
+            <div id="backfillResult" class="modal-section result-panel" style="margin-top: 1rem;">
                 <strong>Results</strong>
                 <div id="backfillResultSummary"></div>
-                <div id="backfillResultDetails"></div>
-                <div id="backfillResultJson"></div>
+                <div id="backfillResultDetails" class="result-scroll"></div>
+                <div id="backfillResultJson" class="result-scroll"></div>
             </div>
         </div>
         <div class="modal-footer">
             <button class="action-btn secondary" type="button" onclick="closeBackfillModal()">Close</button>
-            <button class="action-btn secondary" type="button" onclick="runBackfillDryRun()">Dry-run</button>
-            <button id="backfillExecuteBtn" class="action-btn" type="button" onclick="runBackfillExecute()" {% if not dangerous_actions_enabled %}disabled{% endif %}>Execute</button>
+            <button class="action-btn secondary" type="button" onclick="runBackfillDryRun()">Preview impact</button>
+            <button id="backfillExecuteBtn" class="action-btn" type="button" onclick="runBackfillExecute()" {% if not dangerous_actions_enabled %}disabled title=\"Execute disabled in this build\"{% endif %}>Execute</button>
         </div>
     </div>
 </div>
@@ -1754,31 +1825,58 @@
         </div>
         <div class="modal-body">
             <div class="modal-note">
-                Dry-run first. Cleanup will only delete via Radarr when execute is explicitly enabled.
+                Boxarr will compare this policy against Radarr. No files are deleted in dry-run.
             </div>
-            <div class="modal-grid-3">
-                <div class="form-group"><label for="cleanupTargetLimit">Target add limit</label><input id="cleanupTargetLimit" class="form-input" type="number" min="1" max="30"></div>
-                <div class="form-group"><label for="cleanupProtectTag">Protect tag</label><input id="cleanupProtectTag" class="form-input" type="text" value="boxarr-protected"></div>
-                <div class="form-group"><label for="cleanupConfirmText">Confirmation</label><input id="cleanupConfirmText" class="form-input" type="text" placeholder="Type DELETE for execute"></div>
-                <div class="form-group"><label for="cleanupYearFrom">Year from</label><input id="cleanupYearFrom" class="form-input" type="number" min="1982"></div>
-                <div class="form-group"><label for="cleanupWeekFrom">Week from</label><input id="cleanupWeekFrom" class="form-input" type="number" min="1" max="53"></div>
-                <div class="form-group"><label for="cleanupYearTo">Year to</label><input id="cleanupYearTo" class="form-input" type="number" min="1982"></div>
-                <div class="form-group"><label for="cleanupWeekTo">Week to</label><input id="cleanupWeekTo" class="form-input" type="number" min="1" max="53"></div>
+            <div class="modal-grid">
+                <div class="modal-section">
+                    <h4>Current policy</h4>
+                    <div class="policy-diff">
+                        <div class="policy-diff-item"><span class="label">Market</span><span class="value">{{ market_policy.label }}</span></div>
+                        <div class="policy-diff-item"><span class="label">Current add limit</span><span class="value" id="cleanupCurrentLimit"></span></div>
+                    </div>
+                    <div style="margin-top:0.75rem; color: var(--text-secondary);">
+                        Use Preview impact to compare the current market policy against Radarr. No files are deleted in dry-run.
+                    </div>
+                </div>
+                <div class="modal-section">
+                    <h4>New add limit</h4>
+                    <div class="form-group">
+                        <label for="cleanupTargetLimit">Add to Radarr</label>
+                        <input id="cleanupTargetLimit" class="form-input" type="number" min="1" max="30">
+                    </div>
+                </div>
             </div>
+
+            <details class="advanced-options">
+                <summary>Advanced options</summary>
+                <div class="modal-grid-3">
+                    <div class="form-group"><label for="cleanupProtectTag">Protect tag</label><input id="cleanupProtectTag" class="form-input" type="text" value="boxarr-protected"></div>
+                    <div class="form-group"><label for="cleanupConfirmText">Confirmation</label><input id="cleanupConfirmText" class="form-input" type="text" placeholder="Type DELETE for execute"></div>
+                    <div class="form-group"><label for="cleanupYearFrom">Year from</label><input id="cleanupYearFrom" class="form-input" type="number" min="1982"></div>
+                    <div class="form-group"><label for="cleanupWeekFrom">Week from</label><input id="cleanupWeekFrom" class="form-input" type="number" min="1" max="53"></div>
+                    <div class="form-group"><label for="cleanupYearTo">Year to</label><input id="cleanupYearTo" class="form-input" type="number" min="1982"></div>
+                    <div class="form-group"><label for="cleanupWeekTo">Week to</label><input id="cleanupWeekTo" class="form-input" type="number" min="1" max="53"></div>
+                </div>
+                <div class="form-group" style="margin-top: 0.75rem;">
+                    <label><input id="cleanupAllStored" type="checkbox"> All stored</label>
+                    <label style="display:block; margin-top:0.5rem;"><input id="cleanupDeleteFiles" type="checkbox" checked disabled> Delete files (execute only)</label>
+                </div>
+            </details>
+
             <div class="modal-note warning" style="margin-top:1rem;">
-                No files are deleted in dry-run. Execute is disabled in this build unless dangerous actions are explicitly enabled.
+                Technical fields stay behind Advanced options. The weekly page defaults to the current week unless you expand it.
             </div>
-            <div id="cleanupResult" class="modal-section" style="margin-top: 1rem;">
+            <div id="cleanupResult" class="modal-section result-panel" style="margin-top: 1rem;">
                 <strong>Results</strong>
                 <div id="cleanupResultSummary"></div>
-                <div id="cleanupResultDetails"></div>
-                <div id="cleanupResultJson"></div>
+                <div id="cleanupResultDetails" class="result-scroll"></div>
+                <div id="cleanupResultJson" class="result-scroll"></div>
             </div>
         </div>
         <div class="modal-footer">
             <button class="action-btn secondary" type="button" onclick="closeCleanupModal()">Close</button>
-            <button class="action-btn secondary" type="button" onclick="runCleanupDryRun()">Dry-run</button>
-            <button id="cleanupExecuteBtn" class="action-btn cleanup" type="button" onclick="runCleanupExecute()" {% if not dangerous_actions_enabled %}disabled{% endif %}>Execute</button>
+            <button class="action-btn secondary" type="button" onclick="runCleanupDryRun()">Preview impact</button>
+            <button id="cleanupExecuteBtn" class="action-btn cleanup" type="button" onclick="runCleanupExecute()" {% if not dangerous_actions_enabled %}disabled title=\"Execute disabled in this build\"{% endif %}>Execute</button>
         </div>
     </div>
 </div>
@@ -1792,37 +1890,55 @@
         </div>
         <div class="modal-body">
             <div class="modal-note">
-                Dry-run first. Legacy tags are only migrated when they can be matched safely and explicitly.
+                Preview legacy tag migration first. Legacy tags are only migrated when they can be matched safely and explicitly.
             </div>
-            <div class="modal-grid-3">
-                <div class="form-group">
-                    <label for="migrationMarket">Market</label>
-                    <select id="migrationMarket" class="form-select">
-                        <option value="all">All configured markets</option>
-                        {% for market_key, market_def in configured_markets.items() %}
-                        <option value="{{ market_key }}" {% if market == market_key %}selected{% endif %}>{{ market_def.label }}</option>
-                        {% endfor %}
-                    </select>
+            <div class="modal-grid">
+                <div class="modal-section">
+                    <h4>Current market</h4>
+                    <div class="policy-diff">
+                        <div class="policy-diff-item"><span class="label">Market</span><span class="value">{{ market_policy.label }}</span></div>
+                        <div class="policy-diff-item"><span class="label">Provider</span><span class="value"><code>{{ market_policy.provider }}</code></span></div>
+                    </div>
+                    <div style="margin-top:0.75rem; color: var(--text-secondary);">
+                        Preview legacy tag migration before applying any safe changes.
+                    </div>
                 </div>
-                <div class="form-group"><label for="migrationYearFrom">Year from</label><input id="migrationYearFrom" class="form-input" type="number" min="1982"></div>
-                <div class="form-group"><label for="migrationWeekFrom">Week from</label><input id="migrationWeekFrom" class="form-input" type="number" min="1" max="53"></div>
-                <div class="form-group"><label for="migrationYearTo">Year to</label><input id="migrationYearTo" class="form-input" type="number" min="1982"></div>
-                <div class="form-group"><label for="migrationWeekTo">Week to</label><input id="migrationWeekTo" class="form-input" type="number" min="1" max="53"></div>
+                <div class="modal-section">
+                    <h4>Scope</h4>
+                    <div class="form-group">
+                        <label for="migrationMarket">Market</label>
+                        <select id="migrationMarket" class="form-select">
+                            <option value="all">All configured markets</option>
+                            {% for market_key, market_def in configured_markets.items() %}
+                            <option value="{{ market_key }}" {% if market == market_key %}selected{% endif %}>{{ market_def.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
             </div>
+            <details class="advanced-options">
+                <summary>Advanced options</summary>
+                <div class="modal-grid-3">
+                    <div class="form-group"><label for="migrationYearFrom">Year from</label><input id="migrationYearFrom" class="form-input" type="number" min="1982"></div>
+                    <div class="form-group"><label for="migrationWeekFrom">Week from</label><input id="migrationWeekFrom" class="form-input" type="number" min="1" max="53"></div>
+                    <div class="form-group"><label for="migrationYearTo">Year to</label><input id="migrationYearTo" class="form-input" type="number" min="1982"></div>
+                    <div class="form-group"><label for="migrationWeekTo">Week to</label><input id="migrationWeekTo" class="form-input" type="number" min="1" max="53"></div>
+                </div>
+            </details>
             <div class="modal-note warning" style="margin-top:1rem;">
-                Execute is disabled in this build unless dangerous actions are explicitly enabled.
+                Technical scope stays behind Advanced options.
             </div>
-            <div id="migrationResult" class="modal-section" style="margin-top: 1rem;">
+            <div id="migrationResult" class="modal-section result-panel" style="margin-top: 1rem;">
                 <strong>Results</strong>
                 <div id="migrationResultSummary"></div>
-                <div id="migrationResultDetails"></div>
-                <div id="migrationResultJson"></div>
+                <div id="migrationResultDetails" class="result-scroll"></div>
+                <div id="migrationResultJson" class="result-scroll"></div>
             </div>
         </div>
         <div class="modal-footer">
             <button class="action-btn secondary" type="button" onclick="closeMigrationModal()">Close</button>
-            <button class="action-btn secondary" type="button" onclick="runMigrationDryRun()">Dry-run</button>
-            <button id="migrationExecuteBtn" class="action-btn" type="button" onclick="runMigrationExecute()" {% if not dangerous_actions_enabled %}disabled{% endif %}>Execute</button>
+            <button class="action-btn secondary" type="button" onclick="runMigrationDryRun()">Preview legacy tag migration</button>
+            <button id="migrationExecuteBtn" class="action-btn" type="button" onclick="runMigrationExecute()" {% if not dangerous_actions_enabled %}disabled title=\"Execute disabled in this build\"{% endif %}>Execute</button>
         </div>
     </div>
 </div>

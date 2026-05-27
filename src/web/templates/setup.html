@@ -258,22 +258,25 @@
                         </thead>
                         <tbody>
                             {% for market_key, preview in market_previews.items() %}
-                            {% set effective = preview.effective %}
-                            {% set sources = preview.sources %}
+                            {% set definition = preview.definition|default(preview) %}
+                            {% set effective = preview.effective|default({}) %}
+                            {% set sources = preview.sources|default({}) %}
+                            {% set tag_policy = preview.tag_policy|default({}) %}
+                            {% set provider_config = definition.provider_config|default({}) %}
                             <tr>
                                 <td>
-                                    <strong>{{ preview.definition.label }}</strong><br>
+                                    <strong>{{ definition.label|default(market_key|upper) }}</strong><br>
                                     <small class="text-muted">{{ market_key }}</small>
                                 </td>
                                 <td>
-                                    <code>{{ preview.definition.provider }}</code><br>
+                                    <code>{{ definition.provider|default('mojo') }}</code><br>
                                     <small class="text-muted">
-                                        {% for cfg_key, cfg_val in preview.definition.provider_config.items() %}
+                                        {% for cfg_key, cfg_val in provider_config.items() %}
                                             {{ cfg_key }}={{ cfg_val }}{% if not loop.last %}, {% endif %}
                                         {% endfor %}
                                     </small>
                                 </td>
-                                <td>{{ 'Yes' if preview.definition.enabled else 'No' }}</td>
+                                <td>{{ 'Yes' if definition.enabled|default(true) else 'No' }}</td>
                                 <td>
                                     {{ effective.box_office_fetch_limit }}
                                     <span class="version-badge" style="margin-left: 0.35rem; font-size: 0.7rem;">{{ sources.box_office_fetch_limit }}</span>
@@ -287,19 +290,29 @@
                                     <span class="version-badge" style="margin-left: 0.35rem; font-size: 0.7rem;">{{ sources.auto_add_enabled }}</span>
                                 </td>
                                 <td>
-                                    {% for tag in effective.tags %}
+                                    {% for tag in effective.tags|default([]) %}
                                         <code>{{ tag }}</code>{% if not loop.last %}, {% endif %}
                                     {% endfor %}
                                     <span class="version-badge" style="margin-left: 0.35rem; font-size: 0.7rem;">{{ sources.tags }}</span>
+                                    <div class="text-muted" style="margin-top: 0.35rem; font-size: 0.75rem;">
+                                        Canonical:
+                                        <code>{{ tag_policy.added_tag|default('boxarr-added') }}</code>,
+                                        <code>{{ tag_policy.market_tag|default('boxarr-market-' ~ market_key) }}</code>,
+                                        <code>{{ tag_policy.existing_tag|default('boxarr-existing-' ~ market_key) }}</code>,
+                                        <code>{{ tag_policy.protected_tag|default('boxarr-protected') }}</code>
+                                    </div>
+                                    <div class="text-muted" style="font-size: 0.75rem;">
+                                        Legacy compat: <code>boxarr</code>, <code>boxarr-keep</code>
+                                    </div>
                                 </td>
                                 <td>
-                                    <code>{{ effective.cleanup_protect_tag }}</code>
+                                    <code>{{ effective.cleanup_protect_tag|default('boxarr-protected') }}</code>
                                     <span class="version-badge" style="margin-left: 0.35rem; font-size: 0.7rem;">{{ sources.cleanup_protect_tag }}</span>
                                 </td>
                                 <td>
                                     <div class="market-action-buttons">
                                         <button type="button" class="btn btn-sm btn-info" onclick="openMarketEditor('{{ market_key }}')">Edit</button>
-                                        {% if preview.definition.enabled %}
+                                        {% if definition.enabled|default(true) %}
                                         <button type="button" class="btn btn-sm btn-warning" onclick="toggleMarketEnabled('{{ market_key }}', false)">Disable</button>
                                         {% else %}
                                         <button type="button" class="btn btn-sm btn-success" onclick="toggleMarketEnabled('{{ market_key }}', true)">Enable</button>

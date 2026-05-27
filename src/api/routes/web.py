@@ -3,7 +3,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Request
@@ -94,6 +94,46 @@ def _selected_market(request: Request) -> str:
 
 def _selected_provider(request: Request) -> str:
     return provider_for_market(_selected_market(request))
+
+
+def _build_market_preview(settings_obj, market_key: str) -> Dict[str, Any]:
+    """Build a stable market preview structure for templates.
+
+    Templates should be able to rely on the same shape regardless of whether
+    a market comes from defaults or from ``settings.markets``.
+    """
+    definition = get_market_definition(settings_obj, market_key)
+    effective = get_effective_market_settings(settings_obj, market_key)
+    policy = get_market_policy(settings_obj, market_key)
+
+    return {
+        "market": definition.get("market", market_key),
+        "definition": {
+            "market": definition.get("market", market_key),
+            "label": definition.get("label", str(market_key).upper()),
+            "provider": definition.get("provider"),
+            "provider_config": dict(definition.get("provider_config", {}) or {}),
+            "aliases": list(definition.get("aliases", []) or []),
+            "enabled": bool(definition.get("enabled", True)),
+            "configured": bool(definition.get("configured", False)),
+            "overrides": dict(definition.get("overrides", {}) or {}),
+        },
+        "effective": dict(effective.get("effective", {}) or {}),
+        "sources": dict(effective.get("sources", {}) or {}),
+        "tag_policy": dict(policy.get("tag_policy", {}) or {}),
+        "configured": bool(definition.get("configured", False)),
+        "overrides": dict(effective.get("overrides", {}) or {}),
+        "global": dict(effective.get("global", {}) or {}),
+    }
+
+
+def _build_market_previews(settings_obj) -> Dict[str, Dict[str, Any]]:
+    """Return a normalized preview map for all configured markets."""
+    configured_markets = get_configured_markets(settings_obj)
+    return {
+        market_key: _build_market_preview(settings_obj, market_key)
+        for market_key in configured_markets.keys()
+    }
 
 
 def _redirect_with_market(request: Request, path: str, market: str) -> RedirectResponse:
@@ -558,12 +598,9 @@ async def setup_page(request: Request):
     market = _selected_market(request)
     provider = provider_for_market(market)
     configured_markets = get_configured_markets(settings)
-    market_settings_preview = get_effective_market_settings(settings, market)
+    market_settings_preview = _build_market_preview(settings, market)
     market_policy = get_market_policy(settings, market)
-    market_previews = {
-        market_key: get_effective_market_settings(settings, market_key)
-        for market_key in configured_markets.keys()
-    }
+    market_previews = _build_market_previews(settings)
     # Parse current cron for display
     cron = settings.boxarr_scheduler_cron
     import re
