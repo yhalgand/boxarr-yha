@@ -208,6 +208,44 @@ class TestRadarrMovieOperations:
             call_args = mock_request.call_args
             assert call_args[1]["json"] == {"name": "MoviesSearch", "movieIds": [123]}
 
+    def test_get_queue(self):
+        """Test fetching the Radarr queue."""
+        with patch("httpx.Client.request") as mock_request:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "records": [
+                    {"id": 91, "movieId": 123, "title": "Queued Movie"},
+                ]
+            }
+            mock_request.return_value = mock_response
+
+            queue = self.service.get_queue()
+
+            assert len(queue) == 1
+            assert queue[0]["movieId"] == 123
+            mock_request.assert_called_once()
+            call_args = mock_request.call_args
+            assert call_args[0][0] == "GET"
+            assert call_args[0][1] == "/api/v3/queue"
+
+    def test_remove_queue_item(self):
+        """Test removing a queue item from Radarr."""
+        with patch("httpx.Client.request") as mock_request:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {"status": "ok"}
+            mock_request.return_value = mock_response
+
+            response = self.service.remove_queue_item(91, remove_from_client=True)
+
+            assert response.status_code == 200
+            mock_request.assert_called_once()
+            call_args = mock_request.call_args
+            assert call_args[0][0] == "DELETE"
+            assert call_args[0][1] == "/api/v3/queue/91"
+            assert call_args[1]["params"] == {"removeFromClient": "true"}
+
     def test_get_quality_profiles(self):
         """Test fetching quality profiles from Radarr."""
         mock_profiles = [

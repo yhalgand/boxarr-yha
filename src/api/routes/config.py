@@ -101,6 +101,18 @@ class MarketCreateRequest(BaseModel):
     tags: Optional[List[str]] = None
     auto_tag_text: Optional[str] = None
     cleanup_protect_tag: Optional[str] = None
+    root_folder: Optional[str] = None
+    quality_profile_default: Optional[str] = None
+    quality_profile_upgrade: Optional[str] = None
+    minimum_availability_enabled: Optional[bool] = None
+    minimum_availability: Optional[str] = None
+    monitor_option: Optional[str] = None
+    search_on_add: Optional[bool] = None
+    language_filter_enabled: Optional[bool] = None
+    language_filter_mode: Optional[str] = None
+    language_whitelist: Optional[List[str]] = None
+    language_blacklist: Optional[List[str]] = None
+    ignore_rereleases: Optional[bool] = None
 
 
 class MarketUpdateRequest(BaseModel):
@@ -116,6 +128,18 @@ class MarketUpdateRequest(BaseModel):
     tags: Optional[List[str]] = None
     auto_tag_text: Optional[str] = None
     cleanup_protect_tag: Optional[str] = None
+    root_folder: Optional[str] = None
+    quality_profile_default: Optional[str] = None
+    quality_profile_upgrade: Optional[str] = None
+    minimum_availability_enabled: Optional[bool] = None
+    minimum_availability: Optional[str] = None
+    monitor_option: Optional[str] = None
+    search_on_add: Optional[bool] = None
+    language_filter_enabled: Optional[bool] = None
+    language_filter_mode: Optional[str] = None
+    language_whitelist: Optional[List[str]] = None
+    language_blacklist: Optional[List[str]] = None
+    ignore_rereleases: Optional[bool] = None
 
 
 @router.get("/root-folders")

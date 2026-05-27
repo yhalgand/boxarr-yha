@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -165,6 +165,10 @@ class CleanupDecision:
     ranks_by_week: List[Dict[str, Any]] = field(default_factory=list)
     best_rank: Optional[int] = None
     eligible_under_target_limit: bool = False
+    in_download_queue: bool = False
+    would_remove_download: bool = False
+    would_remove_radarr: bool = False
+    would_delete_files: bool = False
     safe_to_delete: bool = False
     safe_to_detach: bool = False
     unsafe_to_delete: bool = False
@@ -200,6 +204,10 @@ class CleanupDecision:
             "ranks_by_week": self.ranks_by_week,
             "best_rank": self.best_rank,
             "eligible_under_target_limit": self.eligible_under_target_limit,
+            "in_download_queue": self.in_download_queue,
+            "would_remove_download": self.would_remove_download,
+            "would_remove_radarr": self.would_remove_radarr,
+            "would_delete_files": self.would_delete_files,
             "safe_to_delete": self.safe_to_delete,
             "safe_to_detach": self.safe_to_detach,
             "unsafe_to_delete": self.unsafe_to_delete,
@@ -220,6 +228,7 @@ class CleanupReport:
     delete_files: bool
     require_boxarr_tag: bool
     protect_tag: str
+    remove_without_files_only: bool = False
     markets_scanned: List[str] = field(default_factory=list)
     weeks_scanned: int = 0
     movies_scanned: int = 0
@@ -237,8 +246,18 @@ class CleanupReport:
     errors: List[Dict[str, Any]] = field(default_factory=list)
     estimated_size_deleted: int = 0
     actual_size_deleted: int = 0
+    would_remove_downloads_count: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
+        would_delete = [item.to_dict() for item in self.would_delete]
+        would_detach = [item.to_dict() for item in self.would_detach_market_tag_only]
+        protected = [item.to_dict() for item in self.protected]
+        unsafe = [item.to_dict() for item in self.unsafe]
+        skipped = [item.to_dict() for item in self.skipped]
+        movies_with_files_to_delete = sum(1 for item in self.would_delete if item.has_file)
+        movies_without_files_to_remove = sum(
+            1 for item in self.would_delete if not item.has_file
+        )
         if self.dry_run:
             return {
                 "success": True,
@@ -248,6 +267,7 @@ class CleanupReport:
                 "markets_scanned": self.markets_scanned,
                 "target_add_limit": self.target_add_limit,
                 "delete_files": self.delete_files,
+                "remove_without_files_only": self.remove_without_files_only,
                 "require_boxarr_tag": self.require_boxarr_tag,
                 "protect_tag": self.protect_tag,
                 "weeks_scanned": self.weeks_scanned,
@@ -255,14 +275,16 @@ class CleanupReport:
                 "considered_total": self.considered_total,
                 "eligible_count": self.eligible_count,
                 "associated_count": self.associated_count,
-                "candidates": [item.to_dict() for item in self.would_delete],
-                "would_delete": [item.to_dict() for item in self.would_delete],
-                "would_detach_market_tag_only": [
-                    item.to_dict() for item in self.would_detach_market_tag_only
-                ],
-                "protected": [item.to_dict() for item in self.protected],
-                "unsafe": [item.to_dict() for item in self.unsafe],
-                "skipped": [item.to_dict() for item in self.skipped],
+                "candidates": would_delete,
+                "would_delete": would_delete,
+                "would_remove_from_radarr": would_delete,
+                "would_detach_market_tag_only": would_detach,
+                "protected": protected,
+                "unsafe": unsafe,
+                "skipped": skipped,
+                "movies_with_files_to_delete": movies_with_files_to_delete,
+                "movies_without_files_to_remove": movies_without_files_to_remove,
+                "would_remove_downloads_count": self.would_remove_downloads_count,
                 "estimated_size_to_delete": self.estimated_size_deleted,
             }
         return {
@@ -273,6 +295,7 @@ class CleanupReport:
             "markets_scanned": self.markets_scanned,
             "target_add_limit": self.target_add_limit,
             "delete_files": self.delete_files,
+            "remove_without_files_only": self.remove_without_files_only,
             "require_boxarr_tag": self.require_boxarr_tag,
             "protect_tag": self.protect_tag,
             "weeks_scanned": self.weeks_scanned,
@@ -280,15 +303,17 @@ class CleanupReport:
             "considered_total": self.considered_total,
             "eligible_count": self.eligible_count,
             "associated_count": self.associated_count,
-            "would_delete": [item.to_dict() for item in self.would_delete],
-            "would_detach_market_tag_only": [
-                item.to_dict() for item in self.would_detach_market_tag_only
-            ],
+            "would_delete": would_delete,
+            "would_remove_from_radarr": would_delete,
+            "would_detach_market_tag_only": would_detach,
             "deleted": [item.to_dict() for item in self.deleted],
             "detached": [item.to_dict() for item in self.detached],
-            "protected": [item.to_dict() for item in self.protected],
-            "unsafe": [item.to_dict() for item in self.unsafe],
-            "skipped": [item.to_dict() for item in self.skipped],
+            "protected": protected,
+            "unsafe": unsafe,
+            "skipped": skipped,
+            "movies_with_files_to_delete": movies_with_files_to_delete,
+            "movies_without_files_to_remove": movies_without_files_to_remove,
+            "would_remove_downloads_count": self.would_remove_downloads_count,
             "errors": self.errors,
             "estimated_size_deleted": self.estimated_size_deleted,
             "actual_size_deleted": self.actual_size_deleted,
@@ -310,6 +335,8 @@ class AddLimitCleanupService:
         self._tag_ids_by_label: Dict[str, int] = {}
         self._tag_labels_by_id: Dict[int, str] = {}
         self._tmdb_search_cache: Dict[int, Optional[Dict[str, Any]]] = {}
+        self._queue_items_by_movie_id: Dict[int, Dict[str, Any]] = {}
+        self._queue_items_by_radarr_id: Dict[int, Dict[str, Any]] = {}
 
     def run(
         self,
@@ -320,6 +347,7 @@ class AddLimitCleanupService:
         year_to: Optional[int] = None,
         week_to: Optional[int] = None,
         delete_files: bool = True,
+        remove_without_files_only: bool = False,
         require_boxarr_tag: bool = True,
         protect_tag: str = "boxarr-protected",
         required_market_tag: Optional[str] = None,
@@ -342,6 +370,7 @@ class AddLimitCleanupService:
             target_add_limit=target_add_limit,
             dry_run=not execute,
             delete_files=delete_files,
+            remove_without_files_only=remove_without_files_only,
             require_boxarr_tag=require_boxarr_tag,
             protect_tag=protect_tag,
             markets_scanned=selected_markets,
@@ -421,6 +450,24 @@ class AddLimitCleanupService:
                 continue
             decisions.append(decision)
 
+        skipped_due_to_option: List[CleanupDecision] = []
+        if remove_without_files_only:
+            kept_decisions: List[CleanupDecision] = []
+            for decision in decisions:
+                if decision.action == "delete" and decision.would_delete_files:
+                    skipped_due_to_option.append(
+                        replace(
+                            decision,
+                            action="skip",
+                            reason="skipped by remove_without_files_only",
+                            why_not_eligible="skipped by remove_without_files_only",
+                            safe_to_delete=False,
+                            unsafe_to_delete=False,
+                        )
+                    )
+                    continue
+                kept_decisions.append(decision)
+            decisions = kept_decisions
         report.candidates = [decision for decision in decisions if decision.action == "delete"]
         report.would_delete = [decision for decision in decisions if decision.action == "delete"]
         report.would_detach_market_tag_only = [
@@ -428,24 +475,50 @@ class AddLimitCleanupService:
         ]
         report.protected = [decision for decision in decisions if decision.action == "protected"]
         report.unsafe = [decision for decision in decisions if decision.action == "unsafe"]
+        report.skipped.extend(skipped_due_to_option)
         report.estimated_size_deleted = sum(
             item.estimated_size_bytes for item in report.would_delete
+        )
+        report.would_remove_downloads_count = sum(
+            1 for item in report.would_delete if item.would_remove_download
         )
 
         for decision in report.would_delete:
             if execute:
                 try:
+                    if decision.would_remove_download:
+                        queue_item = self._queue_items_by_movie_id.get(decision.radarr_id or -1)
+                        if queue_item is None:
+                            logger.debug(
+                                "No queue item cached for movie id %s; skipping queue removal",
+                                decision.radarr_id,
+                            )
+                        else:
+                            queue_id = self._safe_int(queue_item.get("id"))
+                            if queue_id is None:
+                                raise ValueError("Radarr queue item missing id")
+                            response = self.radarr_service.remove_queue_item(
+                                queue_id,
+                                remove_from_client=True,
+                            )
+                            decision.radarr_result = {
+                                "queue_status_code": getattr(response, "status_code", 200),
+                                "remove_from_client": True,
+                                "queue_id": queue_id,
+                            }
                     response = self.radarr_service.delete_movie(
                         decision.radarr_id,
                         delete_files=True,
                     )
                     decision.action = "deleted"
                     decision.actual_size_bytes = decision.estimated_size_bytes
-                    decision.radarr_result = {
+                    result_payload = dict(decision.radarr_result or {})
+                    result_payload.update({
                         "status_code": getattr(response, "status_code", 200),
                         "delete_files": True,
                         "movie_id": decision.radarr_id,
-                    }
+                    })
+                    decision.radarr_result = result_payload
                     report.deleted.append(decision)
                     report.actual_size_deleted += decision.actual_size_bytes
                 except Exception as exc:
@@ -522,6 +595,30 @@ class AddLimitCleanupService:
             if isinstance(label, str) and isinstance(tag_id, int):
                 self._tag_ids_by_label[label.lower()] = tag_id
                 self._tag_labels_by_id[tag_id] = label
+        self._load_radarr_queue()
+
+    def _load_radarr_queue(self) -> None:
+        self._queue_items_by_movie_id = {}
+        self._queue_items_by_radarr_id = {}
+        try:
+            queue_items = self.radarr_service.get_queue()
+        except Exception as exc:
+            logger.debug("Unable to load Radarr queue for cleanup: %s", exc)
+            return
+        if not isinstance(queue_items, list):
+            return
+        for item in queue_items:
+            if not isinstance(item, dict):
+                continue
+            queue_id = self._safe_int(item.get("id"))
+            movie_id = self._safe_int(item.get("movieId"))
+            if movie_id is None and isinstance(item.get("movie"), dict):
+                movie_id = self._safe_int(item["movie"].get("id"))
+            radarr_id = movie_id
+            if queue_id is None or radarr_id is None:
+                continue
+            self._queue_items_by_movie_id[radarr_id] = item
+            self._queue_items_by_radarr_id[queue_id] = item
 
     def _all_radarr_movies(self) -> List[RadarrMovie]:
         return list(self._movies_by_id.values())
@@ -725,6 +822,12 @@ class AddLimitCleanupService:
                 return int(size_bytes)
         return None
 
+    def _movie_has_file(self, movie: RadarrMovie) -> bool:
+        if isinstance(movie.hasFile, bool):
+            return movie.hasFile
+        movie_file = getattr(movie, "movieFile", None)
+        return bool(movie_file)
+
     def _passes_auto_add_filters(
         self,
         movie_info: Dict[str, Any],
@@ -810,6 +913,8 @@ class AddLimitCleanupService:
         radarr_key = self._format_identity_key(("radarr", movie.id)) if movie.id else None
         identity_source = movie_keys[0][0] if movie_keys else None
         size_on_disk = self._movie_size_on_disk(movie)
+        has_file = self._movie_has_file(movie)
+        queue_item = self._queue_items_by_movie_id.get(movie.id)
         appearance_stats = self._collect_appearance_stats(movie, weekly_index)
         best_rank = appearance_stats.get("best_rank")
         eligible_under_target_limit = best_rank is not None and best_rank <= target_add_limit
@@ -855,11 +960,15 @@ class AddLimitCleanupService:
                 ranks_by_week=ranks_by_week,
                 best_rank=best_rank,
                 eligible_under_target_limit=eligible_under_target_limit,
+                in_download_queue=bool(queue_item),
+                would_remove_download=bool(queue_item and not has_file),
+                would_remove_radarr=action == "delete",
+                would_delete_files=bool(has_file and size_on_disk and size_on_disk > 0),
                 safe_to_delete=safe_to_delete,
                 safe_to_detach=False,
                 unsafe_to_delete=not safe_to_delete,
                 unsafe_reason=unsafe_reason,
-                estimated_size_bytes=size_on_disk or 0,
+                estimated_size_bytes=size_on_disk if size_on_disk and size_on_disk > 0 else 0,
             )
 
         protected_labels = {"boxarr-protected", "boxarr-keep"}
@@ -961,14 +1070,23 @@ class AddLimitCleanupService:
                 why_not_eligible="missing current market tag",
             )
 
-        safe_to_delete = size_on_disk is not None and size_on_disk > 0
-        if not safe_to_delete:
+        if has_file and (size_on_disk is None or size_on_disk <= 0):
             return _base_decision(
                 action="unsafe",
-                reason="unsafe to delete: size_on_disk unknown",
+                reason="unsafe to delete: file exists but size_on_disk unknown",
                 why_not_eligible="absent from eligible set",
                 safe_to_delete=False,
-                unsafe_reason="size_on_disk unknown",
+                unsafe_reason="file exists but size_on_disk unknown",
+            )
+
+        if not has_file:
+            return _base_decision(
+                action="delete",
+                reason="tagged boxarr and absent from eligible set",
+                why_not_eligible="absent from eligible set",
+                eligible_key=None,
+                safe_to_delete=True,
+                unsafe_reason=None,
             )
 
         reason_parts = ["tagged boxarr and absent from eligible set"]

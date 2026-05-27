@@ -59,10 +59,22 @@ def test_setup_page_renders_for_us_and_fr(setup_client):
 
     assert us.status_code == 200
     assert fr.status_code == 200
-    assert "Market Settings Preview" in us.text
-    assert "Market Settings Preview" in fr.text
+    assert "Global Settings" in us.text
+    assert "Global Settings" in fr.text
+    assert "Markets" in us.text
+    assert "Markets" in fr.text
+    assert "Maintenance / Migration" in us.text
+    assert "Maintenance / Migration" in fr.text
     assert "Canonical:" in us.text
     assert "Legacy compat:" in fr.text
+    assert "Language filter uses TMDB original language" in us.text
+    assert "Preview legacy tag migration" in fr.text
+    assert "<h2 class=\"section-title\">Market Overrides</h2>" not in us.text
+    assert "<h2 class=\"section-title\">Market Overrides</h2>" not in fr.text
+    assert "Edit overrides" in us.text
+    assert "Edit overrides" in fr.text
+    assert "US Box Office (us)" in us.text
+    assert "France Box Office (fr)" in fr.text
 
 
 def test_setup_page_renders_when_preview_has_no_definition_key(setup_client, monkeypatch):
@@ -106,4 +118,3 @@ def test_setup_page_renders_when_preview_has_no_definition_key(setup_client, mon
     assert "US Box Office" in response.text
     assert "Canonical:" in response.text
     assert "boxarr-protected" in response.text
-

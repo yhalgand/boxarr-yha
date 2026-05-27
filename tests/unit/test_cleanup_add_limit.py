@@ -12,10 +12,12 @@ from src.core.radarr import RadarrMovie
 
 
 class _FakeRadarrService:
-    def __init__(self, movies, tags):
+    def __init__(self, movies, tags, queue_items=None):
         self._movies = movies
         self._tags = tags
         self.delete_calls = []
+        self.remove_queue_calls = []
+        self._queue_items = queue_items or []
 
     def get_all_movies(self, ignore_cache: bool = False):
         return self._movies
@@ -25,6 +27,13 @@ class _FakeRadarrService:
 
     def delete_movie(self, movie_id: int, delete_files: bool = False):
         self.delete_calls.append((movie_id, delete_files))
+        return SimpleNamespace(status_code=200)
+
+    def get_queue(self):
+        return self._queue_items
+
+    def remove_queue_item(self, queue_id: int, remove_from_client: bool = True):
+        self.remove_queue_calls.append((queue_id, remove_from_client))
         return SimpleNamespace(status_code=200)
 
     def search_movie(self, term: str):
@@ -38,8 +47,8 @@ class _FakeRadarrService:
 
 
 class _StatefulCleanupRadarrService(_FakeRadarrService):
-    def __init__(self, movies, tags):
-        super().__init__(movies, tags)
+    def __init__(self, movies, tags, queue_items=None):
+        super().__init__(movies, tags, queue_items=queue_items)
         self.update_calls = []
 
     def delete_movie(self, movie_id: int, delete_files: bool = False):
@@ -217,8 +226,18 @@ def test_cleanup_dry_run_reports_delete_detach_protected_and_legacy(
             "Unsafe Delete",
             tags=[1, 2],
             size_bytes=0,
-            path=None,
+            path="/movies/Unsafe Delete/Unsafe Delete.mkv",
             has_file=False,
+            quality_profile_id=4,
+        ),
+        _movie(
+            14,
+            207,
+            "Unknown Size With File",
+            tags=[1, 2],
+            size_bytes=0,
+            path="/movies/Unknown Size With File/Unknown Size With File.mkv",
+            has_file=True,
             quality_profile_id=4,
         ),
         _movie(
@@ -300,7 +319,9 @@ def test_cleanup_dry_run_reports_delete_detach_protected_and_legacy(
     assert report["considered_total"] == len(movies)
 
     candidate_titles = {item["title"] for item in report["candidates"]}
-    assert candidate_titles == {"Safe Delete"}
+    assert candidate_titles == {"Safe Delete", "Unsafe Delete"}
+    assert report["movies_with_files_to_delete"] == 1
+    assert report["movies_without_files_to_remove"] == 1
 
     safe_candidate = next(item for item in report["candidates"] if item["title"] == "Safe Delete")
     assert safe_candidate["size_on_disk"] == 30 * 1024 * 1024 * 1024
@@ -333,8 +354,18 @@ def test_cleanup_dry_run_reports_delete_detach_protected_and_legacy(
     protected_titles = {item["title"] for item in report["protected"]}
     assert {"Protected", "Legacy Protected"} <= protected_titles
 
-    unsafe = next(item for item in report["unsafe"] if item["title"] == "Unsafe Delete")
-    assert unsafe["reason"] == "unsafe to delete: size_on_disk unknown"
+    no_file_candidate = next(item for item in report["candidates"] if item["title"] == "Unsafe Delete")
+    assert no_file_candidate["has_file"] is False
+    assert no_file_candidate["size_on_disk"] is None
+    assert no_file_candidate["safe_to_delete"] is True
+    assert no_file_candidate["estimated_size_bytes"] == 0
+
+    unsafe = next(item for item in report["unsafe"] if item["title"] == "Unknown Size With File")
+    unknown_size_with_file = next(item for item in report["unsafe"] if item["title"] == "Unknown Size With File")
+    assert unknown_size_with_file["has_file"] is True
+    assert unknown_size_with_file["size_on_disk"] is None
+    assert unknown_size_with_file["reason"] == "unsafe to delete: file exists but size_on_disk unknown"
+    assert unsafe["reason"] == "unsafe to delete: file exists but size_on_disk unknown"
     assert unsafe["safe_to_delete"] is False
 
     skipped = {item["title"]: item["reason"] for item in report["skipped"]}
@@ -346,6 +377,126 @@ def test_cleanup_dry_run_reports_delete_detach_protected_and_legacy(
 
     assert fake_service.delete_calls == []
     assert report["estimated_size_to_delete"] == 30 * 1024 * 1024 * 1024
+
+
+def test_cleanup_dry_run_no_file_candidate_uses_radarr_queue_and_zero_size(tmp_path):
+    movies = [
+        _movie(
+            21,
+            501,
+            "Queued No File",
+            tags=[1, 2],
+            size_bytes=0,
+            has_file=False,
+            path="/movies/Queued No File/Queued No File.mkv",
+            quality_profile_id=4,
+        ),
+        _movie(
+            22,
+            502,
+            "Queued With File Unknown",
+            tags=[1, 2],
+            size_bytes=0,
+            has_file=True,
+            path="/movies/Queued With File Unknown/Queued With File Unknown.mkv",
+            quality_profile_id=4,
+        ),
+    ]
+    fake_service = _FakeRadarrService(
+        movies,
+        _canonical_tags(),
+        queue_items=[
+            {"id": 91, "movieId": 501, "title": "Queued No File"},
+        ],
+    )
+    cleanup = AddLimitCleanupService(fake_service, data_directory=tmp_path)
+    report = cleanup.run(
+        market="fr",
+        target_add_limit=3,
+        delete_files=True,
+        require_boxarr_tag=True,
+        protect_tag="boxarr-protected",
+        required_market_tag="fr",
+        execute=False,
+    )
+
+    queued = next(item for item in report["candidates"] if item["title"] == "Queued No File")
+    assert queued["has_file"] is False
+    assert queued["size_on_disk"] is None
+    assert queued["in_download_queue"] is True
+    assert queued["would_remove_download"] is True
+    assert queued["would_remove_radarr"] is True
+    assert queued["would_delete_files"] is False
+    assert queued["estimated_size_bytes"] == 0
+
+    unknown = next(item for item in report["unsafe"] if item["title"] == "Queued With File Unknown")
+    assert unknown["has_file"] is True
+    assert unknown["size_on_disk"] is None
+    assert unknown["reason"] == "unsafe to delete: file exists but size_on_disk unknown"
+
+
+def test_cleanup_remove_without_files_only_filters_file_backed_candidates(tmp_path):
+    movies = [
+        _movie(
+            31,
+            601,
+            "No File Candidate",
+            tags=[1, 2],
+            size_bytes=0,
+            has_file=False,
+            path="/movies/No File Candidate/No File Candidate.mkv",
+            quality_profile_id=4,
+        ),
+        _movie(
+            32,
+            602,
+            "File Candidate",
+            tags=[1, 2],
+            size_bytes=2 * 1024 * 1024 * 1024,
+            path="/movies/File Candidate/File Candidate.mkv",
+            quality_profile_id=4,
+        ),
+    ]
+    fake_service = _FakeRadarrService(movies, _canonical_tags(), queue_items=[{"id": 77, "movieId": 601}])
+    cleanup = AddLimitCleanupService(fake_service, data_directory=tmp_path)
+    report = cleanup.run(
+        market="fr",
+        target_add_limit=3,
+        delete_files=True,
+        remove_without_files_only=True,
+        require_boxarr_tag=True,
+        protect_tag="boxarr-protected",
+        required_market_tag="fr",
+        execute=False,
+    )
+
+    candidate_titles = [item["title"] for item in report["candidates"]]
+    assert candidate_titles == ["No File Candidate"]
+    assert report["remove_without_files_only"] is True
+    assert report["would_delete"][0]["title"] == "No File Candidate"
+    assert report["would_delete"][0]["would_remove_download"] is True
+    assert report["would_delete"][0]["would_delete_files"] is False
+    assert report["would_remove_downloads_count"] == 1
+    skipped_titles = {item["title"] for item in report["skipped"]}
+    assert "File Candidate" in skipped_titles
+    assert any(item["reason"] == "skipped by remove_without_files_only" for item in report["skipped"])
+
+    executed = cleanup.run(
+        market="fr",
+        target_add_limit=3,
+        delete_files=True,
+        remove_without_files_only=True,
+        require_boxarr_tag=True,
+        protect_tag="boxarr-protected",
+        required_market_tag="fr",
+        execute=True,
+    )
+
+    assert executed["remove_without_files_only"] is True
+    assert [item["title"] for item in executed["deleted"]] == ["No File Candidate"]
+    assert [item["title"] for item in executed["detached"]] == []
+    assert fake_service.remove_queue_calls == [(77, True)]
+    assert fake_service.delete_calls == [(31, True)]
 
 
 def test_cleanup_execute_deletes_and_detaches_once(tmp_path, monkeypatch):

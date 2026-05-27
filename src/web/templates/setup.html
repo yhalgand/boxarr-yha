@@ -21,6 +21,21 @@
             flex-wrap: wrap;
         }
 
+        .market-card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+            gap: 1rem;
+        }
+
+        .market-card {
+            align-content: start;
+        }
+
+        .market-card.selected {
+            border-color: var(--primary-color);
+            box-shadow: var(--shadow-md);
+        }
+
         .market-table {
             width: 100%;
             border-collapse: collapse;
@@ -101,8 +116,122 @@
             grid-column: 1 / -1;
         }
 
+        .setup-callout {
+            margin-bottom: 1rem;
+            padding: 1rem 1.1rem;
+            border: 1px solid var(--border-color);
+            border-left: 4px solid var(--primary-color);
+            border-radius: 12px;
+            background: var(--bg-secondary);
+        }
+
+        .section-note {
+            margin-top: -0.55rem;
+            margin-bottom: 1rem;
+            color: var(--text-muted);
+            line-height: 1.45;
+        }
+
+        .market-summary-card {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.75rem 1rem;
+            padding: 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            background: var(--bg-secondary);
+        }
+
+        .market-summary-card .summary-item {
+            padding: 0.55rem 0.65rem;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background: var(--bg-primary);
+        }
+
+        .market-summary-card .summary-label {
+            display: block;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.2rem;
+        }
+
+        .market-summary-card .summary-value {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .summary-pill-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+        }
+
+        .summary-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.3rem 0.55rem;
+            border-radius: 999px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+        }
+
+        .summary-pill code {
+            background: transparent;
+            padding: 0;
+        }
+
+        .source-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 52px;
+            padding: 0.18rem 0.45rem;
+            border-radius: 999px;
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            background: var(--bg-tertiary);
+            color: var(--text-muted);
+            margin-left: 0.35rem;
+        }
+
+        .scroll-panel {
+            max-height: 320px;
+            overflow: auto;
+            padding-right: 0.35rem;
+        }
+
+        .migration-example-list {
+            display: grid;
+            gap: 0.75rem;
+        }
+
+        .migration-example {
+            padding: 0.8rem 0.9rem;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background: var(--bg-secondary);
+        }
+
+        .inherit-note {
+            display: inline-block;
+            margin-left: 0.4rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
         @media (max-width: 900px) {
             .market-modal-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .market-summary-card {
                 grid-template-columns: 1fr;
             }
         }
@@ -134,14 +263,24 @@
         <div class="setup-header">
             <img src="{{ request.scope.get('root_path', '') }}/static/boxar-logo.png" alt="Boxarr Logo" style="height: 64px; width: auto; margin-bottom: 1rem; display: block; margin-left: auto; margin-right: auto;">
             <h1 class="setup-title">Welcome to Boxarr!</h1>
-            <p class="setup-subtitle">Let's get you set up with your Radarr connection.</p>
+            <p class="setup-subtitle">Global defaults, market-specific overrides, and maintenance tools all live on this page.</p>
+        </div>
+
+        <div class="setup-callout">
+            <strong>How this page works:</strong>
+            <div style="margin-top: 0.35rem; color: var(--text-secondary); line-height: 1.5;">
+                The selected market only changes the preview and edit context.
+                Global settings apply to every market unless a market override is saved explicitly.
+                Legacy tag migration and cleanup stay dry-run first.
+            </div>
         </div>
         
 
         <form id="setupForm">
-            <!-- Radarr Connection Section -->
             <div class="form-section">
-                <h2 class="section-title">Radarr Connection</h2>
+                <h2 class="section-title">Global Settings</h2>
+                <p class="section-note">These settings apply globally unless a market override is saved for a specific market.</p>
+                <h3 class="section-title" style="font-size: 1.05rem; margin-top: 0.35rem;">Global Radarr Connection</h3>
                 
                 <div class="form-row two-col">
                     <div class="form-group">
@@ -168,9 +307,9 @@
                 <div id="testResults" class="test-results"></div>
             </div>
 
-            <!-- Radarr Settings Section -->
             <div id="qualitySection" class="form-section quality-section {% if is_configured %}show{% endif %}">
-                <h2 class="section-title">Radarr Settings</h2>
+                <h3 class="section-title">Global Radarr Defaults</h3>
+                <p class="section-note">Root folders and quality profiles here are the global defaults used by all markets unless overridden later.</p>
                 
                 <div class="form-group">
                     <label for="rootFolder" class="form-label">Root Folder</label>
@@ -227,102 +366,132 @@
                 </div>
             </div>
 
-            <!-- Market Settings Preview -->
             <div class="form-section">
-                <h2 class="section-title">Market Settings Preview</h2>
+                <h2 class="section-title">Markets</h2>
                 <p class="text-muted" style="margin-top: -0.5rem; margin-bottom: 1rem;">
-                    Read-only preview of effective market settings. Blank market values inherit from the global settings.
+                    Each market is shown as a compact card. Effective values already include inherited global defaults.
                 </p>
                 <div class="market-management-header">
-                    <div></div>
+                    <div class="text-muted" style="max-width: 58rem;">
+                        Use <strong>Edit overrides</strong> to change one market at a time. Badges on each row show whether the value comes from the global defaults or a market override.
+                    </div>
                     <div class="market-management-actions">
                         <button type="button" class="btn btn-primary btn-sm" onclick="openMarketEditor()">
                             + Add market
                         </button>
                     </div>
                 </div>
-                <div class="table-responsive">
-                    <table class="market-table">
-                        <thead>
-                            <tr>
-                                <th>Market</th>
-                                <th>Provider</th>
-                                <th>Enabled</th>
-                                <th>Fetch Limit</th>
-                                <th>Add Limit</th>
-                                <th>Auto-Add</th>
-                                <th>Tags</th>
-                                <th>Cleanup Protect</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for market_key, preview in market_previews.items() %}
-                            {% set definition = preview.definition|default(preview) %}
-                            {% set effective = preview.effective|default({}) %}
-                            {% set sources = preview.sources|default({}) %}
-                            {% set tag_policy = preview.tag_policy|default({}) %}
-                            {% set provider_config = definition.provider_config|default({}) %}
-                            <tr>
-                                <td>
-                                    <strong>{{ definition.label|default(market_key|upper) }}</strong><br>
-                                    <small class="text-muted">{{ market_key }}</small>
-                                </td>
-                                <td>
-                                    <code>{{ definition.provider|default('mojo') }}</code><br>
-                                    <small class="text-muted">
-                                        {% for cfg_key, cfg_val in provider_config.items() %}
-                                            {{ cfg_key }}={{ cfg_val }}{% if not loop.last %}, {% endif %}
-                                        {% endfor %}
-                                    </small>
-                                </td>
-                                <td>{{ 'Yes' if definition.enabled|default(true) else 'No' }}</td>
-                                <td>
-                                    {{ effective.box_office_fetch_limit }}
-                                    <span class="version-badge" style="margin-left: 0.35rem; font-size: 0.7rem;">{{ sources.box_office_fetch_limit }}</span>
-                                </td>
-                                <td>
-                                    {{ effective.maximum_movies_to_add }}
-                                    <span class="version-badge" style="margin-left: 0.35rem; font-size: 0.7rem;">{{ sources.maximum_movies_to_add }}</span>
-                                </td>
-                                <td>
-                                    {{ 'Yes' if effective.auto_add_enabled else 'No' }}
-                                    <span class="version-badge" style="margin-left: 0.35rem; font-size: 0.7rem;">{{ sources.auto_add_enabled }}</span>
-                                </td>
-                                <td>
-                                    {% for tag in effective.tags|default([]) %}
-                                        <code>{{ tag }}</code>{% if not loop.last %}, {% endif %}
+
+                <div class="market-card-grid">
+                    {% for market_key, preview in market_previews.items() %}
+                    {% set definition = preview.definition|default(preview) %}
+                    {% set effective = preview.effective|default({}) %}
+                    {% set sources = preview.sources|default({}) %}
+                    {% set tag_policy = preview.tag_policy|default({}) %}
+                    {% set provider_config = definition.provider_config|default({}) %}
+                    {% set language_enabled = effective.language_filter_enabled|default(false) %}
+                    {% set language_mode = effective.language_filter_mode|default('whitelist') %}
+                    {% set language_values = effective.language_whitelist|default([]) if language_mode == 'whitelist' else effective.language_blacklist|default([]) %}
+                    <div class="market-summary-card market-card {% if market_key == market %}selected{% endif %}">
+                        <div class="summary-item market-modal-full">
+                            <span class="summary-label">Market</span>
+                            <span class="summary-value">
+                                {{ definition.label|default(market_key|upper) }} ({{ market_key }})
+                                {% if market_key == market %}
+                                    <span class="source-pill">selected</span>
+                                {% endif %}
+                            </span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">Provider</span>
+                            <span class="summary-value"><code>{{ definition.provider|default('mojo') }}</code></span>
+                            <div class="text-muted" style="margin-top: 0.35rem; font-size: 0.78rem;">
+                                {% if provider_config %}
+                                    {% for cfg_key, cfg_val in provider_config.items() %}
+                                        {{ cfg_key }}={{ cfg_val }}{% if not loop.last %}, {% endif %}
                                     {% endfor %}
-                                    <span class="version-badge" style="margin-left: 0.35rem; font-size: 0.7rem;">{{ sources.tags }}</span>
-                                    <div class="text-muted" style="margin-top: 0.35rem; font-size: 0.75rem;">
-                                        Canonical:
-                                        <code>{{ tag_policy.added_tag|default('boxarr-added') }}</code>,
-                                        <code>{{ tag_policy.market_tag|default('boxarr-market-' ~ market_key) }}</code>,
-                                        <code>{{ tag_policy.existing_tag|default('boxarr-existing-' ~ market_key) }}</code>,
-                                        <code>{{ tag_policy.protected_tag|default('boxarr-protected') }}</code>
-                                    </div>
-                                    <div class="text-muted" style="font-size: 0.75rem;">
-                                        Legacy compat: <code>boxarr</code>, <code>boxarr-keep</code>
-                                    </div>
-                                </td>
-                                <td>
-                                    <code>{{ effective.cleanup_protect_tag|default('boxarr-protected') }}</code>
-                                    <span class="version-badge" style="margin-left: 0.35rem; font-size: 0.7rem;">{{ sources.cleanup_protect_tag }}</span>
-                                </td>
-                                <td>
-                                    <div class="market-action-buttons">
-                                        <button type="button" class="btn btn-sm btn-info" onclick="openMarketEditor('{{ market_key }}')">Edit</button>
-                                        {% if definition.enabled|default(true) %}
-                                        <button type="button" class="btn btn-sm btn-warning" onclick="toggleMarketEnabled('{{ market_key }}', false)">Disable</button>
-                                        {% else %}
-                                        <button type="button" class="btn btn-sm btn-success" onclick="toggleMarketEnabled('{{ market_key }}', true)">Enable</button>
-                                        {% endif %}
-                                    </div>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                                {% else %}
+                                    none
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">Enabled</span>
+                            <span class="summary-value">{{ 'Enabled' if definition.enabled|default(true) else 'Disabled' }}</span>
+                            <div class="text-muted" style="margin-top: 0.35rem; font-size: 0.78rem;">
+                                Configured: {{ 'Yes' if definition.configured|default(false) else 'No' }}
+                            </div>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">Fetch top</span>
+                            <span class="summary-value">{{ effective.box_office_fetch_limit|default('inherit global') }}</span>
+                            <span class="source-pill">{{ sources.box_office_fetch_limit|default('global') }}</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">Add to Radarr</span>
+                            <span class="summary-value">{{ effective.maximum_movies_to_add|default('inherit global') }}</span>
+                            <span class="source-pill">{{ sources.maximum_movies_to_add|default('global') }}</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">Auto-add</span>
+                            <span class="summary-value">{{ 'Enabled' if effective.auto_add_enabled else 'Disabled' }}</span>
+                            <span class="source-pill">{{ sources.auto_add_enabled|default('global') }}</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">Root folder</span>
+                            <span class="summary-value">{{ effective.root_folder|default('inherit global') }}</span>
+                            <span class="source-pill">{{ sources.root_folder|default('global') }}</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">Quality profile</span>
+                            <span class="summary-value">{{ effective.quality_profile_default|default('inherit global') }}</span>
+                            {% if effective.quality_profile_upgrade %}
+                                <div><small class="text-muted">Upgrade: {{ effective.quality_profile_upgrade }}</small></div>
+                            {% endif %}
+                            <span class="source-pill">{{ sources.quality_profile_default|default('global') }}</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">Language filter</span>
+                            <span class="summary-value">
+                                {% if language_enabled %}
+                                    Enabled
+                                    <div><small class="text-muted">{{ language_mode|capitalize }}{% if language_values %}: {{ language_values|join(', ') }}{% endif %}</small></div>
+                                {% else %}
+                                    Disabled
+                                {% endif %}
+                            </span>
+                            <span class="source-pill">{{ sources.language_filter_enabled|default('global') }}</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">Cleanup protect tag</span>
+                            <span class="summary-value"><code>{{ effective.cleanup_protect_tag|default('boxarr-protected') }}</code></span>
+                            <span class="source-pill">{{ sources.cleanup_protect_tag|default('global') }}</span>
+                        </div>
+                        <div class="summary-item market-modal-full">
+                            <span class="summary-label">Tags policy</span>
+                            <div class="text-muted" style="margin-bottom: 0.35rem; font-size: 0.8rem;">Canonical:</div>
+                            <div class="summary-pill-row">
+                                <span class="summary-pill"><code>{{ tag_policy.added_tag|default('boxarr-added') }}</code></span>
+                                <span class="summary-pill"><code>{{ tag_policy.market_tag|default('boxarr-market-' ~ market_key) }}</code></span>
+                                <span class="summary-pill"><code>{{ tag_policy.existing_tag|default('boxarr-existing-' ~ market_key) }}</code></span>
+                                <span class="summary-pill"><code>{{ tag_policy.protected_tag|default('boxarr-protected') }}</code></span>
+                            </div>
+                            <div style="margin-top: 0.35rem; font-size: 0.8rem; color: var(--text-muted);">
+                                Legacy compat: <code>boxarr</code>, <code>boxarr-keep</code>
+                            </div>
+                        </div>
+                        <div class="summary-item market-modal-full">
+                            <div class="market-management-actions">
+                                <button type="button" class="btn btn-sm btn-info" onclick="openMarketEditor('{{ market_key }}')">Edit overrides</button>
+                                {% if definition.enabled|default(true) %}
+                                <button type="button" class="btn btn-sm btn-warning" onclick="toggleMarketEnabled('{{ market_key }}', false)">Disable</button>
+                                {% else %}
+                                <button type="button" class="btn btn-sm btn-success" onclick="toggleMarketEnabled('{{ market_key }}', true)">Enable</button>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
                 </div>
             </div>
 
@@ -331,7 +500,7 @@
                     <div class="market-modal-header">
                         <div>
                             <h2 id="marketModalTitle" class="section-title" style="margin-bottom: 0.35rem;">Add market</h2>
-                            <p class="text-muted" id="marketModalSubtitle" style="margin: 0;">Create or update a configured market without editing local.yaml directly.</p>
+                            <p class="text-muted" id="marketModalSubtitle" style="margin: 0;">Create or update a configured market without editing local.yaml directly. Empty values inherit global defaults.</p>
                         </div>
                         <button type="button" class="btn btn-secondary btn-sm" onclick="closeMarketEditor()">Close</button>
                     </div>
@@ -366,16 +535,16 @@
                         </div>
                         <div class="form-group">
                             <label for="marketFetchLimitInput" class="form-label">Fetch limit</label>
-                            <input id="marketFetchLimitInput" class="form-input" type="number" min="1" max="30" placeholder="inherit">
+                            <input id="marketFetchLimitInput" class="form-input" type="number" min="1" max="30" placeholder="inherit global">
                         </div>
                         <div class="form-group">
                             <label for="marketAddLimitInput" class="form-label">Maximum movies to add</label>
-                            <input id="marketAddLimitInput" class="form-input" type="number" min="1" max="30" placeholder="inherit">
+                            <input id="marketAddLimitInput" class="form-input" type="number" min="1" max="30" placeholder="inherit global">
                         </div>
                         <div class="form-group">
                             <label for="marketAutoAddInput" class="form-label">Auto-add enabled</label>
                             <select id="marketAutoAddInput" class="form-select">
-                                <option value="">inherit</option>
+                                <option value="">inherit global</option>
                                 <option value="true">Yes</option>
                                 <option value="false">No</option>
                             </select>
@@ -392,6 +561,86 @@
                             <label for="marketTagsInput" class="form-label">Tags (comma-separated)</label>
                             <input id="marketTagsInput" class="form-input" placeholder="boxarr, boxarr-de">
                         </div>
+                        <div class="form-group market-modal-full">
+                            <label class="form-label">Inherited defaults / advanced overrides</label>
+                            <div class="text-muted" style="margin-bottom: 0.65rem;">
+                                These fields are optional. Leave them blank to inherit the global defaults.
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="marketRootFolderInput" class="form-label">Root folder override</label>
+                            <input id="marketRootFolderInput" class="form-input" placeholder="inherit global">
+                        </div>
+                        <div class="form-group">
+                            <label for="marketQualityProfileDefaultInput" class="form-label">Quality profile default override</label>
+                            <input id="marketQualityProfileDefaultInput" class="form-input" placeholder="inherit global">
+                        </div>
+                        <div class="form-group">
+                            <label for="marketQualityProfileUpgradeInput" class="form-label">Quality profile upgrade override</label>
+                            <input id="marketQualityProfileUpgradeInput" class="form-input" placeholder="inherit global">
+                        </div>
+                        <div class="form-group">
+                            <label for="marketMinimumAvailabilityEnabledInput" class="form-label">Minimum availability override</label>
+                            <select id="marketMinimumAvailabilityEnabledInput" class="form-select">
+                                <option value="">inherit global</option>
+                                <option value="true">Enabled</option>
+                                <option value="false">Disabled</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="marketMinimumAvailabilityInput" class="form-label">Minimum availability value</label>
+                            <select id="marketMinimumAvailabilityInput" class="form-select">
+                                <option value="">inherit global</option>
+                                <option value="announced">Announced</option>
+                                <option value="inCinemas">In Cinemas</option>
+                                <option value="released">Released</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="marketMonitorOptionInput" class="form-label">Monitor option override</label>
+                            <input id="marketMonitorOptionInput" class="form-input" placeholder="inherit global">
+                        </div>
+                        <div class="form-group">
+                            <label for="marketSearchOnAddInput" class="form-label">Search on add override</label>
+                            <select id="marketSearchOnAddInput" class="form-select">
+                                <option value="">inherit global</option>
+                                <option value="true">Yes</option>
+                                <option value="false">No</option>
+                            </select>
+                        </div>
+                        <div class="form-group market-modal-full">
+                            <label for="marketLanguageFilterEnabledInput" class="form-label">Language filter override</label>
+                            <select id="marketLanguageFilterEnabledInput" class="form-select">
+                                <option value="">inherit global</option>
+                                <option value="true">Enabled</option>
+                                <option value="false">Disabled</option>
+                            </select>
+                            <small class="text-muted">Language filter uses TMDB original language, not the box-office country.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="marketLanguageFilterModeInput" class="form-label">Language filter mode</label>
+                            <select id="marketLanguageFilterModeInput" class="form-select">
+                                <option value="">inherit global</option>
+                                <option value="whitelist">Whitelist</option>
+                                <option value="blacklist">Blacklist</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="marketLanguageWhitelistInput" class="form-label">Language whitelist</label>
+                            <input id="marketLanguageWhitelistInput" class="form-input" placeholder="English, French">
+                        </div>
+                        <div class="form-group">
+                            <label for="marketLanguageBlacklistInput" class="form-label">Language blacklist</label>
+                            <input id="marketLanguageBlacklistInput" class="form-input" placeholder="Spanish, Italian">
+                        </div>
+                        <div class="form-group market-modal-full">
+                            <label for="marketIgnoreRereleasesInput" class="form-label">Ignore re-releases override</label>
+                            <select id="marketIgnoreRereleasesInput" class="form-select">
+                                <option value="">inherit global</option>
+                                <option value="true">Yes</option>
+                                <option value="false">No</option>
+                            </select>
+                        </div>
                     </div>
 
                     <div id="marketModalMessage" class="status-message" style="display:none; margin-top: 1rem;"></div>
@@ -406,9 +655,46 @@
                 </div>
             </div>
 
+            <div class="form-section">
+                <h2 class="section-title">Maintenance / Migration</h2>
+                <p class="section-note">
+                    Legacy movies tagged with <code>boxarr</code> are not treated as canonical until they are previewed and migrated to the new tag model.
+                </p>
+
+                <div class="market-summary-card" style="grid-template-columns: 1fr;">
+                    <div class="summary-item">
+                        <span class="summary-label">Canonical model</span>
+                        <div class="summary-pill-row">
+                            <span class="summary-pill"><code>boxarr-added</code></span>
+                            <span class="summary-pill"><code>boxarr-market-us</code></span>
+                            <span class="summary-pill"><code>boxarr-market-fr</code></span>
+                            <span class="summary-pill"><code>boxarr-existing-us</code></span>
+                            <span class="summary-pill"><code>boxarr-existing-fr</code></span>
+                            <span class="summary-pill"><code>boxarr-protected</code></span>
+                        </div>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">Legacy compat</span>
+                        <div class="summary-pill-row">
+                            <span class="summary-pill"><code>boxarr</code></span>
+                            <span class="summary-pill"><code>boxarr-keep</code></span>
+                        </div>
+                        <div class="text-muted" style="margin-top: 0.35rem;">
+                            Legacy tags are visible for compatibility and migration only. They are not canonical movie tags.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="market-management-actions" style="margin-top: 1rem;">
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openLegacyMigrationModal()">
+                        Preview legacy tag migration
+                    </button>
+                </div>
+            </div>
+
             <!-- Automation Settings Section -->
             <div class="form-section">
-                <h2 class="section-title">Automation Settings</h2>
+                <h2 class="section-title">Global Automation Defaults</h2>
                 
                 <div class="scheduler-group">
                     <div class="checkbox-group">
@@ -701,7 +987,7 @@
 
             <!-- UI Settings Section -->
             <div class="form-section">
-                <h2 class="section-title">UI Settings</h2>
+                <h2 class="section-title">Global UI Settings</h2>
                 <div class="form-group">
                     <label for="uiTheme" class="form-label">Theme</label>
                     <select name="boxarr_ui_theme" id="uiTheme" class="form-select" onchange="if(window.themeManager) themeManager.setTheme(this.value)">
@@ -717,7 +1003,7 @@
             <div class="form-section" id="advancedSettingsSection" style="margin-top: 2rem;">
                 <div style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;"
                      onclick="(function(){ const s=document.getElementById('advancedSettingsContent'); const i=document.getElementById('advancedSettingsChevron'); if(s.style.display==='none'){s.style.display='block'; i.textContent='▾';} else {s.style.display='none'; i.textContent='▸';}})()">
-                    <h2 class="section-title" style="margin:0;">Advanced Settings</h2>
+                    <h2 class="section-title" style="margin:0;">Global Advanced Settings</h2>
                     <span id="advancedSettingsChevron" aria-hidden="true">▸</span>
                 </div>
                 <div id="advancedSettingsContent" style="display:none; margin-top:1rem;">
@@ -862,6 +1148,66 @@
                 </div>
             </div>
 
+            {% set market_preview_map = market_previews|default({}) %}
+            {% set selected_preview = market_preview_map.get(market, {}) %}
+            {% set selected_definition = selected_preview.definition|default(selected_preview) %}
+            {% set selected_effective = selected_preview.effective|default({}) %}
+            {% set selected_sources = selected_preview.sources|default({}) %}
+            {% set selected_policy = selected_preview.tag_policy|default({}) %}
+            {% set selected_language_enabled = selected_effective.language_filter_enabled|default(false) %}
+            {% set selected_language_mode = selected_effective.language_filter_mode|default('whitelist') %}
+            {% set selected_language_values = selected_effective.language_whitelist|default([]) if selected_language_mode == 'whitelist' else selected_effective.language_blacklist|default([]) %}
+
+            <div id="legacyMigrationModal" class="market-modal-backdrop" aria-hidden="true">
+                <div class="market-modal" role="dialog" aria-modal="true" aria-labelledby="legacyMigrationModalTitle">
+                    <div class="market-modal-header">
+                        <div>
+                            <h2 id="legacyMigrationModalTitle" class="section-title" style="margin-bottom: 0.35rem;">Preview legacy tag migration</h2>
+                            <p class="text-muted" style="margin: 0;">
+                                Legacy <code>boxarr</code> tags are not canonical. This preview shows safe migration candidates only.
+                            </p>
+                        </div>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="closeLegacyMigrationModal()">Close</button>
+                    </div>
+
+                    <div class="market-summary-card" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+                        <div class="summary-item">
+                            <span class="summary-label">Market scope</span>
+                            <span class="summary-value">{{ selected_definition.label|default(market|upper) }} ({{ market }})</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">Legacy compat</span>
+                            <span class="summary-value"><code>boxarr</code>, <code>boxarr-keep</code></span>
+                        </div>
+                    </div>
+
+                    <div id="legacyMigrationSummary" class="summary-pill-row" style="margin-top: 1rem;"></div>
+
+                    <div id="legacyMigrationResults" class="scroll-panel" style="margin-top: 1rem;"></div>
+
+                    <div id="legacyMigrationMessage" class="status-message" style="display:none; margin-top: 1rem;"></div>
+
+                    <div class="button-row" style="margin-top: 1.25rem;">
+                        <button type="button" class="btn btn-secondary" onclick="closeLegacyMigrationModal()">Close</button>
+                        <button type="button" class="btn btn-primary" onclick="runLegacyMigrationPreview()">
+                            <span id="legacyMigrationPreviewButtonText">Preview legacy tag migration</span>
+                            <span id="legacyMigrationPreviewButtonSpinner" class="loading-spinner" style="display:none;"></span>
+                        </button>
+                        {% if dangerous_actions_enabled %}
+                        <button type="button" class="btn btn-primary" onclick="runLegacyMigrationExecute()">
+                            <span id="legacyMigrationExecuteButtonText">Execute migration</span>
+                            <span id="legacyMigrationExecuteButtonSpinner" class="loading-spinner" style="display:none;"></span>
+                        </button>
+                        {% else %}
+                        <button type="button" class="btn btn-secondary" disabled title="Execute migration disabled in this build. Enable BOXARR_ENABLE_DANGEROUS_ACTIONS=true to allow this action.">
+                            <span id="legacyMigrationExecuteButtonText">Execute migration disabled</span>
+                        </button>
+                        <small class="text-muted" style="align-self: center;">Execute disabled in this build. Dry-run only.</small>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
             <div class="button-row" style="margin-top: 1.5rem;">
                 {% if is_configured %}
                 <a href="{{ request.scope.get('root_path', '') }}/" class="btn btn-secondary">← Back to Dashboard</a>
@@ -885,6 +1231,192 @@
 
 <script src="{{ request.scope.get('root_path', '') }}/static/js/theme-manager.js?v=1"></script>
 <script src="{{ request.scope.get('root_path', '') }}/static/js/app.js?v=2"></script>
+<script>
+function setupLegacyMigrationMessage(message, type = 'info') {
+    const container = document.getElementById('legacyMigrationMessage');
+    if (!container) return;
+    container.style.display = 'block';
+    container.className = `status-message status-${type}`;
+    container.textContent = message;
+}
+
+function clearLegacyMigrationMessage() {
+    const container = document.getElementById('legacyMigrationMessage');
+    if (!container) return;
+    container.style.display = 'none';
+    container.className = 'status-message';
+    container.textContent = '';
+}
+
+function toggleLegacyMigrationModal(show) {
+    const modal = document.getElementById('legacyMigrationModal');
+    if (!modal) return;
+    modal.classList.toggle('show', show);
+    modal.setAttribute('aria-hidden', show ? 'false' : 'true');
+}
+
+function renderLegacyMigrationSummary(data) {
+    const container = document.getElementById('legacyMigrationSummary');
+    if (!container) return;
+
+    const chips = [
+        ['Scanned', data.total_movies_scanned ?? 0],
+        ['Legacy boxarr', data.total_tagged_legacy_boxarr ?? 0],
+        ['Migrated', data.migrated ?? (Array.isArray(data.candidates) ? data.candidates.filter((item) => item && item.safe).length : 0)],
+        ['Candidates', Array.isArray(data.candidates) ? data.candidates.length : 0],
+        ['Ambiguous', Array.isArray(data.ambiguous) ? data.ambiguous.length : 0],
+        ['Skipped', Array.isArray(data.skipped) ? data.skipped.length : 0],
+        ['Errors', Array.isArray(data.errors) ? data.errors.length : 0],
+    ];
+
+    container.innerHTML = chips.map(([label, value]) => `<span class="summary-pill"><strong>${label}:</strong> ${value}</span>`).join('');
+}
+
+function renderLegacyMigrationResults(data) {
+    const container = document.getElementById('legacyMigrationResults');
+    if (!container) return;
+
+    const makeExample = (item, type) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'migration-example';
+
+        const title = document.createElement('div');
+        title.style.fontWeight = '600';
+        title.style.marginBottom = '0.35rem';
+        title.textContent = `${item.title || 'Unknown title'}${type ? ' (' + type + ')' : ''}`;
+        wrapper.appendChild(title);
+
+        const details = document.createElement('div');
+        details.className = 'text-muted';
+        details.style.fontSize = '0.85rem';
+        details.style.lineHeight = '1.5';
+        details.textContent = `Current tags: ${(item.current_tags || []).join(', ') || 'none'} | Proposed tags: ${(item.proposed_tags || []).join(', ') || 'none'} | Matched markets: ${(item.matched_markets || []).join(', ') || 'none'} | Safe: ${item.safe ? 'yes' : 'no'} | Reason: ${item.reason || 'n/a'}`;
+        wrapper.appendChild(details);
+        return wrapper;
+    };
+
+    container.innerHTML = '';
+    const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+    const ambiguous = Array.isArray(data.ambiguous) ? data.ambiguous : [];
+    const skipped = Array.isArray(data.skipped) ? data.skipped : [];
+    const errors = Array.isArray(data.errors) ? data.errors : [];
+
+    if (!candidates.length && !ambiguous.length && !skipped.length && !errors.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = data.message || 'No migration data available.';
+        container.appendChild(empty);
+        return;
+    }
+
+    if (candidates.length) {
+        const section = document.createElement('div');
+        section.style.marginBottom = '1rem';
+        section.innerHTML = '<div class="summary-label" style="margin-bottom:0.5rem;">Candidates</div>';
+        const list = document.createElement('div');
+        list.className = 'migration-example-list';
+        candidates.slice(0, 6).forEach((item) => list.appendChild(makeExample(item, 'candidate')));
+        section.appendChild(list);
+        container.appendChild(section);
+    }
+
+    if (ambiguous.length) {
+        const section = document.createElement('div');
+        section.style.marginBottom = '1rem';
+        section.innerHTML = '<div class="summary-label" style="margin-bottom:0.5rem;">Ambiguous</div>';
+        const list = document.createElement('div');
+        list.className = 'migration-example-list';
+        ambiguous.slice(0, 3).forEach((item) => list.appendChild(makeExample(item, 'ambiguous')));
+        section.appendChild(list);
+        container.appendChild(section);
+    }
+
+    if (skipped.length) {
+        const section = document.createElement('div');
+        section.style.marginBottom = '1rem';
+        section.innerHTML = '<div class="summary-label" style="margin-bottom:0.5rem;">Skipped</div>';
+        const list = document.createElement('div');
+        list.className = 'migration-example-list';
+        skipped.slice(0, 3).forEach((item) => list.appendChild(makeExample(item, 'skipped')));
+        section.appendChild(list);
+        container.appendChild(section);
+    }
+
+    if (errors.length) {
+        const section = document.createElement('div');
+        section.innerHTML = '<div class="summary-label" style="margin-bottom:0.5rem;">Errors</div>';
+        const list = document.createElement('div');
+        list.className = 'migration-example-list';
+        errors.slice(0, 3).forEach((item) => list.appendChild(makeExample(item, 'error')));
+        section.appendChild(list);
+        container.appendChild(section);
+    }
+}
+
+window.closeLegacyMigrationModal = function() {
+    toggleLegacyMigrationModal(false);
+    clearLegacyMigrationMessage();
+};
+
+window.openLegacyMigrationModal = function() {
+    clearLegacyMigrationMessage();
+    toggleLegacyMigrationModal(true);
+    window.runLegacyMigrationPreview();
+};
+
+window.runLegacyMigrationPreview = function() {
+    return runLegacyMigration('preview');
+};
+
+window.runLegacyMigrationExecute = function() {
+    return runLegacyMigration('execute');
+};
+
+function runLegacyMigration(mode) {
+    const market = String(window.BOXARR_MARKET || 'us').toLowerCase();
+    const executeMode = mode === 'execute';
+    const button = document.getElementById(
+        executeMode ? 'legacyMigrationExecuteButtonText' : 'legacyMigrationPreviewButtonText'
+    );
+    const spinner = document.getElementById(
+        executeMode ? 'legacyMigrationExecuteButtonSpinner' : 'legacyMigrationPreviewButtonSpinner'
+    );
+    const endpoint = executeMode ? '/policy/tags/migrate/execute' : '/policy/tags/migrate/dry-run';
+    const pendingLabel = executeMode ? 'Executing...' : 'Previewing...';
+    const resetLabel = executeMode ? 'Execute migration' : 'Preview legacy tag migration';
+    if (button) button.textContent = pendingLabel;
+    if (spinner) spinner.style.display = 'inline-block';
+
+    fetch(apiUrl(endpoint), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ market }),
+    })
+        .then(async (response) => {
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.detail || data.message || 'Unable to preview migration');
+            }
+            return data;
+        })
+        .then((data) => {
+            renderLegacyMigrationSummary(data);
+            renderLegacyMigrationResults(data);
+            if (data.message) {
+                setupLegacyMigrationMessage(data.message, 'info');
+            } else {
+                clearLegacyMigrationMessage();
+            }
+        })
+        .catch((error) => {
+            setupLegacyMigrationMessage(error.message, 'error');
+        })
+        .finally(() => {
+            if (button) button.textContent = resetLabel;
+            if (spinner) spinner.style.display = 'none';
+        });
+}
+</script>
 <script>
 // Sync theme select with current preference
 document.addEventListener('DOMContentLoaded', function() {

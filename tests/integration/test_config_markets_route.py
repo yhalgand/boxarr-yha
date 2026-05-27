@@ -73,3 +73,5 @@ def test_get_config_markets_returns_effective_values(tmp_path, monkeypatch):
     assert body["markets"]["us"]["tag_policy"]["market_tag"] == "boxarr-market-us"
     assert body["markets"]["us"]["tag_policy"]["existing_tag"] == "boxarr-existing-us"
     assert body["markets"]["us"]["tag_policy"]["protected_tag"] == "boxarr-protected"
+    assert body["markets"]["us"]["effective"]["root_folder"] == "/movies"
+    assert body["markets"]["us"]["sources"]["root_folder"] == "global"

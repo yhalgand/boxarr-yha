@@ -32,6 +32,11 @@ def test_build_market_definition_infers_defaults_for_new_market():
             "label": "Germany Box Office",
             "provider": "jpboxoffice",
             "enabled": True,
+            "root_folder": "/movies/de",
+            "quality_profile_default": "HD-1080p",
+            "language_filter_enabled": True,
+            "language_filter_mode": "whitelist",
+            "language_whitelist": ["German"],
         },
         create=True,
     )
@@ -41,6 +46,11 @@ def test_build_market_definition_infers_defaults_for_new_market():
     assert definition["auto_tag_text"] == "boxarr-de"
     assert definition["tags"] == ["boxarr", "boxarr-de"]
     assert definition["cleanup_protect_tag"] == "boxarr-protected"
+    assert definition["root_folder"] == "/movies/de"
+    assert definition["quality_profile_default"] == "HD-1080p"
+    assert definition["language_filter_enabled"] is True
+    assert definition["language_filter_mode"] == "whitelist"
+    assert definition["language_whitelist"] == ["German"]
 
 
 def test_build_market_definition_preserves_existing_fields_on_partial_update():
@@ -58,6 +68,12 @@ def test_build_market_definition_preserves_existing_fields_on_partial_update():
             "tags": ["boxarr", "boxarr-de"],
             "auto_tag_text": "boxarr-de",
             "cleanup_protect_tag": "boxarr-protected",
+            "root_folder": "/movies/de",
+            "quality_profile_default": "HD-1080p",
+            "quality_profile_upgrade": "UHD-4K",
+            "language_filter_enabled": True,
+            "language_filter_mode": "blacklist",
+            "language_blacklist": ["Spanish"],
         },
         create=False,
     )
@@ -72,3 +88,9 @@ def test_build_market_definition_preserves_existing_fields_on_partial_update():
     assert definition["tags"] == ["boxarr", "boxarr-de"]
     assert definition["auto_tag_text"] == "boxarr-de"
     assert definition["cleanup_protect_tag"] == "boxarr-protected"
+    assert definition["root_folder"] == "/movies/de"
+    assert definition["quality_profile_default"] == "HD-1080p"
+    assert definition["quality_profile_upgrade"] == "UHD-4K"
+    assert definition["language_filter_enabled"] is True
+    assert definition["language_filter_mode"] == "blacklist"
+    assert definition["language_blacklist"] == ["Spanish"]

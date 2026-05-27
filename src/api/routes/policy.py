@@ -641,6 +641,7 @@ async def _migrate_tags(payload: TagMigrationRequest, *, execute: bool):
         ]
 
         candidates: List[Dict[str, Any]] = []
+        already_migrated: List[Dict[str, Any]] = []
         skipped: List[Dict[str, Any]] = []
         ambiguous: List[Dict[str, Any]] = []
         errors: List[Dict[str, Any]] = []
@@ -664,6 +665,7 @@ async def _migrate_tags(payload: TagMigrationRequest, *, execute: bool):
                 reason = None
                 safe = False
                 matched_markets: List[str] = []
+                required_labels: List[str] = []
 
                 if not legacy_hits:
                     skipped.append(
@@ -680,48 +682,62 @@ async def _migrate_tags(payload: TagMigrationRequest, *, execute: bool):
                     continue
 
                 if "boxarr-keep" in current_label_set and "boxarr-protected" not in current_label_set:
-                    proposed_labels.append("boxarr-protected")
+                    required_labels.append("boxarr-protected")
                     reason = "legacy keep tag"
-                    safe = True
 
                 if "boxarr-us" in current_label_set and "boxarr-market-us" not in current_label_set:
-                    proposed_labels.append("boxarr-market-us")
+                    required_labels.append("boxarr-market-us")
                     reason = "legacy market tag"
-                    safe = True
                 if "boxarr-fr" in current_label_set and "boxarr-market-fr" not in current_label_set:
-                    proposed_labels.append("boxarr-market-fr")
+                    required_labels.append("boxarr-market-fr")
                     reason = "legacy market tag"
-                    safe = True
 
-                if "boxarr" in current_label_set and "boxarr-added" not in current_label_set:
+                if "boxarr" in current_label_set:
                     markets = _movie_market_matches(movie, weekly_index, selected_markets)
                     matched_markets = markets
                     if markets:
-                        proposed_labels.append("boxarr-added")
+                        required_labels.append("boxarr-added")
                         for m in markets:
                             market_tag = f"boxarr-market-{m}"
-                            if market_tag not in current_labels and market_tag not in proposed_labels:
-                                proposed_labels.append(market_tag)
+                            if market_tag not in required_labels:
+                                required_labels.append(market_tag)
                         reason = "legacy boxarr tag matched to weekly pages"
-                        safe = True
                     else:
                         reason = "ambiguous legacy boxarr tag"
-                        if not proposed_labels:
-                            ambiguous.append(
-                                {
-                                    "movie_id": movie.id,
-                                    "title": movie.title,
-                                    "current_tags": current_labels,
-                                    "legacy_tags": legacy_hits,
-                                    "proposed_tags": [],
-                                    "reason": reason,
-                                    "safe": False,
-                                }
-                            )
-                            all_results.append(ambiguous[-1])
-                            continue
+                        ambiguous.append(
+                            {
+                                "movie_id": movie.id,
+                                "title": movie.title,
+                                "current_tags": current_labels,
+                                "legacy_tags": legacy_hits,
+                                "proposed_tags": [],
+                                "matched_markets": matched_markets,
+                                "reason": reason,
+                                "safe": False,
+                            }
+                        )
+                        all_results.append(ambiguous[-1])
+                        continue
 
-                proposed_labels = list(dict.fromkeys(proposed_labels))
+                required_labels = list(dict.fromkeys(required_labels))
+                proposed_labels = [label for label in required_labels if label not in current_label_set]
+                if legacy_hits and not proposed_labels:
+                    already_row = {
+                        "movie_id": movie.id,
+                        "title": movie.title,
+                        "current_tags": current_labels,
+                        "legacy_tags": legacy_hits,
+                        "proposed_tags": [],
+                        "matched_markets": matched_markets,
+                        "reason": "already has canonical tags",
+                        "safe": False,
+                        "already_migrated": True,
+                    }
+                    already_migrated.append(already_row)
+                    all_results.append(already_row)
+                    continue
+                safe = bool(proposed_labels)
+
                 result_row = {
                     "movie_id": movie.id,
                     "title": movie.title,
@@ -731,10 +747,11 @@ async def _migrate_tags(payload: TagMigrationRequest, *, execute: bool):
                     "matched_markets": matched_markets,
                     "reason": reason or "legacy tag migration",
                     "safe": safe,
+                    "already_migrated": False,
                 }
                 candidates.append(result_row)
                 all_results.append(result_row)
-                if execute and safe:
+                if execute and proposed_labels:
                     new_labels = list(dict.fromkeys(current_labels + proposed_labels))
                     new_tag_ids = _tag_ids_for_labels(radarr_service, new_labels)
                     raw = dict(getattr(movie, "_raw_data", {}) or {})
@@ -782,11 +799,13 @@ async def _migrate_tags(payload: TagMigrationRequest, *, execute: bool):
             "resolved_tags": resolved_tags,
             "message": message,
             "candidates": candidates,
+            "already_migrated": already_migrated,
             "skipped": skipped,
             "ambiguous": ambiguous,
             "errors": errors,
             "results": all_results,
             "migrated": sum(1 for item in candidates if item.get("safe")),
+            "already_migrated_count": len(already_migrated),
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

@@ -584,6 +584,9 @@
     margin-top: 1rem;
     border: 1px solid var(--border-color);
     border-radius: 12px;
+    max-height: 50vh;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
     background: var(--bg-color);
 }
@@ -627,11 +630,14 @@
     padding: 1rem;
     display: grid;
     gap: 0.75rem;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .result-scroll {
-    max-height: 42vh;
+    max-height: 50vh;
     overflow: auto;
+    min-height: 0;
 }
 
 .result-list-item {
@@ -875,6 +881,9 @@
         getRequiredElement('policyYearTo').value = {{ week_data.year }};
         getRequiredElement('policyWeekTo').value = {{ week_data.week }};
         getRequiredElement('policyCurrentValueAdd').textContent = formatValue(effective.maximum_movies_to_add);
+        getRequiredElement('policyCurrentValueFetch').textContent = formatValue(effective.box_office_fetch_limit);
+        getRequiredElement('policyCurrentValueAutoAdd').textContent = formatValue(effective.auto_add_enabled);
+        getRequiredElement('policyCurrentValueProtect').textContent = formatValue(effective.cleanup_protect_tag || 'boxarr-protected');
         getRequiredElement('policyCanonicalTags').innerHTML = canonicalTagPills(marketPolicy).canonical
             .map(tag => `<span class="tag-pill">${tag}</span>`)
             .join('');
@@ -944,12 +953,15 @@
         const current = currentPolicyValues();
         getRequiredElement('cleanupTargetLimit').value = current.maximum_movies_to_add ?? '';
         getRequiredElement('cleanupCurrentLimit').textContent = formatValue(current.maximum_movies_to_add);
+        getRequiredElement('cleanupCurrentFetch').textContent = formatValue(current.box_office_fetch_limit);
+        getRequiredElement('cleanupCurrentAutoAdd').textContent = formatValue(current.auto_add_enabled);
         getRequiredElement('cleanupProtectTag').value = current.cleanup_protect_tag ?? 'boxarr-protected';
         getRequiredElement('cleanupConfirmText').value = '';
         getRequiredElement('cleanupYearFrom').value = {{ week_data.year }};
         getRequiredElement('cleanupWeekFrom').value = {{ week_data.week }};
         getRequiredElement('cleanupYearTo').value = {{ week_data.year }};
         getRequiredElement('cleanupWeekTo').value = {{ week_data.week }};
+        getRequiredElement('cleanupWithoutFilesOnly').checked = false;
         getRequiredElement('cleanupResult').innerHTML = '<div class="modal-note">No files are deleted in dry-run.</div>';
         collapseAdvancedOptions('cleanupPolicyModal');
         showModal('cleanupPolicyModal');
@@ -1021,7 +1033,7 @@
 
     function applyPolicyUiButtons() {
         updatePolicyScopeControls();
-        const executeButtons = ['cleanupExecuteBtn', 'cleanupExecuteBtnFooter', 'backfillExecuteBtn', 'migrationExecuteBtn'];
+        const executeButtons = ['cleanupExecuteBtn', 'backfillExecuteBtn', 'migrationExecuteBtn'];
         executeButtons.forEach(id => {
             const button = document.getElementById(id);
             if (button) button.disabled = !dangerousActionsEnabled() || button.dataset.scopeDisabled === 'true';
@@ -1118,6 +1130,9 @@
         const skipped = Array.isArray(data.skipped) ? data.skipped : [];
         const protectedItems = Array.isArray(data.protected) ? data.protected : [];
         const unsafe = Array.isArray(data.unsafe) ? data.unsafe : [];
+        const sizeLabel = item => (item.has_file === false && (item.size_on_disk === null || item.size_on_disk === undefined)
+            ? '0 B'
+            : (item.size_on_disk ?? 'unknown'));
         const summaryTarget = document.getElementById('cleanupResultSummary');
         const detailsTarget = document.getElementById('cleanupResultDetails');
         const jsonTarget = document.getElementById('cleanupResultJson');
@@ -1126,12 +1141,15 @@
         if (jsonTarget) jsonTarget.innerHTML = '';
         renderSummaryMetrics('cleanupResultSummary', {
             would_delete: wouldDelete.length,
+            remove_downloads: data.would_remove_downloads_count ?? wouldDelete.filter(item => item.would_remove_download).length,
             would_detach_market_tag_only: wouldDetach.length,
             skipped: skipped.length,
             protected: protectedItems.length,
             unsafe: unsafe.length,
+            movies_with_files_to_delete: data.movies_with_files_to_delete ?? wouldDelete.filter(item => item.has_file).length,
+            movies_without_files_to_remove: data.movies_without_files_to_remove ?? wouldDelete.filter(item => item.has_file === false).length,
         });
-        renderListSection('cleanupResultDetails', 'Would delete', wouldDelete, item => `<strong>${item.title}</strong><div>Best rank: ${item.best_rank ?? 'n/a'} • Size: ${item.size_on_disk ?? 'unknown'}</div>`);
+        renderListSection('cleanupResultDetails', 'Would delete', wouldDelete, item => `<strong>${item.title}</strong><div>Best rank: ${item.best_rank ?? 'n/a'} • Size: ${sizeLabel(item)}</div>`);
         renderListSection('cleanupResultDetails', 'Would detach market tag only', wouldDetach, item => `<strong>${item.title}</strong><div>Market tags: ${(item.tag_names || []).join(', ') || 'none'}</div>`);
         renderListSection('cleanupResultDetails', 'Skipped', skipped, item => `<strong>${item.title}</strong><div>${item.reason || 'skipped'}</div>`);
         renderListSection('cleanupResultDetails', 'Protected', protectedItems, item => `<strong>${item.title}</strong><div>${item.reason || 'protected'}</div>`);
@@ -1265,6 +1283,7 @@
             year_to: parseNullableInt(document.getElementById('cleanupYearTo').value),
             week_to: parseNullableInt(document.getElementById('cleanupWeekTo').value),
             delete_files: true,
+            remove_without_files_only: Boolean(document.getElementById('cleanupWithoutFilesOnly').checked),
             require_boxarr_tag: true,
         };
         const dryRun = await fetchJson(policyEndpoint('/cleanup/dry-run'), payload).catch(err => {
@@ -1453,10 +1472,10 @@
                     </div>
                 </div>
                 <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-                    <button class="action-btn" onclick="openChangePolicyModal()">Review policy</button>
+                    <button class="action-btn" onclick="openChangePolicyModal()">Manage policy</button>
                     <button class="action-btn" onclick="openImpactModal(); fetchImpactPreview()">Preview impact</button>
                     <button class="action-btn" onclick="openBackfillModal()">Backfill missing adds</button>
-                    <button class="action-btn cleanup" onclick="openCleanupModal()">Review cleanup impact</button>
+                    <button class="action-btn secondary" onclick="openCleanupModal()">Preview impact</button>
                     <button class="action-btn" onclick="openMigrationModal()">Preview legacy tag migration</button>
                 </div>
             </div>
@@ -1638,16 +1657,31 @@
         <div class="modal-body">
             <div class="modal-note">
                 Current market: <strong>{{ market_policy.label }}</strong> • Provider <code>{{ market_policy.provider }}</code><br>
-                Compare the current market add limit against a proposed new limit. Apply to stored weeks is explicit and scope-based.
+                Review the current market policy against a proposed new add limit. No files are changed during preview.
             </div>
             <div class="modal-grid">
                 <div class="modal-section">
                     <h4>Current policy</h4>
                     <div class="policy-diff">
                         <div class="policy-diff-item"><span class="label">Add to Radarr</span><span class="value" id="policyCurrentValueAdd"></span></div>
+                        <div class="policy-diff-item"><span class="label">Fetch top</span><span class="value" id="policyCurrentValueFetch"></span></div>
+                        <div class="policy-diff-item"><span class="label">Auto-add</span><span class="value" id="policyCurrentValueAutoAdd"></span></div>
+                        <div class="policy-diff-item"><span class="label">Cleanup protect tag</span><span class="value" id="policyCurrentValueProtect"></span></div>
                     </div>
                     <div style="margin-top:0.75rem; color: var(--text-secondary);">
-                        Boxarr will compare this policy against Radarr. No files are deleted in dry-run.
+                        Boxarr will compare this policy against stored weekly pages and Radarr. No files are changed during preview.
+                    </div>
+                    <div style="margin-top:0.9rem;">
+                        <div class="policy-tag-lists">
+                            <div>
+                                <strong>Canonical tags</strong>
+                                <div id="policyCanonicalTags" class="tag-pill-list" style="margin-top:0.4rem;"></div>
+                            </div>
+                            <div>
+                                <strong>Legacy tags</strong>
+                                <div id="policyLegacyTags" class="tag-pill-list" style="margin-top:0.4rem;"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-section">
@@ -1724,7 +1758,7 @@
         </div>
         <div class="modal-footer">
             <button class="action-btn secondary" type="button" onclick="closeChangePolicyModal()">Close</button>
-            <button class="action-btn secondary" type="button" onclick="fetchImpactPreview()">Preview impact</button>
+            <button class="action-btn secondary" type="button" onclick="fetchImpactPreview()">Preview policy impact</button>
             <button class="action-btn primary" type="button" onclick="savePolicyFromModal()">Save policy</button>
         </div>
     </div>
@@ -1816,33 +1850,35 @@
     </div>
 </div>
 
-<!-- Cleanup Outside Policy Modal -->
+<!-- Cleanup / Policy Impact Modal -->
 <div id="cleanupPolicyModal" class="modal" onclick="if (event.target === this) closeCleanupModal();">
-    <div class="modal-content" style="max-width: 1120px;">
+    <div class="modal-content" style="max-width: 1120px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden;">
         <div class="modal-header">
-            <h3>Cleanup Outside Policy</h3>
+            <h3>Review Market Policy Impact</h3>
             <button class="modal-close" type="button" onclick="closeCleanupModal()">&times;</button>
         </div>
-        <div class="modal-body">
+        <div class="modal-body" style="display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
             <div class="modal-note">
-                Boxarr will compare this policy against Radarr. No files are deleted in dry-run.
+                Review the policy change against stored weekly pages and Radarr. No files are changed during preview.
             </div>
             <div class="modal-grid">
                 <div class="modal-section">
                     <h4>Current policy</h4>
                     <div class="policy-diff">
-                        <div class="policy-diff-item"><span class="label">Market</span><span class="value">{{ market_policy.label }}</span></div>
-                        <div class="policy-diff-item"><span class="label">Current add limit</span><span class="value" id="cleanupCurrentLimit"></span></div>
+                        <div class="policy-diff-item"><span class="label">Market</span><span class="value">Market: {{ market_policy.label }} ({{ market }})</span></div>
+                        <div class="policy-diff-item"><span class="label">Current add limit</span><span class="value" id="cleanupCurrentLimit">{{ market_policy.effective.maximum_movies_to_add|default(auto_add_limit, true) }}</span></div>
+                        <div class="policy-diff-item"><span class="label">Current fetch top</span><span class="value" id="cleanupCurrentFetch">{{ market_policy.effective.box_office_fetch_limit|default(box_office_limit, true) }}</span></div>
+                        <div class="policy-diff-item"><span class="label">Auto-add</span><span class="value" id="cleanupCurrentAutoAdd">{{ 'enabled' if market_policy.effective.auto_add_enabled else 'disabled' }}</span></div>
                     </div>
                     <div style="margin-top:0.75rem; color: var(--text-secondary);">
-                        Use Preview impact to compare the current market policy against Radarr. No files are deleted in dry-run.
+                        Boxarr will compare this policy against stored weekly pages and Radarr. No files are changed during preview.
                     </div>
                 </div>
                 <div class="modal-section">
                     <h4>New add limit</h4>
                     <div class="form-group">
                         <label for="cleanupTargetLimit">Add to Radarr</label>
-                        <input id="cleanupTargetLimit" class="form-input" type="number" min="1" max="30">
+                        <input id="cleanupTargetLimit" class="form-input" type="number" min="1" max="30" value="{{ market_policy.effective.maximum_movies_to_add|default(auto_add_limit, true) }}">
                     </div>
                 </div>
             </div>
@@ -1856,6 +1892,7 @@
                     <div class="form-group"><label for="cleanupWeekFrom">Week from</label><input id="cleanupWeekFrom" class="form-input" type="number" min="1" max="53"></div>
                     <div class="form-group"><label for="cleanupYearTo">Year to</label><input id="cleanupYearTo" class="form-input" type="number" min="1982"></div>
                     <div class="form-group"><label for="cleanupWeekTo">Week to</label><input id="cleanupWeekTo" class="form-input" type="number" min="1" max="53"></div>
+                    <div class="form-group"><label><input id="cleanupWithoutFilesOnly" type="checkbox"> Remove without files only</label></div>
                 </div>
                 <div class="form-group" style="margin-top: 0.75rem;">
                     <label><input id="cleanupAllStored" type="checkbox"> All stored</label>
@@ -1876,7 +1913,7 @@
         <div class="modal-footer">
             <button class="action-btn secondary" type="button" onclick="closeCleanupModal()">Close</button>
             <button class="action-btn secondary" type="button" onclick="runCleanupDryRun()">Preview impact</button>
-            <button id="cleanupExecuteBtn" class="action-btn cleanup" type="button" onclick="runCleanupExecute()" {% if not dangerous_actions_enabled %}disabled title=\"Execute disabled in this build\"{% endif %}>Execute</button>
+            <button id="cleanupExecuteBtn" class="action-btn {% if dangerous_actions_enabled %}cleanup{% else %}secondary{% endif %}" type="button" onclick="runCleanupExecute()" {% if not dangerous_actions_enabled %}disabled title=\"Execute disabled in this build\"{% endif %}>Execute{% if not dangerous_actions_enabled %} disabled{% endif %}</button>
         </div>
     </div>
 </div>
@@ -1885,7 +1922,7 @@
 <div id="migrationModal" class="modal" onclick="if (event.target === this) closeMigrationModal();">
     <div class="modal-content" style="max-width: 1120px;">
         <div class="modal-header">
-            <h3>Legacy Tag Migration</h3>
+            <h3>Preview Legacy Tag Migration</h3>
             <button class="modal-close" type="button" onclick="closeMigrationModal()">&times;</button>
         </div>
         <div class="modal-body">

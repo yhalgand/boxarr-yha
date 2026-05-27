@@ -29,6 +29,7 @@ class AddLimitCleanupRequest(BaseModel):
     year_to: Optional[int] = None
     week_to: Optional[int] = None
     delete_files: bool = True
+    remove_without_files_only: bool = False
     require_boxarr_tag: bool = True
     protect_tag: str = "boxarr-protected"
 
@@ -99,6 +100,7 @@ def _run_cleanup(request: AddLimitCleanupRequest, execute: bool) -> dict:
             year_to=request.year_to,
             week_to=request.week_to,
             delete_files=request.delete_files,
+            remove_without_files_only=request.remove_without_files_only,
             require_boxarr_tag=request.require_boxarr_tag,
             protect_tag=request.protect_tag,
             execute=execute,

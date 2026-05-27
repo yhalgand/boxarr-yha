@@ -67,6 +67,11 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
             "auto_tag_text": "boxarr-de",
             "tags": ["boxarr", "boxarr-de"],
             "cleanup_protect_tag": "boxarr-protected",
+            "root_folder": "/movies/de",
+            "quality_profile_default": "HD-1080p",
+            "language_filter_enabled": True,
+            "language_filter_mode": "whitelist",
+            "language_whitelist": ["German"],
         },
     )
     assert create_resp.status_code == 200
@@ -79,6 +84,11 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert created["definition"]["box_office_fetch_limit"] == 10
     assert created["definition"]["maximum_movies_to_add"] == 3
     assert created["definition"]["tags"] == ["boxarr", "boxarr-de"]
+    assert created["effective"]["root_folder"] == "/movies/de"
+    assert created["effective"]["quality_profile_default"] == "HD-1080p"
+    assert created["effective"]["language_filter_enabled"] is True
+    assert created["effective"]["language_filter_mode"] == "whitelist"
+    assert created["effective"]["language_whitelist"] == ["German"]
 
     markets_resp = client.get("/api/config/markets")
     assert markets_resp.status_code == 200
@@ -91,6 +101,8 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert markets_body["markets"]["de"]["overrides"]["maximum_movies_to_add"] == 3
     assert markets_body["markets"]["de"]["overrides"]["box_office_fetch_limit"] == 10
     assert markets_body["markets"]["de"]["overrides"]["tags"] == ["boxarr", "boxarr-de"]
+    assert markets_body["markets"]["de"]["overrides"]["root_folder"] == "/movies/de"
+    assert markets_body["markets"]["de"]["overrides"]["language_filter_enabled"] is True
 
     update_resp = client.put(
         "/api/config/markets/de",
@@ -103,6 +115,12 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
             "auto_tag_text": "boxarr-de",
             "tags": ["boxarr", "boxarr-de"],
             "cleanup_protect_tag": "boxarr-protected",
+            "root_folder": "/movies/de",
+            "quality_profile_default": "HD-1080p",
+            "quality_profile_upgrade": "UHD-4K",
+            "language_filter_enabled": True,
+            "language_filter_mode": "blacklist",
+            "language_blacklist": ["Spanish"],
         },
     )
     assert update_resp.status_code == 200
@@ -114,6 +132,11 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert updated["effective"]["tags"] == ["boxarr", "boxarr-de"]
     assert updated["effective"]["box_office_fetch_limit"] == 7
     assert updated["effective"]["maximum_movies_to_add"] == 4
+    assert updated["effective"]["root_folder"] == "/movies/de"
+    assert updated["effective"]["quality_profile_default"] == "HD-1080p"
+    assert updated["effective"]["quality_profile_upgrade"] == "UHD-4K"
+    assert updated["effective"]["language_filter_enabled"] is True
+    assert updated["effective"]["language_filter_mode"] == "blacklist"
 
     saved_yaml = yaml.safe_load(config_path.read_text())
     assert "root_folder_config" in saved_yaml["radarr"]
@@ -126,6 +149,7 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert disabled["definition"]["maximum_movies_to_add"] == 4
     assert disabled["definition"]["box_office_fetch_limit"] == 7
     assert disabled["definition"]["tags"] == ["boxarr", "boxarr-de"]
+    assert disabled["effective"]["root_folder"] == "/movies/de"
 
     markets_after_disable = client.get("/api/config/markets").json()
     assert (
@@ -151,6 +175,7 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert enabled["definition"]["maximum_movies_to_add"] == 4
     assert enabled["definition"]["box_office_fetch_limit"] == 7
     assert enabled["definition"]["tags"] == ["boxarr", "boxarr-de"]
+    assert enabled["effective"]["root_folder"] == "/movies/de"
 
     markets_after_enable = client.get("/api/config/markets").json()
     assert markets_after_enable["markets"]["de"]["effective"]["maximum_movies_to_add"] == 4

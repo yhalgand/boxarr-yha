@@ -44,10 +44,12 @@ def _seed_config(dir_path: Path) -> Path:
 
 
 class _FakeRadarrService:
-    def __init__(self, movies, tags):
+    def __init__(self, movies, tags, queue_items=None):
         self._movies = movies
         self._tags = tags
         self.delete_calls = []
+        self.remove_queue_calls = []
+        self._queue_items = queue_items or []
 
     def get_all_movies(self, ignore_cache: bool = False):
         return self._movies
@@ -57,6 +59,13 @@ class _FakeRadarrService:
 
     def delete_movie(self, movie_id: int, delete_files: bool = False):
         self.delete_calls.append((movie_id, delete_files))
+        return SimpleNamespace(status_code=200)
+
+    def get_queue(self):
+        return self._queue_items
+
+    def remove_queue_item(self, queue_id: int, remove_from_client: bool = True):
+        self.remove_queue_calls.append((queue_id, remove_from_client))
         return SimpleNamespace(status_code=200)
 
     def search_movie(self, term: str):
@@ -70,8 +79,8 @@ class _FakeRadarrService:
 
 
 class _StatefulCleanupRadarrService(_FakeRadarrService):
-    def __init__(self, movies, tags):
-        super().__init__(movies, tags)
+    def __init__(self, movies, tags, queue_items=None):
+        super().__init__(movies, tags, queue_items=queue_items)
         self.update_calls = []
 
     def delete_movie(self, movie_id: int, delete_files: bool = False):
@@ -166,10 +175,22 @@ def test_cleanup_routes_disabled_by_default(tmp_path, monkeypatch):
                 "week": 1,
                 "movies": [
                     {
+                        "rank": 6,
+                        "title": "No File Movie",
+                        "tmdb_id": 205,
+                        "radarr_id": 6,
+                    },
+                    {
                         "rank": 7,
                         "title": "Delete Me",
                         "tmdb_id": 202,
                         "radarr_id": 3,
+                    },
+                    {
+                        "rank": 6,
+                        "title": "Unsafe Delete",
+                        "tmdb_id": 203,
+                        "radarr_id": 4,
                     },
                     {
                         "rank": 8,
@@ -178,10 +199,10 @@ def test_cleanup_routes_disabled_by_default(tmp_path, monkeypatch):
                         "radarr_id": 5,
                     },
                     {
-                        "rank": 8,
-                        "title": "Unsafe Delete",
-                        "tmdb_id": 203,
-                        "radarr_id": 4,
+                        "rank": 9,
+                        "title": "Unknown Size With File",
+                        "tmdb_id": 206,
+                        "radarr_id": 6,
                     },
                 ],
             },
@@ -192,6 +213,26 @@ def test_cleanup_routes_disabled_by_default(tmp_path, monkeypatch):
     fake_service = _StatefulCleanupRadarrService(
         [
             _movie(
+                4,
+                203,
+                "Unsafe Delete",
+                tags=[1, 2],
+                size_bytes=0,
+                has_file=False,
+                path="/movies/Unsafe Delete/Unsafe Delete.mkv",
+                quality_profile_id=4,
+            ),
+            _movie(
+                6,
+                205,
+                "No File Movie",
+                tags=[1, 2],
+                size_bytes=0,
+                has_file=False,
+                path="/movies/No File Movie/No File Movie.mkv",
+                quality_profile_id=4,
+            ),
+            _movie(
                 3,
                 202,
                 "Delete Me",
@@ -201,13 +242,13 @@ def test_cleanup_routes_disabled_by_default(tmp_path, monkeypatch):
                 quality_profile_id=4,
             ),
             _movie(
-                4,
-                203,
-                "Unsafe Delete",
+                6,
+                206,
+                "Unknown Size With File",
                 tags=[1, 2],
                 size_bytes=0,
-                has_file=False,
-                path=None,
+                has_file=True,
+                path="/movies/Unknown Size With File/Unknown Size With File.mkv",
                 quality_profile_id=4,
             ),
             _movie(
@@ -241,7 +282,7 @@ def test_cleanup_routes_disabled_by_default(tmp_path, monkeypatch):
     dry_data = dry_run.json()
     assert dry_data["mode"] == "dry-run"
     assert dry_data["dry_run"] is True
-    assert dry_data["considered_total"] == 3
+    assert dry_data["considered_total"] == 4
     assert dry_data["candidates"][0]["title"] == "Delete Me"
     assert dry_data["candidates"][0]["safe_to_delete"] is True
     assert dry_data["candidates"][0]["eligible_under_target_limit"] is False
@@ -249,12 +290,19 @@ def test_cleanup_routes_disabled_by_default(tmp_path, monkeypatch):
     assert dry_data["candidates"][0]["size_on_disk"] == 1024 * 1024 * 1024
     assert dry_data["candidates"][0]["best_rank"] == 7
     assert dry_data["candidates"][0]["weeks_found"] == [{"market": "fr", "year": 2026, "week": 1}]
-    assert len(dry_data["candidates"]) == 1
+    assert dry_data["movies_with_files_to_delete"] == 1
+    assert dry_data["movies_without_files_to_remove"] == 1
     assert dry_data["would_detach_market_tag_only"][0]["title"] == "Detach Me"
     assert dry_data["would_detach_market_tag_only"][0]["safe_to_detach"] is True
-    skipped = {item["title"]: item for item in dry_data["skipped"]}
-    assert skipped["Unsafe Delete"]["reason"] == "unsafe to delete: size_on_disk unknown"
-    assert skipped["Unsafe Delete"]["safe_to_delete"] is False
+    candidate_titles = {item["title"] for item in dry_data["candidates"]}
+    assert candidate_titles == {"Delete Me", "Unsafe Delete"}
+    no_file_candidate = next(item for item in dry_data["candidates"] if item["title"] == "Unsafe Delete")
+    assert no_file_candidate["has_file"] is False
+    assert no_file_candidate["size_on_disk"] is None
+    assert no_file_candidate["estimated_size_bytes"] == 0
+    unsafe = next(item for item in dry_data["unsafe"] if item["title"] == "Unknown Size With File")
+    assert unsafe["reason"] == "unsafe to delete: file exists but size_on_disk unknown"
+    assert unsafe["safe_to_delete"] is False
     assert dry_data["estimated_size_to_delete"] == 1024 * 1024 * 1024
     assert fake_service.delete_calls == []
 
@@ -285,6 +333,12 @@ def test_cleanup_routes_execute_with_dangerous_actions_enabled(tmp_path, monkeyp
                 "week": 1,
                 "movies": [
                     {
+                        "rank": 6,
+                        "title": "No File Movie",
+                        "tmdb_id": 205,
+                        "radarr_id": 6,
+                    },
+                    {
                         "rank": 7,
                         "title": "Delete Me",
                         "tmdb_id": 202,
@@ -296,6 +350,12 @@ def test_cleanup_routes_execute_with_dangerous_actions_enabled(tmp_path, monkeyp
                         "tmdb_id": 204,
                         "radarr_id": 5,
                     },
+                    {
+                        "rank": 9,
+                        "title": "Unknown Size With File",
+                        "tmdb_id": 206,
+                        "radarr_id": 4,
+                    },
                 ],
             },
             indent=2,
@@ -305,12 +365,32 @@ def test_cleanup_routes_execute_with_dangerous_actions_enabled(tmp_path, monkeyp
     fake_service = _StatefulCleanupRadarrService(
         [
             _movie(
+                6,
+                205,
+                "No File Movie",
+                tags=[1, 2],
+                size_bytes=0,
+                has_file=False,
+                path="/movies/No File Movie/No File Movie.mkv",
+                quality_profile_id=4,
+            ),
+            _movie(
                 3,
                 202,
                 "Delete Me",
                 tags=[1, 2],
                 size_bytes=1024 * 1024 * 1024,
                 path="/movies/Delete Me/Delete Me.mkv",
+                quality_profile_id=4,
+            ),
+            _movie(
+                4,
+                206,
+                "Unknown Size With File",
+                tags=[1, 2],
+                size_bytes=0,
+                has_file=True,
+                path="/movies/Unknown Size With File/Unknown Size With File.mkv",
                 quality_profile_id=4,
             ),
             _movie(
@@ -324,6 +404,7 @@ def test_cleanup_routes_execute_with_dangerous_actions_enabled(tmp_path, monkeyp
             ),
         ],
         _canonical_tags(),
+        queue_items=[{"id": 91, "movieId": 6, "title": "No File Movie"}],
     )
 
     monkeypatch.setattr("src.api.routes.cleanup.RadarrService", lambda: fake_service)
@@ -342,17 +423,31 @@ def test_cleanup_routes_execute_with_dangerous_actions_enabled(tmp_path, monkeyp
     dry_run = client.post("/api/cleanup/add-limit/dry-run", json=payload)
     assert dry_run.status_code == 200
     dry_data = dry_run.json()
-    assert [item["title"] for item in dry_data["candidates"]] == ["Delete Me"]
+    assert [item["title"] for item in dry_data["candidates"]] == ["Delete Me", "No File Movie"]
     assert [item["title"] for item in dry_data["would_detach_market_tag_only"]] == ["Detach Me"]
+    assert dry_data["movies_without_files_to_remove"] == 1
+    assert dry_data["movies_with_files_to_delete"] == 1
+    assert dry_data["would_remove_downloads_count"] == 1
+    queued = next(item for item in dry_data["candidates"] if item["title"] == "No File Movie")
+    assert queued["has_file"] is False
+    assert queued["size_on_disk"] is None
+    assert queued["in_download_queue"] is True
+    assert queued["would_remove_download"] is True
+    assert queued["would_delete_files"] is False
+    assert queued["estimated_size_bytes"] == 0
+    assert any(item["title"] == "Unknown Size With File" for item in dry_data["unsafe"])
+    assert next(item for item in dry_data["unsafe"] if item["title"] == "Unknown Size With File")["reason"] == "unsafe to delete: file exists but size_on_disk unknown"
 
     execute = client.post("/api/cleanup/add-limit/execute", json=payload)
     assert execute.status_code == 200
     exec_data = execute.json()
     assert exec_data["mode"] == "execute"
     assert exec_data["dry_run"] is False
-    assert exec_data["deleted"][0]["title"] == "Delete Me"
-    assert fake_service.delete_calls == [(3, True)]
+    assert [item["title"] for item in exec_data["deleted"]] == ["Delete Me", "No File Movie"]
+    assert fake_service.remove_queue_calls == [(91, True)]
+    assert fake_service.delete_calls == [(3, True), (6, True)]
     assert fake_service.update_calls == [(5, [1, 3])]
+    assert exec_data["would_remove_downloads_count"] == 1
     assert exec_data["estimated_size_deleted"] == 1024 * 1024 * 1024
     assert exec_data["actual_size_deleted"] == 1024 * 1024 * 1024
 
@@ -361,5 +456,103 @@ def test_cleanup_routes_execute_with_dangerous_actions_enabled(tmp_path, monkeyp
     second_data = second.json()
     assert second_data["deleted"] == []
     assert second_data["detached"] == []
-    assert fake_service.delete_calls == [(3, True)]
+    assert fake_service.delete_calls == [(3, True), (6, True)]
+    assert fake_service.remove_queue_calls == [(91, True)]
     assert fake_service.update_calls == [(5, [1, 3])]
+
+
+def test_cleanup_routes_execute_remove_without_files_only(tmp_path, monkeypatch):
+    config_path = _seed_config(tmp_path)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    monkeypatch.setenv("BOXARR_ENABLE_DANGEROUS_ACTIONS", "true")
+    Settings.reload_from_file(config_path)
+
+    weekly_dir = tmp_path / "weekly_pages" / "fr"
+    weekly_dir.mkdir(parents=True)
+    (weekly_dir / "2026W01.json").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-05-25T10:00:00",
+                "market": "fr",
+                "provider": "jpboxoffice",
+                "provider_aliases": ["jpboxoffice_fr"],
+                "source": "jpboxoffice",
+                "units": "admissions",
+                "year": 2026,
+                "week": 1,
+                "movies": [
+                    {
+                        "rank": 6,
+                        "title": "No File Movie",
+                        "tmdb_id": 205,
+                        "radarr_id": 6,
+                    },
+                    {
+                        "rank": 7,
+                        "title": "Delete Me",
+                        "tmdb_id": 202,
+                        "radarr_id": 3,
+                    },
+                ],
+            },
+            indent=2,
+        )
+    )
+
+    fake_service = _StatefulCleanupRadarrService(
+        [
+            _movie(
+                6,
+                205,
+                "No File Movie",
+                tags=[1, 2],
+                size_bytes=0,
+                has_file=False,
+                path="/movies/No File Movie/No File Movie.mkv",
+                quality_profile_id=4,
+            ),
+            _movie(
+                3,
+                202,
+                "Delete Me",
+                tags=[1, 2],
+                size_bytes=1024 * 1024 * 1024,
+                path="/movies/Delete Me/Delete Me.mkv",
+                quality_profile_id=4,
+            ),
+        ],
+        _canonical_tags(),
+        queue_items=[{"id": 91, "movieId": 6, "title": "No File Movie"}],
+    )
+
+    monkeypatch.setattr("src.api.routes.cleanup.RadarrService", lambda: fake_service)
+
+    app = create_app()
+    client = TestClient(app)
+
+    payload = {
+        "market": "fr",
+        "target_add_limit": 3,
+        "delete_files": True,
+        "remove_without_files_only": True,
+        "require_boxarr_tag": True,
+        "protect_tag": "boxarr-protected",
+    }
+
+    dry_run = client.post("/api/cleanup/add-limit/dry-run", json=payload)
+    assert dry_run.status_code == 200
+    dry_data = dry_run.json()
+    assert [item["title"] for item in dry_data["candidates"]] == ["No File Movie"]
+    assert [item["title"] for item in dry_data["skipped"]] == ["Delete Me"]
+    assert dry_data["would_remove_downloads_count"] == 1
+    assert dry_data["remove_without_files_only"] is True
+
+    execute = client.post("/api/cleanup/add-limit/execute", json=payload)
+    assert execute.status_code == 200
+    exec_data = execute.json()
+    assert [item["title"] for item in exec_data["deleted"]] == ["No File Movie"]
+    assert exec_data["would_remove_downloads_count"] == 1
+    assert exec_data["remove_without_files_only"] is True
+    assert fake_service.remove_queue_calls == [(91, True)]
+    assert fake_service.delete_calls == [(6, True)]
+    assert all(call[0] != 3 for call in fake_service.delete_calls)

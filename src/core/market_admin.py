@@ -24,6 +24,18 @@ EDITABLE_MARKET_FIELDS = {
     "tags",
     "auto_tag_text",
     "cleanup_protect_tag",
+    "root_folder",
+    "quality_profile_default",
+    "quality_profile_upgrade",
+    "minimum_availability_enabled",
+    "minimum_availability",
+    "monitor_option",
+    "search_on_add",
+    "language_filter_enabled",
+    "language_filter_mode",
+    "language_whitelist",
+    "language_blacklist",
+    "ignore_rereleases",
 }
 
 
@@ -95,6 +107,18 @@ def _normalize_tags(tags: Any) -> Optional[list[str]]:
     if isinstance(tags, list):
         return [str(tag).strip() for tag in tags if str(tag).strip()]
     return [str(tags).strip()] if str(tags).strip() else []
+
+
+def _normalize_string_list(values: Any) -> Optional[list[str]]:
+    if values is None:
+        return None
+    if isinstance(values, str):
+        parts = [part.strip() for part in values.split(",")]
+        return [part for part in parts if part]
+    if isinstance(values, list):
+        return [str(item).strip() for item in values if str(item).strip()]
+    value = str(values).strip()
+    return [value] if value else []
 
 
 def build_market_definition(
@@ -173,6 +197,30 @@ def build_market_definition(
         cleanup_tag = "boxarr-protected"
     if cleanup_tag is not None:
         record["cleanup_protect_tag"] = cleanup_tag
+
+    simple_fields = [
+        "root_folder",
+        "quality_profile_default",
+        "quality_profile_upgrade",
+        "minimum_availability_enabled",
+        "minimum_availability",
+        "monitor_option",
+        "search_on_add",
+        "language_filter_enabled",
+        "language_filter_mode",
+        "ignore_rereleases",
+    ]
+    for field_name in simple_fields:
+        if field_name in incoming:
+            record[field_name] = incoming.get(field_name)
+        elif create and field_name in base:
+            record[field_name] = base.get(field_name)
+
+    for field_name in ("language_whitelist", "language_blacklist"):
+        if field_name in incoming:
+            record[field_name] = _normalize_string_list(incoming.get(field_name))
+        elif create and field_name in base:
+            record[field_name] = _normalize_string_list(base.get(field_name))
 
     return record
 

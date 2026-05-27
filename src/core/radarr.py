@@ -556,6 +556,28 @@ class RadarrService:
         logger.info(f"Deleted movie {movie_id} from Radarr")
         return response
 
+    def get_queue(self, ignore_cache: bool = False) -> List[Dict[str, Any]]:
+        """
+        Get the current download queue from Radarr.
+        """
+        response = self._make_request("GET", "/api/v3/queue")
+        payload = response.json()
+        if isinstance(payload, dict):
+            records = payload.get("records") or payload.get("items") or []
+            return records if isinstance(records, list) else []
+        if isinstance(payload, list):
+            return payload
+        return []
+
+    def remove_queue_item(self, queue_id: int, remove_from_client: bool = True) -> httpx.Response:
+        """
+        Remove a queue item from Radarr.
+        """
+        params = {"removeFromClient": str(remove_from_client).lower()}
+        response = self._make_request("DELETE", f"/api/v3/queue/{queue_id}", params=params)
+        logger.info("Removed queue item %s from Radarr", queue_id)
+        return response
+
     def get_quality_profiles(self, ignore_cache: bool = False) -> List[QualityProfile]:
         """
         Get quality profiles from Radarr.

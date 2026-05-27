@@ -1537,6 +1537,13 @@ function reloadScheduler() {
         return parts.length ? parts : null;
     }
 
+    function normalizeOptionalBooleanSelect(value) {
+        if (value === undefined || value === null || value === '') {
+            return '';
+        }
+        return Boolean(value) ? 'true' : 'false';
+    }
+
     function parseProviderConfigInput(value) {
         const text = String(value || '').trim();
         if (!text) return {};
@@ -1562,7 +1569,10 @@ function reloadScheduler() {
 
         const isEdit = Boolean(marketKey);
         const markets = window.BOXARR_MARKETS || {};
-        const definition = isEdit ? (markets[marketKey] || {}) : {};
+        const previews = window.BOXARR_MARKET_PREVIEWS || {};
+        const preview = isEdit ? (previews[marketKey] || {}) : {};
+        const definition = isEdit ? (preview.definition || markets[marketKey] || {}) : {};
+        const overrides = isEdit ? (preview.overrides || definition.overrides || {}) : {};
 
         modal.dataset.mode = isEdit ? 'edit' : 'create';
         modal.dataset.market = isEdit ? marketKey : '';
@@ -1580,6 +1590,18 @@ function reloadScheduler() {
         const cleanupInput = document.getElementById('marketCleanupInput');
         const autoTagTextInput = document.getElementById('marketAutoTagTextInput');
         const tagsInput = document.getElementById('marketTagsInput');
+        const rootFolderInput = document.getElementById('marketRootFolderInput');
+        const qualityProfileDefaultInput = document.getElementById('marketQualityProfileDefaultInput');
+        const qualityProfileUpgradeInput = document.getElementById('marketQualityProfileUpgradeInput');
+        const minimumAvailabilityEnabledInput = document.getElementById('marketMinimumAvailabilityEnabledInput');
+        const minimumAvailabilityInput = document.getElementById('marketMinimumAvailabilityInput');
+        const monitorOptionInput = document.getElementById('marketMonitorOptionInput');
+        const searchOnAddInput = document.getElementById('marketSearchOnAddInput');
+        const languageFilterEnabledInput = document.getElementById('marketLanguageFilterEnabledInput');
+        const languageFilterModeInput = document.getElementById('marketLanguageFilterModeInput');
+        const languageWhitelistInput = document.getElementById('marketLanguageWhitelistInput');
+        const languageBlacklistInput = document.getElementById('marketLanguageBlacklistInput');
+        const ignoreRereleasesInput = document.getElementById('marketIgnoreRereleasesInput');
 
         if (title) title.textContent = isEdit ? `Edit market ${marketKey}` : 'Add market';
         if (subtitle) {
@@ -1600,19 +1622,49 @@ function reloadScheduler() {
                 ? JSON.stringify(definition.provider_config, null, 2)
                 : '';
         }
-        if (fetchLimitInput) fetchLimitInput.value = definition.box_office_fetch_limit ?? '';
-        if (addLimitInput) addLimitInput.value = definition.maximum_movies_to_add ?? '';
+        if (fetchLimitInput) fetchLimitInput.value = overrides.box_office_fetch_limit ?? '';
+        if (addLimitInput) addLimitInput.value = overrides.maximum_movies_to_add ?? '';
         if (autoAddInput) {
             autoAddInput.value =
-                definition.auto_add_enabled === undefined || definition.auto_add_enabled === null
+                overrides.auto_add_enabled === undefined || overrides.auto_add_enabled === null
                     ? ''
-                    : String(Boolean(definition.auto_add_enabled));
+                    : String(Boolean(overrides.auto_add_enabled));
         }
-        if (cleanupInput) cleanupInput.value = definition.cleanup_protect_tag || '';
-        if (autoTagTextInput) autoTagTextInput.value = definition.auto_tag_text || '';
+        if (cleanupInput) cleanupInput.value = overrides.cleanup_protect_tag || '';
+        if (autoTagTextInput) autoTagTextInput.value = overrides.auto_tag_text || '';
         if (tagsInput) {
-            const tagsValue = definition.tags || [];
+            const tagsValue = overrides.tags || [];
             tagsInput.value = Array.isArray(tagsValue) ? tagsValue.join(', ') : '';
+        }
+        if (rootFolderInput) rootFolderInput.value = overrides.root_folder || '';
+        if (qualityProfileDefaultInput) qualityProfileDefaultInput.value = overrides.quality_profile_default || '';
+        if (qualityProfileUpgradeInput) qualityProfileUpgradeInput.value = overrides.quality_profile_upgrade || '';
+        if (minimumAvailabilityEnabledInput) {
+            minimumAvailabilityEnabledInput.value = normalizeOptionalBooleanSelect(overrides.minimum_availability_enabled);
+        }
+        if (minimumAvailabilityInput) {
+            minimumAvailabilityInput.value = overrides.minimum_availability || '';
+        }
+        if (monitorOptionInput) monitorOptionInput.value = overrides.monitor_option || '';
+        if (searchOnAddInput) {
+            searchOnAddInput.value = normalizeOptionalBooleanSelect(overrides.search_on_add);
+        }
+        if (languageFilterEnabledInput) {
+            languageFilterEnabledInput.value = normalizeOptionalBooleanSelect(overrides.language_filter_enabled);
+        }
+        if (languageFilterModeInput) languageFilterModeInput.value = overrides.language_filter_mode || '';
+        if (languageWhitelistInput) {
+            languageWhitelistInput.value = Array.isArray(overrides.language_whitelist)
+                ? overrides.language_whitelist.join(', ')
+                : '';
+        }
+        if (languageBlacklistInput) {
+            languageBlacklistInput.value = Array.isArray(overrides.language_blacklist)
+                ? overrides.language_blacklist.join(', ')
+                : '';
+        }
+        if (ignoreRereleasesInput) {
+            ignoreRereleasesInput.value = normalizeOptionalBooleanSelect(overrides.ignore_rereleases);
         }
 
         toggleMarketModal(true);
@@ -1634,6 +1686,18 @@ function reloadScheduler() {
         const cleanupProtectTag = (document.getElementById('marketCleanupInput')?.value || '').trim();
         const autoTagText = (document.getElementById('marketAutoTagTextInput')?.value || '').trim();
         const tagsRaw = document.getElementById('marketTagsInput')?.value || '';
+        const rootFolder = (document.getElementById('marketRootFolderInput')?.value || '').trim();
+        const qualityProfileDefault = (document.getElementById('marketQualityProfileDefaultInput')?.value || '').trim();
+        const qualityProfileUpgrade = (document.getElementById('marketQualityProfileUpgradeInput')?.value || '').trim();
+        const minimumAvailabilityEnabledRaw = document.getElementById('marketMinimumAvailabilityEnabledInput')?.value || '';
+        const minimumAvailabilityRaw = document.getElementById('marketMinimumAvailabilityInput')?.value || '';
+        const monitorOption = (document.getElementById('marketMonitorOptionInput')?.value || '').trim();
+        const searchOnAddRaw = document.getElementById('marketSearchOnAddInput')?.value || '';
+        const languageFilterEnabledRaw = document.getElementById('marketLanguageFilterEnabledInput')?.value || '';
+        const languageFilterMode = document.getElementById('marketLanguageFilterModeInput')?.value || '';
+        const languageWhitelistRaw = document.getElementById('marketLanguageWhitelistInput')?.value || '';
+        const languageBlacklistRaw = document.getElementById('marketLanguageBlacklistInput')?.value || '';
+        const ignoreRereleasesRaw = document.getElementById('marketIgnoreRereleasesInput')?.value || '';
 
         if (!marketKey) {
             setMarketModalMessage('Market key is required.', 'error');
@@ -1692,6 +1756,42 @@ function reloadScheduler() {
         if (tags) {
             payload.tags = tags;
         }
+
+        const setOptionalString = (key, value) => {
+            if (value) {
+                payload[key] = value;
+            } else if (mode === 'edit') {
+                payload[key] = null;
+            }
+        };
+        const setOptionalBoolean = (key, rawValue) => {
+            if (rawValue !== '') {
+                payload[key] = rawValue === 'true';
+            } else if (mode === 'edit') {
+                payload[key] = null;
+            }
+        };
+        const setOptionalList = (key, rawValue) => {
+            const parsed = normalizeMarketTagsInput(rawValue);
+            if (parsed && parsed.length) {
+                payload[key] = parsed;
+            } else if (mode === 'edit') {
+                payload[key] = null;
+            }
+        };
+
+        setOptionalString('root_folder', rootFolder);
+        setOptionalString('quality_profile_default', qualityProfileDefault);
+        setOptionalString('quality_profile_upgrade', qualityProfileUpgrade);
+        setOptionalBoolean('minimum_availability_enabled', minimumAvailabilityEnabledRaw);
+        setOptionalString('minimum_availability', minimumAvailabilityRaw);
+        setOptionalString('monitor_option', monitorOption);
+        setOptionalBoolean('search_on_add', searchOnAddRaw);
+        setOptionalBoolean('language_filter_enabled', languageFilterEnabledRaw);
+        setOptionalString('language_filter_mode', languageFilterMode);
+        setOptionalList('language_whitelist', languageWhitelistRaw);
+        setOptionalList('language_blacklist', languageBlacklistRaw);
+        setOptionalBoolean('ignore_rereleases', ignoreRereleasesRaw);
 
         const method = mode === 'edit' ? 'PUT' : 'POST';
         const endpoint = mode === 'edit'

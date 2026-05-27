@@ -587,8 +587,29 @@ def test_policy_execute_endpoints_work_with_dangerous_actions_enabled(tmp_path, 
     assert migrate_resp.status_code == 200
     migrate = migrate_resp.json()
     assert migrate["migrated"] == 1
+    assert migrate["already_migrated_count"] == 0
     assert migration_service.updated_movies, "expected safe tag migration to update Radarr"
     assert len(migration_service.updated_movies[0].tags) == 3
+
+    migrate_again_resp = client.post(
+        "/api/policy/tags/migrate/execute",
+        json={"market": "us", "year_from": 2026, "week_from": 12, "year_to": 2026, "week_to": 12},
+    )
+    assert migrate_again_resp.status_code == 200
+    migrate_again = migrate_again_resp.json()
+    assert migrate_again["migrated"] == 0
+    assert migrate_again["already_migrated_count"] == 1
+    assert len(migrate_again["already_migrated"]) == 1
+
+    migrate_dry_run_resp = client.post(
+        "/api/policy/tags/migrate/dry-run",
+        json={"market": "us", "year_from": 2026, "week_from": 12, "year_to": 2026, "week_to": 12},
+    )
+    assert migrate_dry_run_resp.status_code == 200
+    migrate_dry_run = migrate_dry_run_resp.json()
+    assert migrate_dry_run["candidates"] == []
+    assert migrate_dry_run["already_migrated_count"] == 1
+    assert len(migrate_dry_run["already_migrated"]) == 1
 
 
 def test_policy_backfill_scope_limits_matcher_build_once(tmp_path, monkeypatch):

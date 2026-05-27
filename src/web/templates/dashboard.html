@@ -297,6 +297,15 @@
     border-radius: 10px;
     overflow: hidden;
     background: var(--card-bg);
+    max-height: 50vh;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.cleanup-results-scroll {
+    overflow-y: auto;
+    min-height: 0;
 }
 
 .cleanup-results-empty {
@@ -615,6 +624,9 @@
     margin-top: 1rem;
     border: 1px solid var(--border-color);
     border-radius: 12px;
+    max-height: 50vh;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
     background: var(--bg-color);
 }
@@ -658,6 +670,14 @@
     padding: 1rem;
     display: grid;
     gap: 0.75rem;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.result-scroll {
+    max-height: 50vh;
+    overflow: auto;
+    min-height: 0;
 }
 
 .result-list-item {
@@ -982,7 +1002,7 @@
             <button class="action-btn cleanup"
                     onclick="showCleanupModal()"
                     title="Preview or remove Boxarr-added movies that are no longer eligible under a lower Maximum Movies to Add limit">
-                <span class="btn-icon">🧹</span> Cleanup Boxarr-added movies
+                <span class="btn-icon">🧹</span> Preview policy impact
             </button>
             
             {% if recent_weeks %}
@@ -1409,16 +1429,16 @@
 
 <!-- Add-Limit Cleanup Modal -->
 <div id="cleanupModal" class="modal">
-    <div class="modal-content" style="max-width: 1100px;">
+    <div class="modal-content" style="max-width: 1100px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden;">
         <div class="modal-header">
-            <h3>Cleanup Boxarr-added movies</h3>
+            <h3>Review Market Policy Impact</h3>
             <button class="modal-close" onclick="closeCleanupModal()">&times;</button>
         </div>
-        <div class="modal-body">
+        <div class="modal-body" style="display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
             <div class="modal-note cleanup-warning">
-                <strong>This will delete movies from Radarr and delete files.</strong>
+                <strong>Boxarr will compare this policy against stored weekly pages and Radarr.</strong>
                 <div style="margin-top: 0.5rem; color: var(--text-secondary);">
-                    Run a dry-run first. The execute button stays disabled until a dry-run has completed and you type <strong>DELETE</strong>.
+                    Run a dry-run first. No files are changed during preview.
                 </div>
                 {% if not dangerous_actions_enabled %}
                 <div style="margin-top: 0.5rem; color: var(--warning-color); font-weight: 600;">
@@ -1427,60 +1447,88 @@
                 {% endif %}
             </div>
 
-            <div class="modal-grid-3 cleanup-grid">
-                <div class="cleanup-field">
-                    <label for="cleanupMarket">Market</label>
-                    <select id="cleanupMarket">
-                        {% for market_key, market_def in configured_markets.items() %}
-                        <option value="{{ market_key }}" {% if market == market_key %}selected{% endif %}>{{ market_def.label }}</option>
-                        {% endfor %}
-                        <option value="all">All markets</option>
-                    </select>
+            <div class="modal-grid">
+                <div class="modal-section">
+                    <h4>Current policy</h4>
+                    <div class="policy-diff">
+                        <div class="policy-diff-item"><span class="label">Market</span><span class="value">Market: {{ market_policy.label }} ({{ market }})</span></div>
+                        <div class="policy-diff-item"><span class="label">Current add limit</span><span class="value" id="cleanupCurrentLimit">{{ market_policy.effective.maximum_movies_to_add|default(auto_add_limit, true) }}</span></div>
+                        <div class="policy-diff-item"><span class="label">Current fetch top</span><span class="value" id="cleanupCurrentFetch">{{ market_policy.effective.box_office_fetch_limit|default(box_office_limit, true) }}</span></div>
+                        <div class="policy-diff-item"><span class="label">Auto-add</span><span class="value" id="cleanupCurrentAutoAdd">{{ 'enabled' if market_policy.effective.auto_add_enabled else 'disabled' }}</span></div>
+                    </div>
+                    <div style="margin-top:0.75rem; color: var(--text-secondary);">
+                        Boxarr will compare this policy against stored weekly pages and Radarr. No files are changed during preview.
+                    </div>
                 </div>
-                <div class="cleanup-field">
-                    <label for="cleanupLimit">Target Maximum Movies to Add</label>
-                    <input id="cleanupLimit" type="number" min="1" max="30" value="{{ auto_add_limit }}">
-                </div>
-                <div class="cleanup-field">
-                    <label for="cleanupYearFrom">Year from</label>
-                    <input id="cleanupYearFrom" type="number" min="1982" placeholder="optional">
-                </div>
-                <div class="cleanup-field">
-                    <label for="cleanupWeekFrom">Week from</label>
-                    <input id="cleanupWeekFrom" type="number" min="1" max="53" placeholder="optional">
-                </div>
-                <div class="cleanup-field">
-                    <label for="cleanupYearTo">Year to</label>
-                    <input id="cleanupYearTo" type="number" min="1982" placeholder="optional">
-                </div>
-                <div class="cleanup-field">
-                    <label for="cleanupWeekTo">Week to</label>
-                    <input id="cleanupWeekTo" type="number" min="1" max="53" placeholder="optional">
-                </div>
-                <div class="cleanup-field">
-                    <label for="cleanupProtectTag">Protect tag</label>
-                    <input id="cleanupProtectTag" type="text" value="boxarr-protected" maxlength="40">
-                </div>
-                <div class="cleanup-field">
-                    <label>Delete files</label>
-                    <input type="text" value="Always true for execute" disabled>
+                <div class="modal-section">
+                    <h4>New add limit</h4>
+                    <div class="form-group">
+                        <label for="cleanupLimit" class="form-label">Add to Radarr</label>
+                        <input id="cleanupLimit" type="number" min="1" max="30" value="{{ market_policy.effective.maximum_movies_to_add|default(auto_add_limit, true) }}">
+                    </div>
                 </div>
             </div>
 
+            <details class="advanced-options" style="margin-top: 1rem;">
+                <summary>Advanced options</summary>
+                <div class="modal-grid-3 cleanup-grid">
+                    <div class="cleanup-field">
+                        <label for="cleanupMarket">Market</label>
+                        <select id="cleanupMarket">
+                            {% for market_key, market_def in configured_markets.items() %}
+                            <option value="{{ market_key }}" {% if market == market_key %}selected{% endif %}>{{ market_def.label }}</option>
+                            {% endfor %}
+                            <option value="all">All markets</option>
+                        </select>
+                    </div>
+                    <div class="cleanup-field">
+                        <label for="cleanupYearFrom">Year from</label>
+                        <input id="cleanupYearFrom" type="number" min="1982" placeholder="optional">
+                    </div>
+                    <div class="cleanup-field">
+                        <label for="cleanupWeekFrom">Week from</label>
+                        <input id="cleanupWeekFrom" type="number" min="1" max="53" placeholder="optional">
+                    </div>
+                    <div class="cleanup-field">
+                        <label for="cleanupYearTo">Year to</label>
+                        <input id="cleanupYearTo" type="number" min="1982" placeholder="optional">
+                    </div>
+                    <div class="cleanup-field">
+                        <label for="cleanupWeekTo">Week to</label>
+                        <input id="cleanupWeekTo" type="number" min="1" max="53" placeholder="optional">
+                    </div>
+                    <div class="cleanup-field">
+                        <label for="cleanupMaxWeeks">Max weeks</label>
+                        <input id="cleanupMaxWeeks" type="number" min="1" max="52" placeholder="optional">
+                    </div>
+                    <div class="cleanup-field">
+                        <label for="cleanupProtectTag">Protect tag</label>
+                        <input id="cleanupProtectTag" type="text" value="boxarr-protected" maxlength="40">
+                    </div>
+                    <div class="cleanup-field">
+                        <label for="cleanupConfirmText">Confirmation</label>
+                        <input id="cleanupConfirmText" type="text" placeholder="Type DELETE to enable execution" autocomplete="off">
+                    </div>
+                    <div class="cleanup-field">
+                        <label><input id="cleanupAllStored" type="checkbox"> All stored</label>
+                    </div>
+                    <div class="cleanup-field">
+                        <label><input id="cleanupDeleteFiles" type="checkbox" checked disabled> Delete files (execute only)</label>
+                    </div>
+                    <div class="cleanup-field">
+                        <label><input id="cleanupWithoutFilesOnly" type="checkbox"> Remove without files only</label>
+                    </div>
+                </div>
+            </details>
+
             <div class="cleanup-confirm">
-                <input id="cleanupConfirmText" type="text" placeholder="Type DELETE to enable execution" autocomplete="off">
-                <button class="action-btn secondary" type="button" onclick="runCleanupDryRun()">Dry-run</button>
-                <button id="cleanupExecuteBtn" class="action-btn cleanup" type="button" onclick="executeCleanup()" {% if not dangerous_actions_enabled %}disabled{% endif %}>Execute</button>
+                <button class="action-btn secondary" type="button" onclick="runCleanupDryRun()">Preview impact</button>
+                <button id="cleanupExecuteBtn" class="action-btn {% if dangerous_actions_enabled %}cleanup{% else %}secondary{% endif %}" type="button" onclick="executeCleanup()" {% if not dangerous_actions_enabled %}disabled title="Execute disabled in this build"{% endif %}>Execute{% if not dangerous_actions_enabled %} disabled{% endif %}</button>
             </div>
 
             <div id="cleanupResults" class="cleanup-results result-panel" style="margin-top: 1.25rem;">
                 <div class="cleanup-results-empty">Run a dry-run to preview the candidate list.</div>
             </div>
-        </div>
-        <div class="modal-footer">
-            <button class="action-btn secondary" onclick="closeCleanupModal()">Close</button>
-            <button class="action-btn secondary" onclick="runCleanupDryRun()">Dry-run</button>
-            <button id="cleanupExecuteBtnFooter" class="action-btn cleanup" onclick="executeCleanup()" {% if not dangerous_actions_enabled %}disabled{% endif %}>Execute</button>
         </div>
     </div>
 </div>
@@ -2249,7 +2297,6 @@ function formatCleanupTags(item) {
 function cleanupButtonSetEnabled(enabled) {
     const executeButtons = [
         document.getElementById('cleanupExecuteBtn'),
-        document.getElementById('cleanupExecuteBtnFooter'),
     ];
     executeButtons.forEach(btn => {
         if (btn) {
@@ -2269,11 +2316,11 @@ function cleanupConfirmSatisfied() {
 
 function cleanupPayloadFromForm() {
     const market = document.getElementById('cleanupMarket')?.value || 'us';
-    const payload = {
-        market,
-        target_add_limit: parseInt(document.getElementById('cleanupLimit')?.value || '3', 10),
-        year_from: document.getElementById('cleanupYearFrom')?.value
-            ? parseInt(document.getElementById('cleanupYearFrom').value, 10)
+        const payload = {
+            market,
+            target_add_limit: parseInt(document.getElementById('cleanupLimit')?.value || '3', 10),
+            year_from: document.getElementById('cleanupYearFrom')?.value
+                ? parseInt(document.getElementById('cleanupYearFrom').value, 10)
             : null,
         week_from: document.getElementById('cleanupWeekFrom')?.value
             ? parseInt(document.getElementById('cleanupWeekFrom').value, 10)
@@ -2284,10 +2331,15 @@ function cleanupPayloadFromForm() {
         week_to: document.getElementById('cleanupWeekTo')?.value
             ? parseInt(document.getElementById('cleanupWeekTo').value, 10)
             : null,
-        delete_files: true,
-        require_boxarr_tag: true,
-        protect_tag: (document.getElementById('cleanupProtectTag')?.value || 'boxarr-protected').trim() || 'boxarr-protected',
-    };
+            all_stored: Boolean(document.getElementById('cleanupAllStored')?.checked),
+            max_weeks: document.getElementById('cleanupMaxWeeks')?.value
+                ? parseInt(document.getElementById('cleanupMaxWeeks').value, 10)
+                : null,
+            delete_files: true,
+            remove_without_files_only: Boolean(document.getElementById('cleanupWithoutFilesOnly')?.checked),
+            require_boxarr_tag: true,
+            protect_tag: (document.getElementById('cleanupProtectTag')?.value || 'boxarr-protected').trim() || 'boxarr-protected',
+        };
     return payload;
 }
 
@@ -2295,6 +2347,10 @@ function cleanupResetState() {
     cleanupDryRunData = null;
     cleanupLastPayload = null;
     cleanupButtonSetEnabled(false);
+    const withoutFilesOnly = document.getElementById('cleanupWithoutFilesOnly');
+    if (withoutFilesOnly) {
+        withoutFilesOnly.checked = false;
+    }
     const results = document.getElementById('cleanupResults');
     if (results) {
         results.innerHTML = '<div class="cleanup-results-empty">Run a dry-run to preview the candidate list.</div>';
@@ -2333,6 +2389,9 @@ function renderCleanupResults(data) {
     const skippedItems = Array.isArray(data.skipped) ? data.skipped : [];
     const errorItems = Array.isArray(data.errors) ? data.errors : [];
     const title = data.dry_run ? 'Dry-run preview' : 'Cleanup results';
+    const formatSizeForRow = item => (item.has_file === false && (item.size_on_disk === null || item.size_on_disk === undefined)
+        ? '0 B'
+        : formatMaybeBytes(item.size_on_disk));
 
     function rowHtml(item, actionLabel) {
         return `
@@ -2346,7 +2405,7 @@ function renderCleanupResults(data) {
                 <td><span class="cleanup-path">${escapeHtml(item.path || 'n/a')}</span></td>
                 <td>${escapeHtml(item.best_rank || 'n/a')}</td>
                 <td>${escapeHtml(formatCleanupWeeks(item.weeks_found))}</td>
-                <td>${escapeHtml(formatMaybeBytes(item.size_on_disk))}</td>
+                <td>${escapeHtml(formatSizeForRow(item))}</td>
                 <td>
                     <strong>${item.safe_to_delete ? 'delete' : item.safe_to_detach ? 'detach' : 'no'}</strong>
                     ${item.unsafe_reason ? `<br><span class="cleanup-reason">${escapeHtml(item.unsafe_reason)}</span>` : ''}
@@ -2380,6 +2439,9 @@ function renderCleanupResults(data) {
             <span class="summary-pill">Markets: ${escapeHtml((data.markets_scanned || [data.market]).join(', '))}</span>
             <span class="summary-pill">Considered: ${escapeHtml(data.considered_total || data.movies_scanned || 0)}</span>
             <span class="summary-pill">Would delete: ${escapeHtml(wouldDeleteItems.length)}</span>
+            <span class="summary-pill">With files: ${escapeHtml(data.movies_with_files_to_delete ?? wouldDeleteItems.filter(item => item.has_file).length)}</span>
+            <span class="summary-pill">Without files: ${escapeHtml(data.movies_without_files_to_remove ?? wouldDeleteItems.filter(item => item.has_file === false).length)}</span>
+            <span class="summary-pill">Remove downloads: ${escapeHtml(data.would_remove_downloads_count ?? wouldDeleteItems.filter(item => item.would_remove_download).length)}</span>
             <span class="summary-pill">Would detach: ${escapeHtml(wouldDetachItems.length)}</span>
             <span class="summary-pill">Protected: ${escapeHtml(protectedItems.length)}</span>
             <span class="summary-pill">Unsafe: ${escapeHtml(unsafeItems.length)}</span>
@@ -2387,7 +2449,7 @@ function renderCleanupResults(data) {
             <span class="summary-pill">Errors: ${escapeHtml(errorItems.length)}</span>
             <span class="summary-pill">Estimated size: ${escapeHtml(formatBytes(data.estimated_size_to_delete || data.estimated_size_deleted || 0))}</span>
         </div>
-        <div style="padding: 1rem;">
+        <div class="cleanup-results-scroll" style="padding: 1rem;">
             <div style="margin-bottom: 0.75rem; color: var(--text-secondary);">
                 Target add limit: <strong>${escapeHtml(data.target_add_limit)}</strong>
                 · Market: <strong>${escapeHtml(data.market)}</strong>
