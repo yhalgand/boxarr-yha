@@ -70,11 +70,12 @@ def test_weekly_template_contains_policy_wizard_modals():
         "max-height: 85vh",
         "class=\"modal-section result-panel\"",
         "class=\"result-scroll\"",
-        "id=\"cleanupCurrentLimit\">{{ market_policy.effective.maximum_movies_to_add|default(auto_add_limit, true) }}</span>",
-        "id=\"cleanupCurrentFetch\">{{ market_policy.effective.box_office_fetch_limit|default(box_office_limit, true) }}</span>",
+        "<span class=\"label\">Current add limit:</span> <span class=\"value\" id=\"cleanupCurrentLimit\">{{ market_policy.effective.maximum_movies_to_add|default(auto_add_limit, true) }}</span>",
+        "<span class=\"label\">Current fetch top:</span> <span class=\"value\" id=\"cleanupCurrentFetch\">{{ market_policy.effective.box_office_fetch_limit|default(box_office_limit, true) }}</span>",
         "value=\"{{ market_policy.effective.maximum_movies_to_add|default(auto_add_limit, true) }}\"",
         "getRequiredElement('cleanupTargetLimit').value = current.maximum_movies_to_add ?? '';",
         "getRequiredElement('backfillCurrentLimit').textContent = formatValue(current.maximum_movies_to_add);",
+        "refreshViewAfterExecute(",
         "getRequiredElement('policyScopeCurrent').checked = true;",
         "backfill-add/dry-run",
         "cleanup/dry-run",
@@ -110,9 +111,9 @@ def test_weekly_template_contains_policy_wizard_modals():
     assert "for=\"cleanupYearFrom\"" in advanced_cleanup_block
     assert "for=\"cleanupWeekFrom\"" in advanced_cleanup_block
     assert "cleanupWithoutFilesOnly" in advanced_cleanup_block
-    assert "Current add limit:" in visible_cleanup_block
-    assert "Current fetch top:" in visible_cleanup_block
-    assert "Auto-add:" in visible_cleanup_block
+    assert "<span class=\"label\">Current add limit:</span> <span class=\"value\" id=\"cleanupCurrentLimit\">" in visible_cleanup_block
+    assert "<span class=\"label\">Current fetch top:</span> <span class=\"value\" id=\"cleanupCurrentFetch\">" in visible_cleanup_block
+    assert "<span class=\"label\">Auto-add:</span> <span class=\"value\" id=\"cleanupCurrentAutoAdd\">" in visible_cleanup_block
     assert "Market:</span> <span class=\"value\">{{ market_policy.label }} ({{ market }})</span>" in visible_cleanup_block
     assert "Cleanup Boxarr-added movies" not in visible_cleanup_block
     assert "class=\"action-btn {% if dangerous_actions_enabled %}primary{% else %}secondary{% endif %}\"" in content

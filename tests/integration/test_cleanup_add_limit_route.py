@@ -265,6 +265,18 @@ def test_cleanup_routes_disabled_by_default(tmp_path, monkeypatch):
     )
 
     monkeypatch.setattr("src.api.routes.cleanup.RadarrService", lambda: fake_service)
+    refresh_calls = []
+    import src.api.routes.cleanup as cleanup_routes
+    monkeypatch.setattr(
+        cleanup_routes,
+        "refresh_stored_status_for_market",
+        lambda market: refresh_calls.append(market) or {
+            "weeks_scanned": 0,
+            "weeks_updated": 0,
+            "movies_refreshed": 0,
+            "movies_linked": 0,
+        },
+    )
 
     app = create_app()
     client = TestClient(app)
@@ -306,6 +318,7 @@ def test_cleanup_routes_disabled_by_default(tmp_path, monkeypatch):
     assert unsafe["safe_to_delete"] is False
     assert dry_data["estimated_size_to_delete"] == 1024 * 1024 * 1024
     assert fake_service.delete_calls == []
+    assert refresh_calls == []
 
     execute = client.post("/api/cleanup/add-limit/execute", json=payload)
     assert execute.status_code == 403
@@ -573,6 +586,7 @@ def test_cleanup_routes_execute_remove_without_files_only(tmp_path, monkeypatch)
     assert [item["title"] for item in dry_data["skipped"]] == ["Delete Me"]
     assert dry_data["would_remove_downloads_count"] == 1
     assert dry_data["remove_without_files_only"] is True
+    assert refresh_calls == []
 
     execute = client.post("/api/cleanup/add-limit/execute", json=payload)
     assert execute.status_code == 200

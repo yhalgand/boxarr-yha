@@ -198,6 +198,17 @@ def test_policy_get_put_apply_and_backfill(tmp_path, monkeypatch):
         "get_all_movies_with_optional_cache_bypass",
         lambda *_, **__: [],
     )
+    refresh_calls = []
+    monkeypatch.setattr(
+        policy_routes,
+        "refresh_stored_status_for_market",
+        lambda market: refresh_calls.append(market) or {
+            "weeks_scanned": 0,
+            "weeks_updated": 0,
+            "movies_refreshed": 0,
+            "movies_linked": 0,
+        },
+    )
 
     app = create_app()
     client = TestClient(app)
@@ -253,6 +264,7 @@ def test_policy_get_put_apply_and_backfill(tmp_path, monkeypatch):
     assert snapshot["policy_snapshot"]["add_limit_used"] == 3
     assert snapshot["policy_snapshot"]["tag_policy_used"]["added_tag"] == "boxarr-added"
     assert snapshot["policy_snapshot"]["tag_policy_used"]["market_tag"] == "boxarr-market-us"
+    assert refresh_calls == []
 
     backfill_resp = client.post(
         "/api/policy/us/backfill-add/dry-run",
@@ -272,6 +284,7 @@ def test_policy_get_put_apply_and_backfill(tmp_path, monkeypatch):
     assert backfill["weeks"][0]["needs_refetch"] is True
     assert backfill["would_add_count_total"] == 1
     assert backfill["skipped_count_total"] == 0
+    assert refresh_calls == []
 
     no_scope_resp = client.post(
         "/api/policy/us/backfill-add/dry-run",
@@ -440,6 +453,17 @@ def test_policy_tag_migration_detects_legacy_tags_and_reports_counts(tmp_path, m
         "get_all_movies_with_optional_cache_bypass",
         lambda *_, **__: movies,
     )
+    refresh_calls = []
+    monkeypatch.setattr(
+        policy_routes,
+        "refresh_stored_status_for_market",
+        lambda market: refresh_calls.append(market) or {
+            "weeks_scanned": 0,
+            "weeks_updated": 0,
+            "movies_refreshed": 0,
+            "movies_linked": 0,
+        },
+    )
 
     app = create_app()
     client = TestClient(app)
@@ -461,6 +485,7 @@ def test_policy_tag_migration_detects_legacy_tags_and_reports_counts(tmp_path, m
     assert len(body["candidates"]) == 4
     assert any(item["title"] == "Legacy Movie" for item in body["candidates"])
     assert any(item["title"] == "Plain Movie" for item in body["skipped"])
+    assert refresh_calls == []
 
 
 def test_policy_execute_endpoints_are_disabled_by_default(tmp_path, monkeypatch):

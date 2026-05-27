@@ -135,9 +135,16 @@ def test_update_week_respects_genre_mapping(tmp_path, monkeypatch):
     # Patch core services that the route imports dynamically inside the function
     import src.core.boxoffice as core_boxoffice
     import src.core.radarr as core_radarr
+    import src.api.routes.scheduler as scheduler_routes
 
     monkeypatch.setattr(core_radarr, "RadarrService", _FakeRadarrService)
     monkeypatch.setattr(core_boxoffice, "BoxOfficeService", _FakeBoxOfficeService)
+    refresh_calls = []
+    monkeypatch.setattr(
+        scheduler_routes,
+        "refresh_stored_status_for_market",
+        lambda market: refresh_calls.append(market) or {"weeks_scanned": 0, "weeks_updated": 0, "movies_refreshed": 0, "movies_linked": 0},
+    )
 
     app = create_app()
     client = TestClient(app)
@@ -160,6 +167,7 @@ def test_update_week_respects_genre_mapping(tmp_path, monkeypatch):
     # Assert mapping chose the Horror folder
     assert _FakeRadarrService.added_calls, "No add_movie calls captured"
     assert _FakeRadarrService.added_calls[0]["root_folder"] == "/movies/horror"
+    assert refresh_calls == ["us"]
 
 
 def test_update_week_rejects_invalid_provider(tmp_path, monkeypatch):

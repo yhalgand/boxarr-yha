@@ -332,7 +332,7 @@ async def get_movies_status(request: MovieStatusRequest):
 
 
 @router.post("/{movie_id}/upgrade", response_model=UpgradeResponse)
-async def upgrade_movie_quality(movie_id: int):
+async def upgrade_movie_quality(movie_id: int, market: str = DEFAULT_MARKET):
     """Upgrade movie to higher quality profile."""
     try:
         if not settings.radarr_api_key:
@@ -373,6 +373,7 @@ async def upgrade_movie_quality(movie_id: int):
             # Trigger search for new quality
             radarr_service.trigger_movie_search(movie_id)
             regenerate_weeks_with_movie(movie.title)
+            await asyncio.to_thread(refresh_stored_status_for_market, market)
 
             return UpgradeResponse(
                 success=True,
@@ -392,7 +393,7 @@ async def upgrade_movie_quality(movie_id: int):
 
 
 @router.post("/add")
-async def add_movie_to_radarr(request: AddMovieRequest):
+async def add_movie_to_radarr(request: AddMovieRequest, market: str = DEFAULT_MARKET):
     """Add a movie to Radarr and regenerate affected weeks."""
     try:
         if not settings.radarr_api_key:
@@ -453,6 +454,7 @@ async def add_movie_to_radarr(request: AddMovieRequest):
         if already:
             # Regenerate affected weeks so UI reflects correct status immediately
             regenerate_weeks_with_movie(req_title)
+            await asyncio.to_thread(refresh_stored_status_for_market, market)
 
             return {
                 "success": True,
@@ -472,6 +474,7 @@ async def add_movie_to_radarr(request: AddMovieRequest):
         if result:
             # Find and regenerate weeks containing this movie
             regenerate_weeks_with_movie(req_title)
+            await asyncio.to_thread(refresh_stored_status_for_market, market)
 
             return {
                 "success": True,

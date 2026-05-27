@@ -2658,6 +2658,7 @@ async function executeCleanup() {
         cleanupDryRunData = data;
         renderCleanupResults(data);
         cleanupButtonSetEnabled(false);
+        setTimeout(() => window.location.reload(), 800);
     } catch (error) {
         if (results) {
             results.innerHTML = `<div class="cleanup-results-empty" style="color: var(--error-color);">Execute failed: ${escapeHtml(error.message)}</div>`;
