@@ -491,6 +491,8 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
         release_url = None
         if anchor is not None:
             title = self._normalize_space(anchor.get_text(" ", strip=True))
+            if title and title.strip().lower() == "image":
+                title = None
             href = str(anchor.get("href", ""))
             if href:
                 release_url = href if href.startswith("/") else f"/{href.lstrip('/')}"
@@ -613,6 +615,8 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
 
         for extra in stripped_strings[1:]:
             if not extra or extra == title:
+                continue
+            if extra.strip().lower() == "image":
                 continue
             if extra.startswith("(") and extra.endswith(")"):
                 continue

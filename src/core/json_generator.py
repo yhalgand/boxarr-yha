@@ -21,6 +21,7 @@ from .movie_identity import resolve_movie_identity
 from .boxoffice_storage import market_weekly_page_path, market_weekly_pages_dir
 from .matcher import MatchResult
 from .models import MovieStatus
+from .market_policy import build_policy_snapshot, get_market_policy
 from .radarr import RadarrService
 
 logger = get_logger(__name__)

@@ -50,6 +50,12 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     config_path = _seed_config(tmp_path)
     monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
     Settings.reload_from_file(config_path)
+    settings.markets["fr"] = MarketConfig(
+        label="France Box Office",
+        provider="jpboxoffice",
+        provider_config={"country": "fr"},
+        enabled=True,
+    )
     assert isinstance(settings.markets["fr"], MarketConfig)
 
     app = create_app()
@@ -82,9 +88,9 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert created["definition"]["provider_config"] == {"country": "de"}
     assert created["definition"]["aliases"] == ["jpboxoffice_de"]
     assert created["enabled"] is True
-    assert created["definition"]["box_office_fetch_limit"] == 10
-    assert created["definition"]["maximum_movies_to_add"] == 3
-    assert created["definition"]["tags"] == ["boxarr", "boxarr-de"]
+    assert created["effective"]["box_office_fetch_limit"] == 10
+    assert created["effective"]["maximum_movies_to_add"] == 3
+    assert created["effective"]["tags"] == ["boxarr", "boxarr-de"]
     assert created["effective"]["root_folder"] == "/movies/de"
     assert created["effective"]["quality_profile_default"] == "HD-1080p"
     assert created["effective"]["language_filter_enabled"] is True
@@ -99,11 +105,16 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert markets_body["markets"]["de"]["definition"]["provider_config"] == {
         "country": "de"
     }
-    assert markets_body["markets"]["de"]["overrides"]["maximum_movies_to_add"] == 3
-    assert markets_body["markets"]["de"]["overrides"]["box_office_fetch_limit"] == 10
-    assert markets_body["markets"]["de"]["overrides"]["tags"] == ["boxarr", "boxarr-de"]
-    assert markets_body["markets"]["de"]["overrides"]["root_folder"] == "/movies/de"
-    assert markets_body["markets"]["de"]["overrides"]["language_filter_enabled"] is True
+    assert markets_body["markets"]["de"]["effective"]["maximum_movies_to_add"] == 3
+    assert markets_body["markets"]["de"]["sources"]["maximum_movies_to_add"] == "market"
+    assert markets_body["markets"]["de"]["effective"]["box_office_fetch_limit"] == 10
+    assert markets_body["markets"]["de"]["sources"]["box_office_fetch_limit"] == "market"
+    assert markets_body["markets"]["de"]["effective"]["tags"] == ["boxarr", "boxarr-de"]
+    assert markets_body["markets"]["de"]["sources"]["tags"] == "market"
+    assert markets_body["markets"]["de"]["effective"]["root_folder"] == "/movies/de"
+    assert markets_body["markets"]["de"]["sources"]["root_folder"] == "market"
+    assert markets_body["markets"]["de"]["effective"]["language_filter_enabled"] is True
+    assert markets_body["markets"]["de"]["sources"]["language_filter_enabled"] == "market"
 
     update_resp = client.put(
         "/api/config/markets/de",
@@ -131,8 +142,6 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert updated["effective"]["maximum_movies_to_add"] == 4
     assert updated["effective"]["auto_add_enabled"] is True
     assert updated["effective"]["tags"] == ["boxarr", "boxarr-de"]
-    assert updated["effective"]["box_office_fetch_limit"] == 7
-    assert updated["effective"]["maximum_movies_to_add"] == 4
     assert updated["effective"]["root_folder"] == "/movies/de"
     assert updated["effective"]["quality_profile_default"] == "HD-1080p"
     assert updated["effective"]["quality_profile_upgrade"] == "UHD-4K"
@@ -147,9 +156,9 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert disable_resp.status_code == 200
     disabled = disable_resp.json()
     assert disabled["enabled"] is False
-    assert disabled["definition"]["maximum_movies_to_add"] == 4
-    assert disabled["definition"]["box_office_fetch_limit"] == 7
-    assert disabled["definition"]["tags"] == ["boxarr", "boxarr-de"]
+    assert disabled["effective"]["maximum_movies_to_add"] == 4
+    assert disabled["effective"]["box_office_fetch_limit"] == 7
+    assert disabled["effective"]["tags"] == ["boxarr", "boxarr-de"]
     assert disabled["effective"]["root_folder"] == "/movies/de"
 
     markets_after_disable = client.get("/api/config/markets").json()
@@ -173,9 +182,9 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert enable_resp.status_code == 200
     enabled = enable_resp.json()
     assert enabled["enabled"] is True
-    assert enabled["definition"]["maximum_movies_to_add"] == 4
-    assert enabled["definition"]["box_office_fetch_limit"] == 7
-    assert enabled["definition"]["tags"] == ["boxarr", "boxarr-de"]
+    assert enabled["effective"]["maximum_movies_to_add"] == 4
+    assert enabled["effective"]["box_office_fetch_limit"] == 7
+    assert enabled["effective"]["tags"] == ["boxarr", "boxarr-de"]
     assert enabled["effective"]["root_folder"] == "/movies/de"
 
     markets_after_enable = client.get("/api/config/markets").json()
@@ -184,15 +193,17 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert markets_after_enable["markets"]["de"]["effective"]["box_office_fetch_limit"] == 7
     assert markets_after_enable["markets"]["de"]["sources"]["box_office_fetch_limit"] == "market"
 
-    current_enabled = client.get("/api/boxoffice/current?market=de")
-    assert current_enabled.status_code == 501
-    assert "not implemented yet" in current_enabled.json()["detail"].lower()
-
 
 def test_default_market_override_save_persists_for_us_and_fr(tmp_path, monkeypatch):
     config_path = _seed_config(tmp_path)
     monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
     Settings.reload_from_file(config_path)
+    settings.markets["fr"] = MarketConfig(
+        label="France Box Office",
+        provider="jpboxoffice",
+        provider_config={"country": "fr"},
+        enabled=True,
+    )
     assert isinstance(settings.markets["fr"], MarketConfig)
 
     app = create_app()
@@ -211,9 +222,6 @@ def test_default_market_override_save_persists_for_us_and_fr(tmp_path, monkeypat
     assert fr_resp.status_code == 200
     fr_data = fr_resp.json()
     assert fr_data["market"] == "fr"
-    assert fr_data["definition"]["maximum_movies_to_add"] == 3
-    assert fr_data["definition"]["box_office_fetch_limit"] == 10
-    assert fr_data["definition"]["tags"] == ["boxarr", "boxarr-fr"]
     assert fr_data["effective"]["maximum_movies_to_add"] == 3
     assert fr_data["effective"]["box_office_fetch_limit"] == 10
     assert fr_data["effective"]["tags"] == ["boxarr", "boxarr-fr"]
@@ -231,9 +239,9 @@ def test_default_market_override_save_persists_for_us_and_fr(tmp_path, monkeypat
     assert us_resp.status_code == 200
     us_data = us_resp.json()
     assert us_data["market"] == "us"
-    assert us_data["definition"]["maximum_movies_to_add"] == 4
-    assert us_data["definition"]["box_office_fetch_limit"] == 12
-    assert us_data["definition"]["tags"] == ["boxarr", "boxarr-us"]
+    assert us_data["effective"]["maximum_movies_to_add"] == 4
+    assert us_data["effective"]["box_office_fetch_limit"] == 12
+    assert us_data["effective"]["tags"] == ["boxarr", "boxarr-us"]
 
     saved_yaml = yaml.safe_load(config_path.read_text())
     assert saved_yaml["markets"]["fr"]["maximum_movies_to_add"] == 3
@@ -281,12 +289,10 @@ def test_update_existing_marketconfig_object_does_not_crash(tmp_path, monkeypatc
     assert resp.status_code == 200
     data = resp.json()
     assert data["market"] == "fr"
-    assert data["definition"]["maximum_movies_to_add"] == 3
-    assert data["definition"]["box_office_fetch_limit"] == 12
-    assert data["definition"]["auto_add_enabled"] is False
-    assert data["definition"]["tags"] == ["boxarr", "boxarr-fr"]
     assert data["effective"]["maximum_movies_to_add"] == 3
     assert data["effective"]["box_office_fetch_limit"] == 12
+    assert data["effective"]["auto_add_enabled"] is False
+    assert data["effective"]["tags"] == ["boxarr", "boxarr-fr"]
 
     saved_yaml = yaml.safe_load(config_path.read_text())
     assert saved_yaml["markets"]["fr"]["maximum_movies_to_add"] == 3

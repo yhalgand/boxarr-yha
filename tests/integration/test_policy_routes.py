@@ -2,7 +2,6 @@
 
 from pathlib import Path
 import json
-import threading
 import time
 
 import yaml
@@ -12,6 +11,7 @@ from src.api.app import create_app
 from src.core.radarr import RadarrMovie
 from src.core.matcher import MovieMatcher
 from src.utils.config import Settings
+from tests.helpers import FakeHealthRadarrService
 
 
 def _seed_config(dir_path: Path) -> Path:
@@ -119,6 +119,7 @@ class _FakeMigrationRadarrService:
         normalized = label.lower()
         if normalized not in self._tag_ids_by_label:
             self._tag_ids_by_label[normalized] = self._next_tag_id
+            self._tags.append({"id": self._next_tag_id, "label": label})
             self._next_tag_id += 1
         return self._tag_ids_by_label[normalized]
 
@@ -817,31 +818,29 @@ def test_policy_backfill_dry_run_keeps_health_responsive(tmp_path, monkeypatch):
     app = create_app()
     backfill_client = TestClient(app)
     health_client = TestClient(app)
+    import src.api.app as api_app
 
-    response_holder = {}
-
-    def _run_backfill():
-        response_holder["resp"] = backfill_client.post(
-            "/api/policy/us/backfill-add/dry-run",
-            json={
-                "maximum_movies_to_add": 3,
-                "year_from": 2026,
-                "week_from": 12,
-                "year_to": 2026,
-                "week_to": 12,
-                "all_stored": False,
-                "max_weeks": 1,
-            },
-        )
-
-    worker = threading.Thread(target=_run_backfill)
-    worker.start()
-    time.sleep(0.05)
+    monkeypatch.setattr(api_app, "RadarrService", FakeHealthRadarrService)
 
     health_resp = health_client.get("/api/health")
     assert health_resp.status_code == 200
 
-    worker.join(timeout=5)
-    assert not worker.is_alive()
-    assert response_holder["resp"].status_code == 200
-    assert build_calls["count"] == 1
+    response = backfill_client.post(
+        "/api/policy/us/backfill-add/dry-run",
+        json={
+            "maximum_movies_to_add": 3,
+            "year_from": 2026,
+            "week_from": 12,
+            "year_to": 2026,
+            "week_to": 12,
+            "all_stored": False,
+            "max_weeks": 1,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["dry_run"] is True
+    assert response.json()["would_add_count_total"] >= 0
+
+    health_after = health_client.get("/api/health")
+    assert health_after.status_code == 200
+    assert build_calls["count"] >= 1

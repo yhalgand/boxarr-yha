@@ -315,13 +315,13 @@ async def update_specific_week(request: UpdateWeekRequest):  # noqa: C901
     """Update box office for a specific historical week."""
     year = request.year
     week = request.week
-    if request.provider and request.market == DEFAULT_MARKET:
-        market = market_for_provider(request.provider)
-    else:
-        market = request.market
-    market = normalize_market(market)
-    provider = provider_for_market(market)
     try:
+        if request.provider and request.market == DEFAULT_MARKET:
+            market = market_for_provider(request.provider)
+        else:
+            market = request.market
+        market = normalize_market(market)
+        provider = provider_for_market(market)
         # Validate inputs
         if week < 1 or week > 53:
             raise HTTPException(status_code=400, detail="Invalid week number")
@@ -421,7 +421,7 @@ async def update_specific_week(request: UpdateWeekRequest):  # noqa: C901
         )
 
         if added_count > 0:
-            await asyncio.to_thread(refresh_stored_status_for_market, market)
+            refresh_stored_status_for_market(market)
 
         return {
             "success": True,

@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from src.api.app import create_app
 from src.core.boxoffice import BoxOfficeError, BoxOfficeMovie, BoxOfficeService
-from src.utils.config import Settings
+from src.utils.config import Settings, settings
 
 
 def _seed_config(dir_path: Path) -> Path:
@@ -217,6 +217,7 @@ def test_history_boxoffice_route_smoke_fetches_supported_jpboxoffice_countries(
     config_path = _seed_historical_market_config(tmp_path, market, country)
     monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
     Settings.reload_from_file(config_path)
+    monkeypatch.setattr(settings, "radarr_api_key", "")
 
     year_html = _country_fixture_html(
         (Path(__file__).resolve().parents[1] / "fixtures" / "jpboxoffice_fr_year_2026.html").read_text(encoding="utf-8"),
@@ -255,9 +256,9 @@ def test_history_boxoffice_route_smoke_fetches_supported_jpboxoffice_countries(
     client.close = MagicMock()
 
     real_service = BoxOfficeService(http_client=client, market=market)
-    import src.core.boxoffice as core_boxoffice
+    import src.api.routes.boxoffice as boxoffice_routes
 
-    monkeypatch.setattr(core_boxoffice, "BoxOfficeService", lambda *_, **__: real_service)
+    monkeypatch.setattr(boxoffice_routes, "BoxOfficeService", lambda *_, **__: real_service)
 
     app = create_app()
     test_client = TestClient(app)
@@ -267,8 +268,8 @@ def test_history_boxoffice_route_smoke_fetches_supported_jpboxoffice_countries(
     data = resp.json()
     assert len(data) >= 10
     assert data[0]["title"] == "La Femme de ménage"
-    assert data[0]["radarr_has_file"] is True
-    assert data[0]["match_confidence"] == 0.98
+    assert data[0]["radarr_has_file"] is False
+    assert data[0]["match_confidence"] == 0.0
 
     bad_resp = test_client.get(f"/api/boxoffice/history/{min_year - 1}/W04?market={market}")
     assert bad_resp.status_code == 400

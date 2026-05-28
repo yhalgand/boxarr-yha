@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import anyio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -396,7 +396,7 @@ async def _backfill_add(
     *,
     execute: bool,
 ):
-    return await asyncio.to_thread(_backfill_add_sync, market, payload, execute)
+    return _backfill_add_sync(market, payload, execute)
 
 
 def _backfill_add_sync(
@@ -573,7 +573,7 @@ async def _cleanup(market: str, payload: CleanupRequest, *, execute: bool):
             or result.get("would_delete")
             or result.get("would_detach_market_tag_only")
         ):
-            result["status_refresh"] = await asyncio.to_thread(
+            result["status_refresh"] = await anyio.to_thread.run_sync(
                 refresh_stored_status_for_market,
                 market_key,
             )
@@ -828,10 +828,7 @@ async def _migrate_tags(payload: TagMigrationRequest, *, execute: bool):
             "already_migrated_count": len(already_migrated),
         }
         if execute and result["migrated"] > 0:
-            result["status_refresh"] = await asyncio.to_thread(
-                refresh_stored_status_for_market,
-                market,
-            )
+            result["status_refresh"] = refresh_stored_status_for_market(market)
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

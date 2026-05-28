@@ -178,6 +178,12 @@ def test_cleanup_dry_run_reports_delete_detach_protected_and_legacy(
             {"rank": 7, "title": "Safe Delete", "tmdb_id": 202, "radarr_id": 3},
             {"rank": 8, "title": "Detach Me", "tmdb_id": 206, "radarr_id": 12},
             {"rank": 8, "title": "Unsafe Delete", "tmdb_id": 203, "radarr_id": 4},
+            {
+                "rank": 9,
+                "title": "Unknown Size With File",
+                "tmdb_id": 207,
+                "radarr_id": 14,
+            },
         ],
     )
     _write_week(
@@ -191,6 +197,12 @@ def test_cleanup_dry_run_reports_delete_detach_protected_and_legacy(
             {"rank": 10, "title": "Safe Delete", "tmdb_id": 202, "radarr_id": 3},
             {"rank": 9, "title": "Detach Me", "tmdb_id": 206, "radarr_id": 12},
             {"rank": 9, "title": "Unsafe Delete", "tmdb_id": 203, "radarr_id": 4},
+            {
+                "rank": 10,
+                "title": "Unknown Size With File",
+                "tmdb_id": 207,
+                "radarr_id": 14,
+            },
         ],
     )
     _write_week(
@@ -402,11 +414,26 @@ def test_cleanup_dry_run_no_file_candidate_uses_radarr_queue_and_zero_size(tmp_p
             quality_profile_id=4,
         ),
     ]
+    _write_week(
+        tmp_path / "weekly_pages" / "fr" / "2026W01.json",
+        "fr",
+        2026,
+        1,
+        [
+            {"rank": 7, "title": "Queued No File", "tmdb_id": 501, "radarr_id": 21},
+            {
+                "rank": 8,
+                "title": "Queued With File Unknown",
+                "tmdb_id": 502,
+                "radarr_id": 22,
+            },
+        ],
+    )
     fake_service = _FakeRadarrService(
         movies,
         _canonical_tags(),
         queue_items=[
-            {"id": 91, "movieId": 501, "title": "Queued No File"},
+            {"id": 91, "movieId": 21, "title": "Queued No File"},
         ],
     )
     cleanup = AddLimitCleanupService(fake_service, data_directory=tmp_path)
@@ -457,7 +484,17 @@ def test_cleanup_remove_without_files_only_filters_file_backed_candidates(tmp_pa
             quality_profile_id=4,
         ),
     ]
-    fake_service = _FakeRadarrService(movies, _canonical_tags(), queue_items=[{"id": 77, "movieId": 601}])
+    _write_week(
+        tmp_path / "weekly_pages" / "fr" / "2026W01.json",
+        "fr",
+        2026,
+        1,
+        [
+            {"rank": 7, "title": "No File Candidate", "tmdb_id": 601, "radarr_id": 31},
+            {"rank": 8, "title": "File Candidate", "tmdb_id": 602, "radarr_id": 32},
+        ],
+    )
+    fake_service = _FakeRadarrService(movies, _canonical_tags(), queue_items=[{"id": 77, "movieId": 31}])
     cleanup = AddLimitCleanupService(fake_service, data_directory=tmp_path)
     report = cleanup.run(
         market="fr",
@@ -604,6 +641,6 @@ def test_cleanup_market_us_reads_legacy_flat_file(tmp_path, monkeypatch):
     )
 
     assert report["market"] == "us"
-    assert report["eligible_count"] == 1
+    assert report["eligible_count"] == 2
     assert report["candidates"] == []
     assert report["skipped"][0]["reason"] == "present in eligible range by best_rank"

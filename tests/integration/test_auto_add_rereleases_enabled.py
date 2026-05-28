@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from src.api.app import create_app
 from src.core.boxoffice import BoxOfficeMovie
 from src.utils.config import Settings
+from tests.helpers import FakeWeeklyDataGenerator
 
 
 def _seed_config(dir_path: Path) -> Path:
@@ -126,10 +127,14 @@ def test_ignore_rereleases_enabled_skips_old_years(tmp_path, monkeypatch):
     Settings.reload_from_file(config_path)
 
     import src.core.boxoffice as core_boxoffice
+    import src.core.json_generator as core_json_generator
     import src.core.radarr as core_radarr
 
     monkeypatch.setattr(core_radarr, "RadarrService", _FakeRadarrService)
     monkeypatch.setattr(core_boxoffice, "BoxOfficeService", _FakeBoxOfficeService)
+    monkeypatch.setattr(
+        core_json_generator, "WeeklyDataGenerator", FakeWeeklyDataGenerator
+    )
 
     app = create_app()
     client = TestClient(app)

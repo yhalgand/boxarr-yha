@@ -95,6 +95,7 @@ class MovieMatcher:
         self.min_confidence = min_confidence
         self._movie_cache: Dict[str, RadarrMovie] = {}
         self._imdb_index: Dict[str, RadarrMovie] = {}
+        self._index_built = False
 
     def build_movie_index(self, movies: List[RadarrMovie]) -> None:
         """
@@ -146,6 +147,7 @@ class MovieMatcher:
                         self._movie_cache[key] = movie
 
         logger.info(f"Built movie index with {len(movies)} movies")
+        self._index_built = True
 
     def normalize_title(self, title: str) -> str:
         """
@@ -299,7 +301,7 @@ class MovieMatcher:
         box_office_movie = BoxOfficeMovie(rank=0, title=box_office_title)
 
         # Build index if needed
-        if not self._movie_cache:
+        if not self._index_built:
             self.build_movie_index(radarr_movies)
 
         # Try exact match
@@ -581,7 +583,7 @@ class MovieMatcher:
             MatchResult object
         """
         # Build index if needed
-        if not self._movie_cache:
+        if not self._index_built:
             self.build_movie_index(radarr_movies)
 
         # Try IMDb match first (language-agnostic)

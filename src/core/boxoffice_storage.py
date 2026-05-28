@@ -19,14 +19,17 @@ def week_key(year: int, week: int) -> str:
 
 
 def weekly_pages_root(base_dir: Path) -> Path:
+    base_dir = Path(base_dir)
     return base_dir / "weekly_pages"
 
 
 def history_root(base_dir: Path) -> Path:
+    base_dir = Path(base_dir)
     return base_dir / "history"
 
 
 def market_weekly_pages_dir(base_dir: Path, market: str, create: bool = False) -> Path:
+    base_dir = Path(base_dir)
     market = normalize_market(market)
     path = weekly_pages_root(base_dir) / market
     if create:
@@ -35,6 +38,7 @@ def market_weekly_pages_dir(base_dir: Path, market: str, create: bool = False) -
 
 
 def market_history_dir(base_dir: Path, market: str, create: bool = False) -> Path:
+    base_dir = Path(base_dir)
     market = normalize_market(market)
     path = history_root(base_dir) / market
     if create:
@@ -43,16 +47,19 @@ def market_history_dir(base_dir: Path, market: str, create: bool = False) -> Pat
 
 
 def legacy_weekly_page_path(base_dir: Path, year: int, week: int) -> Path:
+    base_dir = Path(base_dir)
     return weekly_pages_root(base_dir) / f"{week_key(year, week)}.json"
 
 
 def legacy_history_latest_path(base_dir: Path, year: int, week: int) -> Path:
+    base_dir = Path(base_dir)
     return history_root(base_dir) / f"{week_key(year, week)}_latest.json"
 
 
 def market_weekly_page_path(
     base_dir: Path, market: str, year: int, week: int, create_dir: bool = True
 ) -> Path:
+    base_dir = Path(base_dir)
     return market_weekly_pages_dir(base_dir, market, create=create_dir) / f"{week_key(year, week)}.json"
 
 
@@ -64,6 +71,7 @@ def market_history_file_path(
     suffix: str,
     create_dir: bool = True,
 ) -> Path:
+    base_dir = Path(base_dir)
     directory = market_history_dir(base_dir, market, create=create_dir)
     return directory / f"{week_key(year, week)}_{suffix}.json"
 
@@ -71,12 +79,14 @@ def market_history_file_path(
 def market_history_latest_file_path(
     base_dir: Path, market: str, year: int, week: int, create_dir: bool = True
 ) -> Path:
+    base_dir = Path(base_dir)
     return market_history_file_path(
         base_dir, market, year, week, "latest", create_dir=create_dir
     )
 
 
 def resolve_weekly_page_path(base_dir: Path, market: str, year: int, week: int) -> Path:
+    base_dir = Path(base_dir)
     market = normalize_market(market)
     preferred = market_weekly_page_path(base_dir, market, year, week, create_dir=False)
     if preferred.exists():
@@ -91,6 +101,7 @@ def resolve_weekly_page_path(base_dir: Path, market: str, year: int, week: int) 
 
 
 def resolve_history_latest_path(base_dir: Path, market: str, year: int, week: int) -> Path:
+    base_dir = Path(base_dir)
     market = normalize_market(market)
     preferred = market_history_latest_file_path(
         base_dir, market, year, week, create_dir=False
@@ -108,6 +119,7 @@ def resolve_history_latest_path(base_dir: Path, market: str, year: int, week: in
 
 def iter_weekly_page_paths(base_dir: Path, market: str) -> List[Path]:
     """Return market-aware weekly metadata paths, including legacy fallback for US."""
+    base_dir = Path(base_dir)
     market = normalize_market(market)
     paths: List[Path] = []
     seen: Set[str] = set()
@@ -135,6 +147,7 @@ def iter_weekly_page_paths(base_dir: Path, market: str) -> List[Path]:
 
 def iter_history_paths(base_dir: Path, market: str) -> List[Path]:
     """Return market-aware history paths, including legacy fallback for US."""
+    base_dir = Path(base_dir)
     market = normalize_market(market)
     paths: List[Path] = []
     seen: Set[str] = set()

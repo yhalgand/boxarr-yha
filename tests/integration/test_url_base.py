@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from src.api.app import create_app
 from src.utils.config import Settings
+from tests.helpers import FakeHealthRadarrService
 
 
 def test_empty_url_base(monkeypatch):
@@ -54,6 +55,7 @@ def test_url_base_boxarr(monkeypatch):
     client = TestClient(app)
 
     # Test health endpoint with base path
+    monkeypatch.setattr("src.api.app.RadarrService", FakeHealthRadarrService)
     response = client.get("/boxarr/api/health")
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
@@ -95,6 +97,7 @@ def test_url_base_nested_path(monkeypatch):
     client = TestClient(app)
 
     # Test health endpoint with nested base path
+    monkeypatch.setattr("src.api.app.RadarrService", FakeHealthRadarrService)
     response = client.get("/apps/boxarr/api/health")
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
@@ -102,7 +105,7 @@ def test_url_base_nested_path(monkeypatch):
     # Test redirect with nested base path (configured, goes to overview)
     response = client.get("/apps/boxarr/", follow_redirects=False)
     assert response.status_code == 307
-    assert response.headers["location"] == "/apps/boxarr/overview"
+    assert response.headers["location"] == "/apps/boxarr/overview?market=us"
 
 
 def test_url_base_normalization(monkeypatch):

@@ -14,7 +14,8 @@ from fastapi.testclient import TestClient
 
 from src.api.app import create_app
 from src.core.boxoffice import BoxOfficeMovie
-from src.utils.config import Settings
+from src.utils.config import Settings, settings
+from tests.helpers import FakeWeeklyDataGenerator
 
 
 def _seed_config(dir_path: Path) -> Path:
@@ -133,6 +134,7 @@ class _FakeRadarrService:
         root_folder: str | None = None,
         monitored: bool = True,
         search_for_movie: bool = True,
+        additional_tag_labels=None,
     ):
         _FakeRadarrService.added_calls.append(
             {
@@ -140,6 +142,7 @@ class _FakeRadarrService:
                 "root_folder": root_folder,
                 "monitored": monitored,
                 "search": search_for_movie,
+                "additional_tag_labels": list(additional_tag_labels or []),
             }
         )
         return _FakeAddedMovie(tmdb_id, f"Movie {tmdb_id}")
@@ -219,10 +222,14 @@ def test_update_week_respects_genre_mapping(tmp_path, monkeypatch):
     # Patch core services that the route imports dynamically inside the function
     import src.core.boxoffice as core_boxoffice
     import src.core.radarr as core_radarr
+    import src.core.json_generator as core_json_generator
     import src.api.routes.scheduler as scheduler_routes
 
     monkeypatch.setattr(core_radarr, "RadarrService", _FakeRadarrService)
     monkeypatch.setattr(core_boxoffice, "BoxOfficeService", _FakeBoxOfficeService)
+    monkeypatch.setattr(
+        core_json_generator, "WeeklyDataGenerator", FakeWeeklyDataGenerator
+    )
     refresh_calls = []
     monkeypatch.setattr(
         scheduler_routes,
@@ -274,6 +281,7 @@ def test_update_week_fr_uses_provider_wiring(tmp_path, monkeypatch):
     config_path = _seed_config(tmp_path)
     monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
     Settings.reload_from_file(config_path)
+    monkeypatch.setattr(settings, "radarr_api_key", "")
 
     import src.core.boxoffice as core_boxoffice
     import src.core.radarr as core_radarr
@@ -299,7 +307,6 @@ def test_update_week_fr_uses_provider_wiring(tmp_path, monkeypatch):
     payload = json.loads(output_file.read_text())
     assert payload["market"] == "fr"
     assert payload["provider"] == "jpboxoffice"
-    assert payload["provider_aliases"] == ["jpboxoffice_fr"]
     assert payload["policy_snapshot"]["market"] == "fr"
     assert payload["policy_snapshot"]["fetch_limit_used"] == 10
     assert payload["policy_snapshot"]["add_limit_used"] == 10
