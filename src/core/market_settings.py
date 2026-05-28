@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from ..utils.config import MarketConfig, Settings
 from ..utils.logger import get_logger
@@ -52,6 +52,8 @@ _EFFECTIVE_FIELD_MAP: Dict[str, str] = {
     "scheduler_cron": "boxarr_scheduler_cron",
 }
 
+_LEGACY_ACTIVE_TAGS = {"boxarr", "boxarr-keep"}
+
 
 def _normalize_key(value: Optional[str]) -> str:
     return str(value or "").strip().lower()
@@ -71,6 +73,51 @@ def market_config_to_dict(market_config: Any) -> Dict[str, Any]:
         return dict(market_config)
     except Exception:
         return {}
+
+
+def _normalize_tag_list(values: Optional[Iterable[Any]]) -> List[str]:
+    tags: List[str] = []
+    for value in values or []:
+        label = str(value).strip()
+        if label:
+            tags.append(label)
+    return tags
+
+
+def canonical_active_tags(
+    market_key: str,
+    *,
+    auto_tag_text: Optional[str] = None,
+    extra_tags: Optional[Iterable[Any]] = None,
+    include_market_tag: bool = True,
+) -> List[str]:
+    """Return canonical active tags for a market, filtering legacy tags."""
+
+    market_key = _normalize_key(market_key)
+    base_tags = ["boxarr-added"]
+    if include_market_tag:
+        base_tags.append(f"boxarr-market-{market_key}")
+    active_tags: List[str] = list(base_tags)
+    seen = {tag.lower() for tag in active_tags}
+
+    candidates: List[str] = []
+    if auto_tag_text is not None:
+        candidates.append(str(auto_tag_text))
+    candidates.extend(_normalize_tag_list(extra_tags))
+
+    for candidate in candidates:
+        normalized = str(candidate).strip()
+        if not normalized:
+            continue
+        normalized_lower = normalized.lower()
+        if normalized_lower in _LEGACY_ACTIVE_TAGS:
+            continue
+        if normalized_lower in seen:
+            continue
+        seen.add(normalized_lower)
+        active_tags.append(normalized)
+
+    return active_tags
 
 
 def _canonicalize_provider_fields(
@@ -262,16 +309,19 @@ def get_effective_market_settings(settings_obj: Settings, market: str) -> Dict[s
         effective[field_name] = resolved["value"]
         sources[field_name] = resolved["source"]
 
-    auto_tag_text = effective.get("auto_tag_text") or "boxarr"
+    auto_tag_text = effective.get("auto_tag_text") or "boxarr-added"
     tags = overrides.get("tags")
     if tags is not None:
-        effective["tags"] = list(tags)
+        effective["tags"] = canonical_active_tags(
+            definition["market"],
+            auto_tag_text=auto_tag_text,
+            extra_tags=tags,
+        )
         sources["tags"] = "market"
     else:
-        derived_tags: List[str] = ["boxarr"]
-        if auto_tag_text and auto_tag_text not in derived_tags:
-            derived_tags.append(str(auto_tag_text))
-        effective["tags"] = derived_tags
+        effective["tags"] = canonical_active_tags(
+            definition["market"], auto_tag_text=auto_tag_text
+        )
         sources["tags"] = sources.get("auto_tag_text", "global")
 
     cleanup_tag = overrides.get("cleanup_protect_tag")
@@ -298,6 +348,14 @@ def get_effective_market_settings(settings_obj: Settings, market: str) -> Dict[s
         },
         "effective": effective,
         "sources": sources,
+        "tag_policy": {
+            "legacy_tags": ["boxarr", "boxarr-keep"],
+            "added_tag": "boxarr-added",
+            "market_tag": f"boxarr-market-{definition['market']}",
+            "existing_tag": f"boxarr-existing-{definition['market']}",
+            "protected_tag": effective["cleanup_protect_tag"],
+            "auto_tag_text": effective.get("auto_tag_text") or "boxarr-added",
+        },
     }
 
 

@@ -43,7 +43,7 @@ def _build_tag_policy(market: str, effective: Dict[str, Any]) -> Dict[str, Any]:
         "market_tag": f"boxarr-market-{market_key}",
         "existing_tag": f"boxarr-existing-{market_key}",
         "protected_tag": str(effective.get("cleanup_protect_tag") or "boxarr-protected"),
-        "auto_tag_text": str(effective.get("auto_tag_text") or "boxarr"),
+        "auto_tag_text": str(effective.get("auto_tag_text") or "boxarr-added"),
     }
 
 

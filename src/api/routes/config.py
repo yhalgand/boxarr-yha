@@ -18,6 +18,7 @@ from ...core.market_admin import (
     save_yaml_config,
 )
 from ...core.market_settings import (
+    canonical_active_tags,
     get_configured_markets,
     get_effective_market_settings,
     market_config_to_dict,
@@ -86,7 +87,7 @@ class SaveConfigRequest(BaseModel):
     boxarr_features_auto_add_language_blacklist: List[str] = Field(default_factory=list)
     # Auto-tagging settings
     boxarr_features_auto_tag_enabled: bool = True
-    boxarr_features_auto_tag_text: str = "boxarr"
+    boxarr_features_auto_tag_text: str = "boxarr-added"
     # UI theme setting
     boxarr_ui_theme: str = "light"
 
@@ -220,7 +221,11 @@ async def get_market_configuration():
             "maximum_movies_to_add": current_settings.boxarr_features_auto_add_limit,
             "auto_add_enabled": current_settings.boxarr_features_auto_add,
             "auto_tag_text": current_settings.boxarr_features_auto_tag_text,
-            "tags": ["boxarr", current_settings.boxarr_features_auto_tag_text],
+            "tags": canonical_active_tags(
+                "global",
+                auto_tag_text=current_settings.boxarr_features_auto_tag_text,
+                include_market_tag=False,
+            ),
             "root_folder": str(current_settings.radarr_root_folder),
             "quality_profile_default": current_settings.radarr_quality_profile_default,
             "quality_profile_upgrade": current_settings.radarr_quality_profile_upgrade,

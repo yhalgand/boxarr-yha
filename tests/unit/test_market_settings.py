@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from src.core.market_settings import (
+    canonical_active_tags,
     get_configured_markets,
     get_effective_market_settings,
     get_market_definition,
@@ -34,9 +35,20 @@ def test_default_markets_fallback_to_us_and_fr():
     assert effective_us["effective"]["box_office_fetch_limit"] == settings.boxarr_features_box_office_limit
     assert effective_us["sources"]["box_office_fetch_limit"] == "global"
     assert effective_us["effective"]["cleanup_protect_tag"] == "boxarr-protected"
+    assert effective_us["effective"]["tags"] == ["boxarr-added", "boxarr-market-us"]
     assert effective_us["capabilities"]["historical"]["supports_historical_update"] is True
     assert effective_us["capabilities"]["historical"]["min_year"] == 1982
     assert effective_us["capabilities"]["historical"]["max_year"] >= 2026
+
+
+def test_canonical_active_tags_filters_legacy_boxarr_inputs():
+    tags = canonical_active_tags(
+        "us",
+        auto_tag_text="boxarr",
+        extra_tags=["boxarr", "boxarr-added", "boxarr-market-us", "boxarr-us"],
+    )
+
+    assert tags == ["boxarr-added", "boxarr-market-us", "boxarr-us"]
 
 
 def test_supported_jpboxoffice_countries_expose_capabilities():
@@ -82,8 +94,16 @@ def test_market_overrides_take_precedence_and_sources_reflect_market():
     assert fr_effective["effective"]["maximum_movies_to_add"] == 7
     assert us_effective["sources"]["maximum_movies_to_add"] == "market"
     assert fr_effective["sources"]["maximum_movies_to_add"] == "market"
-    assert us_effective["effective"]["tags"] == ["boxarr", "boxarr-us"]
-    assert fr_effective["effective"]["tags"] == ["boxarr", "boxarr-fr"]
+    assert us_effective["effective"]["tags"] == [
+        "boxarr-added",
+        "boxarr-market-us",
+        "boxarr-us",
+    ]
+    assert fr_effective["effective"]["tags"] == [
+        "boxarr-added",
+        "boxarr-market-fr",
+        "boxarr-fr",
+    ]
     assert us_effective["effective"]["cleanup_protect_tag"] == "boxarr-protected"
 
 

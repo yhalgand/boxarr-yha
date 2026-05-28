@@ -71,8 +71,8 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
             "enabled": True,
             "box_office_fetch_limit": 10,
             "maximum_movies_to_add": 3,
-            "auto_tag_text": "boxarr-de",
-            "tags": ["boxarr", "boxarr-de"],
+            "auto_tag_text": "boxarr-added",
+            "tags": ["boxarr-added", "boxarr-market-de", "boxarr-de"],
             "cleanup_protect_tag": "boxarr-protected",
             "root_folder": "/movies/de",
             "quality_profile_default": "HD-1080p",
@@ -90,7 +90,11 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert created["enabled"] is True
     assert created["effective"]["box_office_fetch_limit"] == 10
     assert created["effective"]["maximum_movies_to_add"] == 3
-    assert created["effective"]["tags"] == ["boxarr", "boxarr-de"]
+    assert created["effective"]["tags"] == [
+        "boxarr-added",
+        "boxarr-market-de",
+        "boxarr-de",
+    ]
     assert created["effective"]["root_folder"] == "/movies/de"
     assert created["effective"]["quality_profile_default"] == "HD-1080p"
     assert created["effective"]["language_filter_enabled"] is True
@@ -109,7 +113,11 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert markets_body["markets"]["de"]["sources"]["maximum_movies_to_add"] == "market"
     assert markets_body["markets"]["de"]["effective"]["box_office_fetch_limit"] == 10
     assert markets_body["markets"]["de"]["sources"]["box_office_fetch_limit"] == "market"
-    assert markets_body["markets"]["de"]["effective"]["tags"] == ["boxarr", "boxarr-de"]
+    assert markets_body["markets"]["de"]["effective"]["tags"] == [
+        "boxarr-added",
+        "boxarr-market-de",
+        "boxarr-de",
+    ]
     assert markets_body["markets"]["de"]["sources"]["tags"] == "market"
     assert markets_body["markets"]["de"]["effective"]["root_folder"] == "/movies/de"
     assert markets_body["markets"]["de"]["sources"]["root_folder"] == "market"
@@ -124,8 +132,8 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
             "box_office_fetch_limit": 7,
             "maximum_movies_to_add": 4,
             "auto_add_enabled": True,
-            "auto_tag_text": "boxarr-de",
-            "tags": ["boxarr", "boxarr-de"],
+            "auto_tag_text": "boxarr-added",
+            "tags": ["boxarr-added", "boxarr-market-de", "boxarr-de"],
             "cleanup_protect_tag": "boxarr-protected",
             "root_folder": "/movies/de",
             "quality_profile_default": "HD-1080p",
@@ -141,7 +149,11 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert updated["effective"]["box_office_fetch_limit"] == 7
     assert updated["effective"]["maximum_movies_to_add"] == 4
     assert updated["effective"]["auto_add_enabled"] is True
-    assert updated["effective"]["tags"] == ["boxarr", "boxarr-de"]
+    assert updated["effective"]["tags"] == [
+        "boxarr-added",
+        "boxarr-market-de",
+        "boxarr-de",
+    ]
     assert updated["effective"]["root_folder"] == "/movies/de"
     assert updated["effective"]["quality_profile_default"] == "HD-1080p"
     assert updated["effective"]["quality_profile_upgrade"] == "UHD-4K"
@@ -158,7 +170,11 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert disabled["enabled"] is False
     assert disabled["effective"]["maximum_movies_to_add"] == 4
     assert disabled["effective"]["box_office_fetch_limit"] == 7
-    assert disabled["effective"]["tags"] == ["boxarr", "boxarr-de"]
+    assert disabled["effective"]["tags"] == [
+        "boxarr-added",
+        "boxarr-market-de",
+        "boxarr-de",
+    ]
     assert disabled["effective"]["root_folder"] == "/movies/de"
 
     markets_after_disable = client.get("/api/config/markets").json()
@@ -169,7 +185,8 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert markets_after_disable["markets"]["de"]["effective"]["box_office_fetch_limit"] == 7
     assert markets_after_disable["markets"]["de"]["sources"]["box_office_fetch_limit"] == "market"
     assert markets_after_disable["markets"]["de"]["effective"]["tags"] == [
-        "boxarr",
+        "boxarr-added",
+        "boxarr-market-de",
         "boxarr-de",
     ]
     assert markets_after_disable["markets"]["de"]["sources"]["tags"] == "market"
@@ -184,7 +201,11 @@ def test_create_update_disable_enable_market(tmp_path, monkeypatch):
     assert enabled["enabled"] is True
     assert enabled["effective"]["maximum_movies_to_add"] == 4
     assert enabled["effective"]["box_office_fetch_limit"] == 7
-    assert enabled["effective"]["tags"] == ["boxarr", "boxarr-de"]
+    assert enabled["effective"]["tags"] == [
+        "boxarr-added",
+        "boxarr-market-de",
+        "boxarr-de",
+    ]
     assert enabled["effective"]["root_folder"] == "/movies/de"
 
     markets_after_enable = client.get("/api/config/markets").json()
@@ -215,7 +236,7 @@ def test_default_market_override_save_persists_for_us_and_fr(tmp_path, monkeypat
             "maximum_movies_to_add": 3,
             "box_office_fetch_limit": 10,
             "auto_add_enabled": True,
-            "tags": ["boxarr", "boxarr-fr"],
+            "tags": ["boxarr-added", "boxarr-market-fr", "boxarr-fr"],
             "cleanup_protect_tag": "boxarr-protected",
         },
     )
@@ -224,7 +245,11 @@ def test_default_market_override_save_persists_for_us_and_fr(tmp_path, monkeypat
     assert fr_data["market"] == "fr"
     assert fr_data["effective"]["maximum_movies_to_add"] == 3
     assert fr_data["effective"]["box_office_fetch_limit"] == 10
-    assert fr_data["effective"]["tags"] == ["boxarr", "boxarr-fr"]
+    assert fr_data["effective"]["tags"] == [
+        "boxarr-added",
+        "boxarr-market-fr",
+        "boxarr-fr",
+    ]
 
     us_resp = client.put(
         "/api/config/markets/us",
@@ -232,7 +257,7 @@ def test_default_market_override_save_persists_for_us_and_fr(tmp_path, monkeypat
             "maximum_movies_to_add": 4,
             "box_office_fetch_limit": 12,
             "auto_add_enabled": False,
-            "tags": ["boxarr", "boxarr-us"],
+            "tags": ["boxarr-added", "boxarr-market-us", "boxarr-us"],
             "cleanup_protect_tag": "boxarr-protected",
         },
     )
@@ -241,15 +266,27 @@ def test_default_market_override_save_persists_for_us_and_fr(tmp_path, monkeypat
     assert us_data["market"] == "us"
     assert us_data["effective"]["maximum_movies_to_add"] == 4
     assert us_data["effective"]["box_office_fetch_limit"] == 12
-    assert us_data["effective"]["tags"] == ["boxarr", "boxarr-us"]
+    assert us_data["effective"]["tags"] == [
+        "boxarr-added",
+        "boxarr-market-us",
+        "boxarr-us",
+    ]
 
     saved_yaml = yaml.safe_load(config_path.read_text())
     assert saved_yaml["markets"]["fr"]["maximum_movies_to_add"] == 3
     assert saved_yaml["markets"]["fr"]["box_office_fetch_limit"] == 10
-    assert saved_yaml["markets"]["fr"]["tags"] == ["boxarr", "boxarr-fr"]
+    assert saved_yaml["markets"]["fr"]["tags"] == [
+        "boxarr-added",
+        "boxarr-market-fr",
+        "boxarr-fr",
+    ]
     assert saved_yaml["markets"]["us"]["maximum_movies_to_add"] == 4
     assert saved_yaml["markets"]["us"]["box_office_fetch_limit"] == 12
-    assert saved_yaml["markets"]["us"]["tags"] == ["boxarr", "boxarr-us"]
+    assert saved_yaml["markets"]["us"]["tags"] == [
+        "boxarr-added",
+        "boxarr-market-us",
+        "boxarr-us",
+    ]
 
 
 def test_update_existing_marketconfig_object_does_not_crash(tmp_path, monkeypatch):
@@ -264,8 +301,8 @@ def test_update_existing_marketconfig_object_does_not_crash(tmp_path, monkeypatc
             "box_office_fetch_limit": 10,
             "maximum_movies_to_add": 3,
             "auto_add_enabled": True,
-            "tags": ["boxarr", "boxarr-fr"],
-            "auto_tag_text": "boxarr-fr",
+            "tags": ["boxarr-added", "boxarr-market-fr", "boxarr-fr"],
+            "auto_tag_text": "boxarr-added",
             "cleanup_protect_tag": "boxarr-protected",
             "root_folder": "/movies/fr",
         }
@@ -292,12 +329,20 @@ def test_update_existing_marketconfig_object_does_not_crash(tmp_path, monkeypatc
     assert data["effective"]["maximum_movies_to_add"] == 3
     assert data["effective"]["box_office_fetch_limit"] == 12
     assert data["effective"]["auto_add_enabled"] is False
-    assert data["effective"]["tags"] == ["boxarr", "boxarr-fr"]
+    assert data["effective"]["tags"] == [
+        "boxarr-added",
+        "boxarr-market-fr",
+        "boxarr-fr",
+    ]
 
     saved_yaml = yaml.safe_load(config_path.read_text())
     assert saved_yaml["markets"]["fr"]["maximum_movies_to_add"] == 3
     assert saved_yaml["markets"]["fr"]["box_office_fetch_limit"] == 12
-    assert saved_yaml["markets"]["fr"]["tags"] == ["boxarr", "boxarr-fr"]
+    assert saved_yaml["markets"]["fr"]["tags"] == [
+        "boxarr-added",
+        "boxarr-market-fr",
+        "boxarr-fr",
+    ]
 
     markets_resp = client.get("/api/config/markets")
     assert markets_resp.status_code == 200

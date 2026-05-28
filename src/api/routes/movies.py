@@ -24,6 +24,7 @@ from ...core.boxoffice_provider import (
 from ...core.boxoffice_storage import iter_weekly_page_paths
 from ...core.movie_identity import resolve_movie_identity
 from ...core.models import MovieStatus
+from ...core.market_settings import canonical_active_tags
 from ...core.radarr import RadarrService, get_all_movies_with_optional_cache_bypass
 from ...core.root_folder_manager import RootFolderManager
 from ...utils.config import settings
@@ -469,6 +470,7 @@ async def add_movie_to_radarr(request: AddMovieRequest, market: str = DEFAULT_MA
             root_folder=root_folder,
             monitored=True,
             search_for_movie=settings.radarr_search_for_movie,
+            additional_tag_labels=canonical_active_tags(market),
         )
 
         if result:

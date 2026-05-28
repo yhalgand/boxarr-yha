@@ -9,7 +9,11 @@ from typing import Any, Dict, Optional
 import yaml
 
 from .boxoffice_provider import DEFAULT_PROVIDER, canonicalize_provider_definition, normalize_provider
-from .market_settings import get_configured_markets, market_config_to_dict
+from .market_settings import (
+    canonical_active_tags,
+    get_configured_markets,
+    market_config_to_dict,
+)
 from ..utils.config import Settings, settings
 
 MARKET_KEY_PATTERN = re.compile(r"^[a-z0-9_-]+$")
@@ -180,7 +184,7 @@ def build_market_definition(
 
     auto_tag_text = incoming.get("auto_tag_text", base.get("auto_tag_text"))
     if auto_tag_text is None and create:
-        auto_tag_text = f"boxarr-{normalized_key}"
+        auto_tag_text = "boxarr-added"
     if auto_tag_text is not None:
         record["auto_tag_text"] = auto_tag_text
 
@@ -188,10 +192,16 @@ def build_market_definition(
     if tags is None and not create and "tags" in base:
         tags = _normalize_tags(base.get("tags"))
     if tags is None and create:
-        default_auto_tag = auto_tag_text or f"boxarr-{normalized_key}"
-        tags = ["boxarr", default_auto_tag]
+        tags = canonical_active_tags(
+            normalized_key,
+            auto_tag_text=auto_tag_text,
+        )
     if tags is not None:
-        record["tags"] = tags
+        record["tags"] = canonical_active_tags(
+            normalized_key,
+            auto_tag_text=auto_tag_text,
+            extra_tags=tags,
+        )
 
     cleanup_tag = incoming.get("cleanup_protect_tag", base.get("cleanup_protect_tag"))
     if cleanup_tag is None and create:

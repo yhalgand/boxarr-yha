@@ -261,7 +261,7 @@ class Settings(BaseSettings):
         default=True, description="Auto tag movies added to Radarr"
     )
     boxarr_features_auto_tag_text: str = Field(
-        default="boxarr", description="Tag label for movies added to Radarr"
+        default="boxarr-added", description="Tag label for movies added to Radarr"
     )
 
     # Auto-Add Advanced Options
@@ -370,11 +370,11 @@ class Settings(BaseSettings):
     def validate_auto_tag_text(cls, v: Any) -> str:
         """Ensure auto tag text is a single word up to 20 characters."""
         if v is None:
-            return "boxarr"
+            return "boxarr-added"
         s: str = str(v).strip()
         # Enforce non-empty, no whitespace, max 20 chars
         if not s:
-            return "boxarr"
+            return "boxarr-added"
         if any(ch.isspace() for ch in s):
             raise ValueError("Auto tag must be a single word without spaces")
         if len(s) > 20:

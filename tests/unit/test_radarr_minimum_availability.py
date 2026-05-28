@@ -1,4 +1,5 @@
 import httpx
+import pytest
 
 from src.core.radarr import RadarrService
 from src.utils.config import MinimumAvailabilityEnum, settings
@@ -72,3 +73,36 @@ def test_add_movie_coerces_unsupported_minimum_availability_to_safe_default(
     # Ensure payload uses a supported value (announced) when legacy value is configured
     payload = fake.last_request["json"]
     assert payload["minimumAvailability"] == "announced"
+
+
+@pytest.mark.parametrize(
+    "market_tag",
+    ["boxarr-market-us", "boxarr-market-fr"],
+)
+def test_add_movie_filters_legacy_boxarr_tags(monkeypatch, market_tag):
+    monkeypatch.setattr(settings, "radarr_minimum_availability_enabled", False)
+    monkeypatch.setattr(settings, "boxarr_features_auto_tag_enabled", True)
+    monkeypatch.setattr(settings, "boxarr_features_auto_tag_text", "boxarr")
+
+    fake = _FakeClient()
+    service = RadarrService(
+        url="http://radarr.local:7878", api_key="test", http_client=fake
+    )
+
+    seen_labels = []
+
+    def _fake_ensure_tag(label: str):
+        seen_labels.append(label)
+        return len(seen_labels)
+
+    monkeypatch.setattr(service, "ensure_tag", _fake_ensure_tag)
+
+    added = service.add_movie(
+        tmdb_id=123,
+        root_folder="/movies",
+        additional_tag_labels=["boxarr", "boxarr-added", market_tag],
+    )
+
+    assert added.id == 999
+    assert seen_labels == ["boxarr-added", market_tag]
+    assert fake.last_request["json"]["tags"] == [1, 2]

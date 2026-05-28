@@ -19,6 +19,8 @@ from .models import MovieStatus
 
 logger = get_logger(__name__)
 
+_LEGACY_ACTIVE_TAGS = {"boxarr", "boxarr-keep"}
+
 
 @dataclass
 class QualityProfile:
@@ -457,6 +459,8 @@ class RadarrService:
             seen_labels = set()
             for label in labels:
                 normalized_label = label.lower()
+                if normalized_label in _LEGACY_ACTIVE_TAGS:
+                    continue
                 if normalized_label in seen_labels:
                     continue
                 seen_labels.add(normalized_label)

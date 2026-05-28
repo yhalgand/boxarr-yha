@@ -1393,7 +1393,7 @@ function reloadScheduler() {
         // Auto-tag settings
         config.boxarr_features_auto_tag_enabled = document.getElementById('autoTagEnabled')?.checked || false;
         const autoTagInput = document.getElementById('autoTagText');
-        config.boxarr_features_auto_tag_text = (autoTagInput && autoTagInput.value) ? autoTagInput.value : 'boxarr';
+        config.boxarr_features_auto_tag_text = (autoTagInput && autoTagInput.value) ? autoTagInput.value : 'boxarr-added';
         
         // Box office fetch limit
         config.boxarr_features_box_office_limit = parseInt(document.getElementById('boxOfficeLimit')?.value || '10');
