@@ -653,9 +653,9 @@
                     {% if movie.genres %}<span>{{ movie.genres }}</span>{% endif %}
                     {% if movie.best_weekend_gross %}
                     {% if market == 'fr' %}
-                    <span>Best admissions: {{ "{:,.0f}".format(movie.best_weekend_gross) }}</span>
+                    <span>Best admissions: {{ format_boxoffice_amount(movie.best_weekend_gross) }}</span>
                     {% else %}
-                    <span>Best: ${{ "{:,.0f}".format(movie.best_weekend_gross) }}</span>
+                    <span>Best: ${{ format_boxoffice_amount(movie.best_weekend_gross) }}</span>
                     {% endif %}
                     {% endif %}
                     {% if movie.weeks|length > 1 %}
@@ -720,7 +720,7 @@
                             IMDb
                         </a>
                         {% endif %}
-                        <a href="https://en.wikipedia.org/wiki/{{ movie.title.replace(' ', '_') }}" target="_blank" class="action-btn">
+                        <a href="https://en.wikipedia.org/wiki/{{ wikipedia_slug(movie.title) }}" target="_blank" class="action-btn">
                             Wikipedia
                         </a>
                     </div>

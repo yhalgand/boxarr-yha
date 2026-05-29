@@ -56,6 +56,25 @@ def _build_history_movie_response(
     """Return a historical movie payload without dropping stored metadata."""
     result = dict(stored_movie)
 
+    raw_confidence = result.get("match_confidence", None)
+    try:
+        match_confidence = float(raw_confidence) if raw_confidence is not None else None
+    except (TypeError, ValueError):
+        match_confidence = None
+
+    if match_confidence is not None and match_confidence <= 0:
+        result["tmdb_id"] = None
+        result["radarr_id"] = None
+        result["radarr_title"] = None
+        result["radarr_status"] = None
+        result["radarr_has_file"] = False
+        result["has_file"] = False
+        result["status"] = result.get("status") or "Not in Radarr"
+        result["match_confidence"] = 0.0
+        if "match_method" not in result:
+            result["match_method"] = "unmatched"
+        return result
+
     radarr_id = result.get("radarr_id")
     tmdb_id = result.get("tmdb_id")
 
@@ -150,20 +169,20 @@ async def get_current_box_office(
                         ),
                         radarr_id=(
                             match_result.radarr_movie.id
-                            if match_result.is_matched
+                            if match_result.is_matched and match_result.confidence > 0
                             else None
                         ),
                         radarr_status=(
                             match_result.radarr_movie.status.value
-                            if match_result.is_matched
+                            if match_result.is_matched and match_result.confidence > 0
                             else None
                         ),
                         radarr_has_file=(
                             match_result.radarr_movie.hasFile
-                            if match_result.is_matched
+                            if match_result.is_matched and match_result.confidence > 0
                             else False
                         ),
-                        match_confidence=match_result.confidence,
+                        match_confidence=match_result.confidence if match_result.confidence > 0 else 0.0,
                     )
                 )
         else:

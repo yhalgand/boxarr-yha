@@ -1,6 +1,8 @@
 """JSON data generator for weekly box office pages."""
 
 import json
+import re
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -25,6 +27,14 @@ from .market_policy import build_policy_snapshot, get_market_policy
 from .radarr import RadarrService
 
 logger = get_logger(__name__)
+
+
+def _normalize_title_key(value: Any) -> str:
+    text = unicodedata.normalize("NFKD", str(value or "").strip().lower())
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = re.sub(r"[^\w\s]", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
 class WeeklyDataGenerator:
@@ -132,6 +142,8 @@ class WeeklyDataGenerator:
 
         # Prepare movie data
         movies_data = []
+        seen_tmdb_ids: Dict[int, str] = {}
+        seen_radarr_ids: Dict[int, str] = {}
         for result in match_results:
             movie_data = {
                 "rank": result.box_office_movie.rank,
@@ -164,6 +176,8 @@ class WeeklyDataGenerator:
                 "imdb_id": None,
                 "tmdb_id": None,
                 "original_language": None,
+                "match_confidence": float(result.confidence or 0.0),
+                "match_method": result.match_method if result.is_matched else "none",
                 "is_new_release": (
                     result.box_office_movie.weeks_released == 1
                     if result.box_office_movie.weeks_released is not None
@@ -171,62 +185,105 @@ class WeeklyDataGenerator:
                 ),
             }
 
-            if result.is_matched and result.radarr_movie:
+            if result.is_matched and result.radarr_movie and result.confidence > 0:
                 movie = result.radarr_movie
-                movie_data.update(
-                    {
-                        "radarr_id": movie.id,
-                        "radarr_title": movie.title,
-                        "quality_profile_id": movie.qualityProfileId,
-                        "quality_profile_name": quality_profiles.get(
-                            movie.qualityProfileId, ""
-                        ),
-                        "has_file": movie.hasFile,
-                        "year": movie.year,
-                        "genres": ", ".join(movie.genres[:2]) if movie.genres else None,
-                        "overview": (
-                            movie.overview[:150] + "..."
-                            if movie.overview and len(movie.overview) > 150
-                            else movie.overview
-                        ),
-                        "imdb_id": movie.imdbId,
-                        "tmdb_id": movie.tmdbId,
-                        "original_language": movie.original_language,
-                        "poster": movie.poster_url,
-                        "can_upgrade_quality": bool(
-                            movie.qualityProfileId
-                            and ultra_hd_id
-                            and movie.qualityProfileId != ultra_hd_id
-                            and settings.boxarr_features_quality_upgrade
-                        ),
-                    }
+                title_key = _normalize_title_key(
+                    result.box_office_movie.original_title or result.box_office_movie.title
                 )
+                tmdb_id = movie.tmdbId
+                radarr_id = movie.id
+                duplicate_conflict = False
+                if tmdb_id and tmdb_id in seen_tmdb_ids and seen_tmdb_ids[tmdb_id] != title_key:
+                    duplicate_conflict = True
+                if radarr_id and radarr_id in seen_radarr_ids and seen_radarr_ids[radarr_id] != title_key:
+                    duplicate_conflict = True
 
-                # Initial status (will be updated dynamically when page loads)
-                if movie.hasFile:
-                    movie_data["status"] = "Downloaded"
-                    movie_data["status_color"] = "#48bb78"
-                    movie_data["status_icon"] = "✅"
-                elif movie.status == MovieStatus.RELEASED and movie.isAvailable:
-                    movie_data["status"] = "Missing"
-                    movie_data["status_color"] = "#f56565"
-                    movie_data["status_icon"] = "❌"
-                elif movie.status == MovieStatus.IN_CINEMAS:
-                    movie_data["status"] = "In Cinemas"
-                    movie_data["status_color"] = "#f6ad55"
-                    movie_data["status_icon"] = "🎬"
+                if duplicate_conflict:
+                    logger.warning(
+                        "Rejecting duplicate Radarr/TMDB match for '%s' (tmdb_id=%s radarr_id=%s)",
+                        result.box_office_movie.title,
+                        tmdb_id,
+                        radarr_id,
+                    )
+                    movie_data.update(
+                        {
+                            "radarr_id": None,
+                            "radarr_title": None,
+                            "radarr_status": None,
+                            "radarr_has_file": False,
+                            "has_file": False,
+                            "tmdb_id": None,
+                            "poster": None,
+                            "year": None,
+                            "genres": None,
+                            "overview": None,
+                            "imdb_id": None,
+                        }
+                    )
+                    movie_data["match_confidence"] = 0.0
+                    movie_data["match_method"] = "duplicate_rejected"
                 else:
-                    movie_data["status"] = "Pending"
-                    movie_data["status_color"] = "#ed8936"
-                    movie_data["status_icon"] = "⏳"
+                    seen_tmdb_ids[tmdb_id] = title_key
+                    seen_radarr_ids[radarr_id] = title_key
+                    movie_data.update(
+                        {
+                            "radarr_id": movie.id,
+                            "radarr_title": movie.title,
+                            "quality_profile_id": movie.qualityProfileId,
+                            "quality_profile_name": quality_profiles.get(
+                                movie.qualityProfileId, ""
+                            ),
+                            "has_file": movie.hasFile,
+                            "year": movie.year,
+                            "genres": ", ".join(movie.genres[:2]) if movie.genres else None,
+                            "overview": (
+                                movie.overview[:150] + "..."
+                                if movie.overview and len(movie.overview) > 150
+                                else movie.overview
+                            ),
+                            "imdb_id": movie.imdbId,
+                            "tmdb_id": movie.tmdbId,
+                            "original_language": movie.original_language,
+                            "poster": movie.poster_url,
+                            "can_upgrade_quality": bool(
+                                movie.qualityProfileId
+                                and ultra_hd_id
+                                and movie.qualityProfileId != ultra_hd_id
+                                and settings.boxarr_features_quality_upgrade
+                            ),
+                        }
+                    )
+
+                    # Initial status (will be updated dynamically when page loads)
+                    if movie.hasFile:
+                        movie_data["status"] = "Downloaded"
+                        movie_data["status_color"] = "#48bb78"
+                        movie_data["status_icon"] = "✅"
+                    elif movie.status == MovieStatus.RELEASED and movie.isAvailable:
+                        movie_data["status"] = "Missing"
+                        movie_data["status_color"] = "#f56565"
+                        movie_data["status_icon"] = "❌"
+                    elif movie.status == MovieStatus.IN_CINEMAS:
+                        movie_data["status"] = "In Cinemas"
+                        movie_data["status_color"] = "#f6ad55"
+                        movie_data["status_icon"] = "🎬"
+                    else:
+                        movie_data["status"] = "Pending"
+                        movie_data["status_color"] = "#ed8936"
+                        movie_data["status_icon"] = "⏳"
             else:
                 # For unmatched movies, ALWAYS try to get data from TMDB
                 # This ensures we have poster and description for dashboard display
                 if self.radarr_service:
                     try:
+                        search_movie_tmdb = getattr(
+                            self.radarr_service,
+                            "search_movie_tmdb",
+                            self.radarr_service.search_movie,
+                        )
                         identity = resolve_movie_identity(
                             result.box_office_movie,
-                            self.radarr_service.search_movie,
+                            search_movie_tmdb,
                             market=self.market,
                         )
                         if identity.matched and identity.movie_info:

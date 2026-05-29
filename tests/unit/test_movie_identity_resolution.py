@@ -7,8 +7,8 @@ from src.core.movie_identity import resolve_movie_identity
 def test_resolve_avatar_from_french_and_original_titles():
     calls = []
 
-    def fake_search(term: str):
-        calls.append(term)
+    def fake_search(term: str, language=None, region=None):
+        calls.append((term, language, region))
         if "avatar" in term.lower():
             return [
                 {
@@ -40,11 +40,20 @@ def test_resolve_avatar_from_french_and_original_titles():
     assert resolution.movie_info["tmdbId"] == 424242
     assert resolution.confidence >= 0.84
     assert resolution.search_term is not None
-    assert any("avatar" in term.lower() for term in calls)
+    assert resolution.search_term == "Avatar : de feu et de cendres"
+    assert any("avatar" in term.lower() for term, _, _ in calls)
+    assert calls[0][1] == "fr-FR"
+    assert calls[0][2] == "FR"
+    assert calls[0][0] == "Avatar : de feu et de cendres"
+    assert resolution.debug["source_title"] == "Avatar : de feu et de cendres"
+    assert resolution.debug["tmdb_query"] is not None
+    assert resolution.debug["tmdb_language"] == "fr-FR"
+    assert resolution.debug["tmdb_region"] == "FR"
+    assert resolution.debug["selected_candidate"] is not None
 
 
 def test_resolve_zootopie_with_accent_and_punctuation_variations():
-    def fake_search(term: str):
+    def fake_search(term: str, language=None, region=None):
         if "zootopia" in term.lower() or "zootopie" in term.lower():
             return [
                 {
@@ -74,6 +83,9 @@ def test_resolve_zootopie_with_accent_and_punctuation_variations():
     assert resolution.movie_info is not None
     assert resolution.movie_info["tmdbId"] == 515151
     assert resolution.confidence >= 0.84
+    assert resolution.debug["cleaned_title"] == "zootopie 2"
+    assert resolution.debug["tmdb_language"] == "fr-FR"
+    assert resolution.debug["tmdb_region"] == "FR"
 
 
 def test_resolve_unknown_movie_rejects_false_positive():

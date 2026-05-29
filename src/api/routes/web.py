@@ -55,6 +55,58 @@ def url_for(request: Request, path: str) -> str:
 templates.env.globals["url_for"] = url_for
 
 
+def format_boxoffice_amount(value: Any) -> str:
+    """Format a box office amount defensively for templates."""
+    if value is None:
+        return "0"
+    try:
+        if hasattr(value, "value"):
+            value = getattr(value, "value")
+        if isinstance(value, str):
+            cleaned = value.replace(",", "").replace(" ", "").replace("\xa0", "")
+            value = float(cleaned)
+        return f"{float(value):,.0f}"
+    except Exception:
+        return "0"
+
+
+def wikipedia_slug(title: Any) -> str:
+    """Generate a safe Wikipedia slug from an arbitrary title."""
+    text = str(title or "").strip()
+    if not text:
+        return ""
+    return text.replace(" ", "_")
+
+
+templates.env.globals["format_boxoffice_amount"] = format_boxoffice_amount
+templates.env.globals["wikipedia_slug"] = wikipedia_slug
+
+
+def _coerce_float(value: Any, default: float = 0.0) -> float:
+    """Coerce mixed JSON numeric values into a stable float."""
+    if value is None:
+        return float(default)
+    if hasattr(value, "value"):
+        value = getattr(value, "value")
+    try:
+        if isinstance(value, str):
+            cleaned = value.replace(",", "").replace(" ", "").replace("\xa0", "")
+            if not cleaned:
+                return float(default)
+            return float(cleaned)
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _coerce_int(value: Any, default: int = 0) -> int:
+    """Coerce mixed JSON numeric values into a stable integer."""
+    try:
+        return int(round(_coerce_float(value, float(default))))
+    except Exception:
+        return int(default)
+
+
 def get_template_context(request: Request, **kwargs) -> dict:
     """Get base template context with common values."""
     # Handle both string and enum values for theme
@@ -222,21 +274,31 @@ async def aggregate_all_movies(market: str = DEFAULT_MARKET) -> List[dict]:
                 else:
                     key = f"{movie.get('title', 'unknown')}_{movie.get('year', 0)}"
 
+                rank = _coerce_int(movie.get("rank"), 999)
+                weekend_gross = _coerce_float(movie.get("weekend_gross"), 0.0)
+
                 if key in movies_by_key:
+                    existing_rank = _coerce_int(
+                        movies_by_key[key].get("best_rank", 999), 999
+                    )
+                    existing_best_gross = _coerce_float(
+                        movies_by_key[key].get("best_weekend_gross", 0.0), 0.0
+                    )
                     # Movie already exists, add this week to its appearances
                     movies_by_key[key]["weeks"].append(week_str)
                     # Update with better data if this week has higher rank
-                    if movie.get("rank", 999) < movies_by_key[key]["best_rank"]:
-                        movies_by_key[key]["best_rank"] = movie.get("rank", 999)
-                        movies_by_key[key]["best_weekend_gross"] = movie.get(
-                            "weekend_gross", 0
-                        )
+                    if rank < existing_rank:
+                        movies_by_key[key]["best_rank"] = rank
+                    if weekend_gross > existing_best_gross:
+                        movies_by_key[key]["best_weekend_gross"] = weekend_gross
                 else:
                     # New movie entry
                     movie_copy = dict(movie)
                     movie_copy["weeks"] = [week_str]
-                    movie_copy["best_rank"] = movie.get("rank", 999)
-                    movie_copy["best_weekend_gross"] = movie.get("weekend_gross", 0)
+                    movie_copy["rank"] = rank
+                    movie_copy["best_rank"] = rank
+                    movie_copy["weekend_gross"] = weekend_gross
+                    movie_copy["best_weekend_gross"] = weekend_gross
                     movies_by_key[key] = movie_copy
 
         except Exception as e:
@@ -245,7 +307,10 @@ async def aggregate_all_movies(market: str = DEFAULT_MARKET) -> List[dict]:
 
     # Convert to list and sort by best weekend gross (highest first)
     movies_list = list(movies_by_key.values())
-    movies_list.sort(key=lambda x: x.get("best_weekend_gross", 0), reverse=True)
+    movies_list.sort(
+        key=lambda x: _coerce_float(x.get("best_weekend_gross", 0), 0.0),
+        reverse=True,
+    )
 
     return movies_list
 

@@ -382,6 +382,41 @@ def test_fr_provider_parses_saved_fixture():
     assert mufasa.title == "Mufasa: Le Roi Lion"
 
 
+def test_fr_provider_skips_header_row_and_parses_week_2026w01():
+    year_html = (
+        "<html><body><div class='annual-listing'>"
+        "<a href='/v9_tophebdo.php?idsem=2901&view=2'>1</a>"
+        "</div></body></html>"
+    )
+    weekly_html = _load_fixture("jpboxoffice_fr_week_2026w01.html")
+
+    client = MagicMock()
+
+    def fake_get(url: str):
+        if "v9_hebdomadaire.php?view=2&year=2026" in url:
+            return _response(url, year_html)
+        if "v9_tophebdo.php?idsem=2901&view=2" in url:
+            return _response(url, weekly_html)
+        return _response(url, "<html><body></body></html>")
+
+    client.get.side_effect = fake_get
+    client.close = MagicMock()
+
+    service = BoxOfficeService(http_client=client, market="fr")
+    movies = service.fetch_weekend_box_office(2026, 1, limit=10)
+
+    assert len(movies) == 10
+    assert [movie.rank for movie in movies] == list(range(1, 11))
+    assert all(movie.title != "Titre" for movie in movies)
+    assert all(movie.title != "title" for movie in movies)
+
+    diagnostics = getattr(service._provider, "last_parse_diagnostics", {})
+    assert diagnostics["rows_seen"] >= 10
+    assert diagnostics["rows_parsed"] == 10
+    assert diagnostics["rows_skipped"] >= 1
+    assert any(row.get("reason") == "missing_title" for row in diagnostics["skipped_rows"])
+
+
 def test_fr_provider_ignores_sidebar_artifacts_in_2026w21_fixture():
     year_html = (
         "<html><body><table><tr>"

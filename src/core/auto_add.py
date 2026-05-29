@@ -74,9 +74,12 @@ def auto_add_missing_movies(
     for result in unmatched:
         try:
             # Resolve a reliable TMDb candidate from the box-office title(s).
+            search_movie_tmdb = getattr(
+                radarr_service, "search_movie_tmdb", radarr_service.search_movie
+            )
             identity = resolve_movie_identity(
                 result.box_office_movie,
-                radarr_service.search_movie,
+                search_movie_tmdb,
                 market=market,
             )
 

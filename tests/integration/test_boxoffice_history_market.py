@@ -146,6 +146,25 @@ def test_history_boxoffice_route_reads_market_file_and_keeps_radarr_fields(
                         "status": "Missing",
                         "has_file": False,
                     },
+                    {
+                        "rank": 3,
+                        "title": "Low Confidence Movie",
+                        "original_title": "Low Confidence Movie",
+                        "source_year": 2026,
+                        "weekend_gross": 1000,
+                        "total_gross": 2000,
+                        "weeks_released": 1,
+                        "weeks_in_release": 1,
+                        "theater_count": 10,
+                        "radarr_id": 999,
+                        "radarr_title": "Should Be Cleared",
+                        "radarr_status": "released",
+                        "radarr_has_file": True,
+                        "match_confidence": 0.0,
+                        "tmdb_id": 888,
+                        "status": "Downloaded",
+                        "has_file": True,
+                    },
                 ],
             },
             f,
@@ -182,7 +201,7 @@ def test_history_boxoffice_route_reads_market_file_and_keeps_radarr_fields(
     assert resp.status_code == 200
     data = resp.json()
 
-    assert len(data) == 2
+    assert len(data) == 3
     assert data[0]["title"] == "La Femme de ménage"
     assert data[0]["radarr_id"] == 12582
     assert data[0]["radarr_status"] == "released"
@@ -202,6 +221,12 @@ def test_history_boxoffice_route_reads_market_file_and_keeps_radarr_fields(
     assert data[1]["match_confidence"] == 0.97
     assert data[1]["original_title"] == "Avatar: Fire and Ash"
     assert data[1]["source_year"] == 2026
+
+    assert data[2]["match_confidence"] == 0.0
+    assert data[2]["tmdb_id"] is None
+    assert data[2]["radarr_id"] is None
+    assert data[2]["radarr_status"] is None
+    assert data[2]["radarr_has_file"] is False
 
 
 @pytest.mark.parametrize(

@@ -772,7 +772,12 @@ class RadarrService:
         folders = self.get_root_folders()
         return [f["path"] for f in folders if "path" in f]
 
-    def search_movie_tmdb(self, title: str) -> List[Dict[str, Any]]:
+    def search_movie_tmdb(
+        self,
+        title: str,
+        language: Optional[str] = None,
+        region: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Search for a movie on TMDB via Radarr.
         Routes expect this method.
@@ -786,7 +791,9 @@ class RadarrService:
         Raises:
             RadarrError: If search fails
         """
-        # Use existing search_movie method
+        # Radarr's lookup endpoint does not expose locale controls directly.
+        # Accept locale kwargs so future TMDB-aware clients can pass them
+        # through without changing call sites, while preserving current behavior.
         return self.search_movie(title)
 
     def update_movie_quality_profile(

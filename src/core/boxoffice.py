@@ -546,7 +546,7 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
         release_url = None
         if anchor is not None:
             title = self._normalize_space(anchor.get_text(" ", strip=True))
-            if title and title.strip().lower() == "image":
+            if title and (title.strip().lower() == "image" or self._is_header_label_line(title)):
                 title = None
             href = str(anchor.get("href", ""))
             if href:
@@ -645,21 +645,58 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
     def _is_title_line(self, line: str) -> bool:
         if not line:
             return False
-        if line in {"Image", "Entrées Hebdomadaires 2026"}:
+        normalized = self._normalize_space(line)
+        lowered = normalized.lower()
+        header_labels = {
+            "titre",
+            "title",
+            "image",
+            "sem.",
+            "semaine",
+            "entrées",
+            "entrees",
+            "evol.",
+            "copies",
+            "moyenne",
+            "cumul",
+            "pdm",
+        }
+        if lowered in header_labels:
             return False
-        if line.startswith("(") and line.endswith(")"):
+        if re.search(
+            r"\b(titre|title)\b.*\b(sem\.?|semaine|entr[ée]es|evol\.?|copies|moyenne|cumul|pdm)\b",
+            lowered,
+        ):
             return False
-        if re.fullmatch(r"[+-]?\d+", line):
+        if normalized in {"Image", "Entrées Hebdomadaires 2026"}:
             return False
-        if "%" in line:
+        if normalized.startswith("(") and normalized.endswith(")"):
             return False
-        return not re.search(r"\b(France|Etats-Unis|Royaume-Uni|Espagne|Allemagne|Italie|Brésil|Iran|Japon)\b", line)
+        if re.fullmatch(r"[+-]?\d+", normalized):
+            return False
+        if "%" in normalized:
+            return False
+        return not re.search(
+            r"\b(France|Etats-Unis|Royaume-Uni|Espagne|Allemagne|Italie|Brésil|Iran|Japon)\b",
+            normalized,
+        )
 
     def _find_title(self, block_lines: List[str]) -> Optional[str]:
         for line in block_lines:
+            if self._is_header_label_line(line):
+                continue
             if self._is_title_line(line) and re.search(r"[A-Za-zÀ-ÿ]", line):
                 return self._normalize_space(line)
         return None
+
+    def _is_header_label_line(self, line: str) -> bool:
+        normalized = self._normalize_space(line)
+        lowered = normalized.lower()
+        if lowered in {"titre", "title", "image"}:
+            return True
+        if re.search(r"\b(titre|title)\b.*\b(sem\.?|semaine|entr[ée]es|evol\.?|copies|moyenne|cumul|pdm)\b", lowered):
+            return True
+        return False
 
     def _title_key(self, title: str) -> str:
         return re.sub(r"[^\w\s]", "", title.lower()).strip()
@@ -826,9 +863,14 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
         movies: List[BoxOfficeMovie] = []
         skipped_rows = []
         parsed_rows = []
-        for index, node in enumerate(candidate_nodes[:limit], start=1):
+        rows_seen = 0
+        for node in candidate_nodes:
+            rows_seen += 1
+            if len(movies) >= limit:
+                break
+            fallback_rank = len(movies) + 1
             movie, reason, parsed_meta = self._parse_candidate_node(
-                node, fallback_rank=index, release_urls=release_urls
+                node, fallback_rank=fallback_rank, release_urls=release_urls
             )
             if movie is None:
                 skipped_rows.append(
@@ -863,9 +905,8 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
                 movie.weekend_gross,
                 movie.total_gross,
                 movie.theater_count,
-            )
+                )
 
-        rows_seen = min(len(candidate_nodes), limit)
         rows_parsed = len(movies)
         rows_skipped = len(skipped_rows)
 
@@ -901,7 +942,7 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
                 f"(source_url={source_url}, country={self.country}, view={self.view}, "
                 f"rows_seen={rows_seen}, rows_skipped={rows_skipped})"
             )
-        if rows_seen and rows_parsed < rows_seen:
+        if rows_seen >= limit and rows_parsed < limit:
             raise BoxOfficeError(
                 "JPBoxOffice parse error: partial ranking parse "
                 f"(source_url={source_url}, country={self.country}, view={self.view}, "

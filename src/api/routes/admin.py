@@ -214,6 +214,9 @@ async def repair_missing_metadata(
                     yield f"data: {json.dumps({'stage': 'fetching', 'progress': idx, 'total': total_movies, 'message': message})}\n\n"
 
                     sample_data = unique_movies[title]["sample_data"]
+                    search_movie_tmdb = getattr(
+                        radarr_service, "search_movie_tmdb", radarr_service.search_movie
+                    )
                     identity = resolve_movie_identity(
                         BoxOfficeMovie(
                             rank=sample_data.get("rank", 0) or 0,
@@ -221,7 +224,7 @@ async def repair_missing_metadata(
                             original_title=sample_data.get("original_title"),
                             year=sample_data.get("source_year") or sample_data.get("year"),
                         ),
-                        radarr_service.search_movie,
+                        search_movie_tmdb,
                         market=market_value,
                     )
                     if identity.matched and identity.movie_info:

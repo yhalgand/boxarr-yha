@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from inspect import Parameter, signature
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any, Callable, Dict, List, Optional
@@ -81,7 +82,9 @@ def _build_search_terms(movie: BoxOfficeMovie, market: str) -> List[str]:
 
     preferred = []
     if market == "fr":
-        preferred.extend([movie.original_title, movie.title])
+        # Prefer the localized French title first for JPBoxOffice FR markets,
+        # then fall back to the original/English title and normalized variants.
+        preferred.extend([movie.title, movie.original_title])
     else:
         preferred.extend([movie.title, movie.original_title])
 
@@ -159,6 +162,46 @@ class MovieIdentityResolution:
     reason: Optional[str] = None
     searched_terms: List[str] = field(default_factory=list)
     candidates: List[Dict[str, Any]] = field(default_factory=list)
+    debug: Dict[str, Any] = field(default_factory=dict)
+
+
+def _search_locale_for_market(market: str) -> Dict[str, Optional[str]]:
+    market_key = str(market or "").strip().lower()
+    if market_key == "fr":
+        return {"language": "fr-FR", "region": "FR"}
+    return {"language": None, "region": None}
+
+
+def _search_with_optional_locale(
+    search_movie: Callable[..., List[Dict[str, Any]]],
+    term: str,
+    *,
+    language: Optional[str] = None,
+    region: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Call a search function, passing locale kwargs only when supported."""
+    try:
+        params = signature(search_movie).parameters
+    except Exception:
+        params = {}
+
+    kwargs: Dict[str, Any] = {}
+    if language is not None and (
+        "language" in params or any(p.kind == Parameter.VAR_KEYWORD for p in params.values())
+    ):
+        kwargs["language"] = language
+    if region is not None and (
+        "region" in params or any(p.kind == Parameter.VAR_KEYWORD for p in params.values())
+    ):
+        kwargs["region"] = region
+
+    try:
+        if kwargs:
+            return search_movie(term, **kwargs) or []
+    except TypeError:
+        # Fall back to the plain call when the callable is stricter than its signature.
+        pass
+    return search_movie(term) or []
 
 
 def resolve_movie_identity(
@@ -176,10 +219,23 @@ def resolve_movie_identity(
     """
 
     terms = _build_search_terms(movie, market)
+    locale = _search_locale_for_market(market)
+    source_title = movie.title
+    cleaned_title = _normalize_text(movie.title)
     if not terms:
         return MovieIdentityResolution(
             matched=False,
             reason="no search terms available",
+            debug={
+                "source_title": source_title,
+                "cleaned_title": cleaned_title,
+                "tmdb_language": locale["language"],
+                "tmdb_region": locale["region"],
+                "tmdb_query": None,
+                "candidates": [],
+                "selected_candidate": None,
+                "rejection_reason": "no search terms available",
+            },
         )
 
     best_movie_info: Optional[Dict[str, Any]] = None
@@ -197,7 +253,12 @@ def resolve_movie_identity(
 
     for term in terms:
         try:
-            results = search_movie(term) or []
+            results = _search_with_optional_locale(
+                search_movie,
+                term,
+                language=locale["language"],
+                region=locale["region"],
+            )
         except Exception as exc:
             logger.debug("TMDb search failed for term '%s': %s", term, exc)
             continue
@@ -226,6 +287,13 @@ def resolve_movie_identity(
                 best_term = term
 
     if best_movie_info and best_score >= min_confidence:
+        selected_candidate = {
+            "tmdbId": best_movie_info.get("tmdbId"),
+            "title": best_movie_info.get("title") or best_movie_info.get("originalTitle"),
+            "year": best_movie_info.get("year"),
+            "score": round(best_score, 3),
+            "search_term": best_term,
+        }
         logger.info(
             "Resolved movie identity '%s' -> tmdbId=%s via term '%s' (confidence=%.2f)",
             movie.title,
@@ -242,6 +310,16 @@ def resolve_movie_identity(
             reason="matched",
             searched_terms=terms,
             candidates=candidate_log,
+            debug={
+                "source_title": source_title,
+                "cleaned_title": cleaned_title,
+                "tmdb_query": best_term,
+                "tmdb_language": locale["language"],
+                "tmdb_region": locale["region"],
+                "candidates": candidate_log,
+                "selected_candidate": selected_candidate,
+                "rejection_reason": None,
+            },
         )
 
     reason = "no candidate above confidence threshold" if best_movie_info else "no candidates found"
@@ -261,4 +339,24 @@ def resolve_movie_identity(
         reason=reason,
         searched_terms=terms,
         candidates=candidate_log,
+        debug={
+            "source_title": source_title,
+            "cleaned_title": cleaned_title,
+            "tmdb_query": best_term,
+            "tmdb_language": locale["language"],
+            "tmdb_region": locale["region"],
+            "candidates": candidate_log,
+            "selected_candidate": (
+                {
+                    "tmdbId": best_movie_info.get("tmdbId"),
+                    "title": best_movie_info.get("title") or best_movie_info.get("originalTitle"),
+                    "year": best_movie_info.get("year"),
+                    "score": round(best_score, 3),
+                    "search_term": best_term,
+                }
+                if best_movie_info
+                else None
+            ),
+            "rejection_reason": reason,
+        },
     )

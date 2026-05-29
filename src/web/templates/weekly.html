@@ -1713,9 +1713,9 @@
                     {% if movie.genres %}<span>{{ movie.genres }}</span>{% endif %}
                     {% if movie.weekend_gross %}
                     {% if market == 'fr' %}
-                    <span>Admissions: {{ "{:,.0f}".format(movie.weekend_gross) }}</span>
+                    <span>Admissions: {{ format_boxoffice_amount(movie.weekend_gross) }}</span>
                     {% else %}
-                    <span>Weekend: ${{ "{:,.0f}".format(movie.weekend_gross) }}</span>
+                    <span>Weekend: ${{ format_boxoffice_amount(movie.weekend_gross) }}</span>
                     {% endif %}
                     {% endif %}
                 </div>
@@ -1777,7 +1777,7 @@
                             IMDb
                         </a>
                         {% endif %}
-                        <a href="https://en.wikipedia.org/wiki/{{ movie.title.replace(' ', '_') }}" target="_blank" class="action-btn">
+                        <a href="https://en.wikipedia.org/wiki/{{ wikipedia_slug(movie.title) }}" target="_blank" class="action-btn">
                             Wikipedia
                         </a>
                     </div>
