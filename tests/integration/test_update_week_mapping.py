@@ -293,8 +293,8 @@ def test_update_week_fr_uses_provider_wiring(tmp_path, monkeypatch):
     client = TestClient(app)
 
     resp = client.post(
-        "/api/scheduler/update-week",
-        json={"year": 2024, "week": 10, "market": "fr"},
+        "/api/scheduler/update-week?market=fr",
+        json={"year": 2024, "week": 10, "market": "us"},
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -314,3 +314,32 @@ def test_update_week_fr_uses_provider_wiring(tmp_path, monkeypatch):
     assert payload["movies"][0]["weeks_in_release"] == 2
     assert payload["movies"][0]["theater_count"] == 789
     assert payload["policy_snapshot"]["tag_policy_used"]["added_tag"] == "boxarr-added"
+
+
+def test_update_week_query_market_wins_over_body_market(tmp_path, monkeypatch):
+    config_path = _seed_historical_market_config(tmp_path, "fr", "fr")
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+    monkeypatch.setattr(settings, "radarr_api_key", "")
+
+    import src.core.boxoffice as core_boxoffice
+    import src.core.radarr as core_radarr
+
+    monkeypatch.setattr(core_radarr, "RadarrService", _FakeRadarrService)
+    monkeypatch.setattr(core_boxoffice, "BoxOfficeService", _FakeBoxOfficeService)
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/scheduler/update-week?market=fr",
+        json={"year": 2026, "week": 2, "market": "us"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["market"] == "fr"
+    assert data["provider"] == "jpboxoffice"
+
+    output_file = tmp_path / "weekly_pages" / "fr" / "2026W02.json"
+    assert output_file.exists()
+    assert not (tmp_path / "weekly_pages" / "us" / "2026W02.json").exists()

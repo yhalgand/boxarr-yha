@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from ...core.scheduler import BoxarrScheduler
@@ -311,15 +311,19 @@ class UpdateWeekRequest(BaseModel):
 
 
 @router.post("/update-week")
-async def update_specific_week(request: UpdateWeekRequest):  # noqa: C901
+async def update_specific_week(
+    request: UpdateWeekRequest,
+    market: Optional[str] = Query(None, description="Box office market override"),
+):  # noqa: C901
     """Update box office for a specific historical week."""
     year = request.year
     week = request.week
     try:
-        if request.provider and request.market == DEFAULT_MARKET:
+        effective_market = market if market is not None else request.market
+        if request.provider and effective_market == DEFAULT_MARKET:
             market = market_for_provider(request.provider)
         else:
-            market = request.market
+            market = effective_market
         market = normalize_market(market)
         provider = provider_for_market(market)
         # Validate inputs

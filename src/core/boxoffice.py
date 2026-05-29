@@ -399,9 +399,64 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
 
     def _collect_candidate_nodes(self, soup: BeautifulSoup) -> List:
         """Return ranking row candidates in the most specific shape available."""
-        movie_blocks = soup.select(".movie-block")
-        if movie_blocks:
-            return list(movie_blocks)
+        def container_score(container) -> Tuple[int, int]:
+            class_names = " ".join(container.get("class", [])) if hasattr(container, "get") else ""
+            text = self._normalize_space(container.get_text(" ", strip=True))
+            score = 0
+            if re.search(r"\bTitre\b.*\bSem\.\b", text, re.IGNORECASE) or re.search(
+                r"\bEntr[ée]es\b", text, re.IGNORECASE
+            ):
+                score += 100
+            if re.search(r"\bEvol\.", text, re.IGNORECASE) or re.search(
+                r"\bCopies\b", text, re.IGNORECASE
+            ):
+                score += 25
+            if re.search(r"\bPDM\b", text, re.IGNORECASE):
+                score += 10
+            if "weekly" in class_names.lower() or "hebdo" in class_names.lower():
+                score += 20
+            if container.name in {"main", "section", "article"}:
+                score += 5
+
+            direct_movie_blocks = container.find_all("div", class_="movie-block", recursive=False)
+            direct_rows = container.find_all("tr", recursive=False)
+            score += len(direct_movie_blocks) * 10
+            score += len(direct_rows) * 6
+            return score, len(direct_movie_blocks) + len(direct_rows)
+
+        container_candidates = []
+        seen_ids = set()
+        for candidate in soup.find_all(True):
+            try:
+                node_id = id(candidate)
+                if node_id in seen_ids:
+                    continue
+                seen_ids.add(node_id)
+            except Exception:
+                pass
+
+            direct_movie_blocks = candidate.find_all(
+                "div", class_="movie-block", recursive=False
+            )
+            direct_rows = candidate.find_all("tr", recursive=False)
+            nodes = list(direct_movie_blocks) + list(direct_rows)
+            if not nodes:
+                continue
+            score, count = container_score(candidate)
+            if count:
+                container_candidates.append((score, count, candidate, nodes))
+
+        if container_candidates:
+            container_candidates.sort(
+                key=lambda item: (item[0], item[1]), reverse=True
+            )
+            best_score, _, _, best_nodes = container_candidates[0]
+            logger.debug(
+                "JPBoxOffice selected ranking container score=%s candidates=%s",
+                best_score,
+                len(container_candidates),
+            )
+            return list(best_nodes)
 
         candidate_rows = []
         for row in soup.find_all("tr"):
@@ -470,7 +525,7 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
         node,
         fallback_rank: int,
         release_urls: Optional[Dict[str, str]] = None,
-    ) -> Tuple[Optional[BoxOfficeMovie], Optional[str]]:
+    ) -> Tuple[Optional[BoxOfficeMovie], Optional[str], Dict[str, Any]]:
         """Parse a single ranking candidate into a movie, or return a skip reason."""
         lines = [
             self._normalize_space(part)
@@ -499,11 +554,27 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
         if not title:
             title = self._find_title(lines)
         if not title:
-            return None, "missing_title"
+            return None, "missing_title", {"extracted_rank": None, "rank_source": "missing"}
+        if re.match(r"^N\s*°?\s*1\b", title, re.IGNORECASE):
+            fallback_title = next(
+                (
+                    self._normalize_space(line)
+                    for line in lines
+                    if line
+                    and line != title
+                    and not re.match(r"^N\s*°?\s*1\b", line, re.IGNORECASE)
+                    and self._is_title_line(line)
+                ),
+                None,
+            )
+            if fallback_title:
+                title = fallback_title
+            else:
+                return None, "artifact_title", {"extracted_rank": None, "rank_source": "artifact"}
 
-        rank = self._extract_rank_from_node(node, lines)
-        if rank is None:
-            rank = fallback_rank
+        extracted_rank = self._extract_rank_from_node(node, lines)
+        rank = fallback_rank
+        rank_source = "row_order"
 
         if release_urls:
             release_url = release_urls.get(self._title_key(title), release_url)
@@ -523,7 +594,11 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
             release_url=release_url,
         )
 
-        return movie, None
+        return movie, None, {
+            "extracted_rank": extracted_rank,
+            "final_rank": rank,
+            "rank_source": rank_source,
+        }
 
     def _extract_numeric_tokens(self, text: str) -> List[str]:
         text = text.replace("\xa0", " ")
@@ -750,8 +825,9 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
 
         movies: List[BoxOfficeMovie] = []
         skipped_rows = []
+        parsed_rows = []
         for index, node in enumerate(candidate_nodes[:limit], start=1):
-            movie, reason = self._parse_candidate_node(
+            movie, reason, parsed_meta = self._parse_candidate_node(
                 node, fallback_rank=index, release_urls=release_urls
             )
             if movie is None:
@@ -759,10 +835,22 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
                     {
                         "reason": reason or "unknown",
                         "text": self._normalize_space(node.get_text(" ", strip=True))[:240],
+                        **parsed_meta,
                     }
                 )
                 continue
             movies.append(movie)
+            parsed_rows.append(
+                {
+                    "rank": movie.rank,
+                    "extracted_rank": parsed_meta.get("extracted_rank"),
+                    "final_rank": parsed_meta.get("final_rank"),
+                    "rank_source": parsed_meta.get("rank_source"),
+                    "title": movie.title,
+                    "original_title": movie.original_title,
+                    "source_text": self._normalize_space(node.get_text(" ", strip=True))[:240],
+                }
+            )
             logger.debug(
                 "Parsed JPBoxOffice row: country=%s view=%s rank=%s title=%s original=%s year=%s weeks=%s weekly=%s total=%s copies=%s",
                 self.country,
@@ -788,12 +876,24 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
             "rows_seen": rows_seen,
             "rows_parsed": rows_parsed,
             "rows_skipped": rows_skipped,
+            "parsed_rows": parsed_rows,
             "skipped_rows": skipped_rows,
         }
         logger.debug(
             "JPBoxOffice parse diagnostics: %s",
             self.last_parse_diagnostics,
         )
+
+        expected_ranks = list(range(1, min(limit, rows_parsed) + 1))
+        actual_ranks = [movie.rank for movie in movies]
+        if rows_parsed and actual_ranks != expected_ranks:
+            raise BoxOfficeError(
+                "JPBoxOffice parse error: invalid ranking sequence "
+                f"(source_url={source_url}, country={self.country}, view={self.view}, "
+                f"expected_ranks={expected_ranks}, actual_ranks={actual_ranks}, "
+                f"rows_seen={rows_seen}, rows_parsed={rows_parsed}, rows_skipped={rows_skipped}, "
+                f"skipped_rows={skipped_rows})"
+            )
 
         if rows_seen and rows_parsed == 0:
             raise BoxOfficeError(

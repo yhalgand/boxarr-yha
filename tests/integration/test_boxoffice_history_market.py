@@ -369,6 +369,66 @@ def test_history_boxoffice_route_de_returns_500_on_parse_error(tmp_path, monkeyp
     assert "JPBoxOffice parse error" in resp.json()["detail"]
 
 
+def test_history_boxoffice_route_fr_w02_uses_row_order_rank_and_returns_10(
+    tmp_path, monkeypatch
+):
+    config_path = _seed_historical_market_config(tmp_path, "fr", "fr")
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    year_html = (
+        "<html><body><table><tr>"
+        "<td><a href='/v9_tophebdo.php?idsem=2902&view=2'>2</a></td>"
+        "</tr></table></body></html>"
+    )
+    weekly_html = (Path(__file__).resolve().parents[1] / "fixtures" / "jpboxoffice_fr_week_2026w02.html").read_text(encoding="utf-8")
+
+    client = MagicMock()
+
+    def fake_get(url: str):
+        if "v9_hebdomadaire.php?view=2&year=2026" in url:
+            return _response(url, year_html)
+        if "v9_tophebdo.php?idsem=2902&view=2" in url:
+            return _response(url, weekly_html)
+        if "fichfilm.php?id=12345&view=2" in url:
+            return _response(
+                url,
+                "<html><body><a href='https://pro.imdb.com/title/tt1234567/'>IMDb</a></body></html>",
+            )
+        if "fichfilm.php?id=23456&view=2" in url:
+            return _response(
+                url,
+                "<html><body><a href='https://pro.imdb.com/title/tt7654321/'>IMDb</a></body></html>",
+            )
+        if "fichfilm.php?id=34567&view=2" in url:
+            return _response(
+                url,
+                "<html><body><a href='https://pro.imdb.com/title/tt3456789/'>IMDb</a></body></html>",
+            )
+        return _response(url, "<html><body></body></html>")
+
+    client.get.side_effect = fake_get
+    client.close = MagicMock()
+
+    real_service = BoxOfficeService(http_client=client, market="fr")
+    import src.api.routes.boxoffice as boxoffice_routes
+
+    monkeypatch.setattr(boxoffice_routes, "BoxOfficeService", lambda *_, **__: real_service)
+
+    app = create_app()
+    test_client = TestClient(app)
+
+    resp = test_client.get("/api/boxoffice/history/2026/W02?market=fr")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 10
+    assert [item["rank"] for item in data] == list(range(1, 11))
+    assert data[0]["title"] == "La Femme de ménage"
+    assert data[1]["rank"] == 2
+    assert data[1]["title"] == "Avatar : de feu et de cendres"
+    assert all(not item["title"].startswith("N°1 ") for item in data)
+
+
 @pytest.mark.parametrize(
     "market,country,min_year",
     [

@@ -182,6 +182,7 @@ def test_fr_provider_parses_fixture_and_enriches_imdb():
 
     assert movies[1].title == "Avatar : de feu et de cendres"
     assert movies[1].original_title == "Avatar: Fire and Ash"
+    assert movies[1].rank == 2
     assert movies[1].weekend_gross is not None
     assert movies[1].total_gross is not None
     assert movies[1].weeks_released is not None
@@ -197,6 +198,15 @@ def test_fr_provider_parses_fixture_and_enriches_imdb():
 
     mufasa = next(movie for movie in movies if movie.title == "Mufasa: Le Roi Lion")
     assert mufasa.title == "Mufasa: Le Roi Lion"
+
+    diagnostics = getattr(service._provider, "last_parse_diagnostics", {})
+    assert diagnostics["rows_seen"] == 10
+    assert diagnostics["rows_parsed"] == 10
+    assert diagnostics["rows_skipped"] == 0
+    assert diagnostics["parsed_rows"][1]["rank"] == 2
+    assert diagnostics["parsed_rows"][1]["extracted_rank"] == 1
+    assert diagnostics["parsed_rows"][1]["final_rank"] == 2
+    assert diagnostics["parsed_rows"][1]["rank_source"] == "row_order"
 
 
 @pytest.mark.parametrize(
@@ -370,6 +380,40 @@ def test_fr_provider_parses_saved_fixture():
 
     mufasa = next(movie for movie in movies if movie.title == "Mufasa: Le Roi Lion")
     assert mufasa.title == "Mufasa: Le Roi Lion"
+
+
+def test_fr_provider_ignores_sidebar_artifacts_in_2026w21_fixture():
+    year_html = (
+        "<html><body><table><tr>"
+        "<td><a href='/v9_tophebdo.php?idsem=2926&view=2'>21</a></td>"
+        "</tr></table></body></html>"
+    )
+    weekly_html = _load_fixture("jpboxoffice_fr_week_2026w21.html")
+
+    client = MagicMock()
+
+    def fake_get(url: str):
+        if "v9_hebdomadaire.php?view=2&year=2026" in url:
+            return _response(url, year_html)
+        if "v9_tophebdo.php?idsem=2926&view=2" in url:
+            return _response(url, weekly_html)
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    client.get.side_effect = fake_get
+    client.close = MagicMock()
+
+    service = BoxOfficeService(http_client=client, market="fr")
+    movies = service.fetch_weekend_box_office(2026, 21, limit=10)
+
+    assert len(movies) == 10
+    assert [movie.rank for movie in movies] == list(range(1, 11))
+    assert all(not movie.title.startswith("N°1 ") for movie in movies)
+    diagnostics = getattr(service._provider, "last_parse_diagnostics", {})
+    assert diagnostics["rows_seen"] == 10
+    assert diagnostics["rows_parsed"] == 10
+    assert diagnostics["rows_skipped"] == 0
+    assert diagnostics["parsed_rows"][0]["rank"] == 1
+    assert diagnostics["parsed_rows"][0]["title"] == "Mufasa: Le Roi Lion"
 
 
 def test_unsupported_jpboxoffice_country_raises_clean_error():
