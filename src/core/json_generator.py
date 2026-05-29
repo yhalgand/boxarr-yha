@@ -24,6 +24,7 @@ from .boxoffice_storage import market_weekly_page_path, market_weekly_pages_dir
 from .matcher import MatchResult
 from .models import MovieStatus
 from .market_policy import build_policy_snapshot, get_market_policy
+from .history_sanitizer import sanitize_history_movies
 from .radarr import RadarrService
 
 logger = get_logger(__name__)
@@ -335,6 +336,8 @@ class WeeklyDataGenerator:
                         )
 
             movies_data.append(movie_data)
+
+        movies_data = sanitize_history_movies(movies_data)
 
         # Save metadata with full movie data
         market_policy = get_market_policy(settings, self.market)

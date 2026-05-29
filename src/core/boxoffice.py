@@ -450,13 +450,29 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
             container_candidates.sort(
                 key=lambda item: (item[0], item[1]), reverse=True
             )
-            best_score, _, _, best_nodes = container_candidates[0]
+            selected_nodes = []
+            seen_ids = set()
+            for score, _, container, _ in container_candidates:
+                container_nodes = container.find_all("div", class_="movie-block")
+                if not container_nodes:
+                    container_nodes = container.find_all("tr")
+                for node in container_nodes:
+                    try:
+                        node_id = id(node)
+                        if node_id in seen_ids:
+                            continue
+                        seen_ids.add(node_id)
+                    except Exception:
+                        pass
+                    selected_nodes.append(node)
+            best_score = container_candidates[0][0]
             logger.debug(
-                "JPBoxOffice selected ranking container score=%s candidates=%s",
+                "JPBoxOffice selected ranking container score=%s candidates=%s selected_nodes=%s",
                 best_score,
                 len(container_candidates),
+                len(selected_nodes),
             )
-            return list(best_nodes)
+            return selected_nodes
 
         candidate_rows = []
         for row in soup.find_all("tr"):
@@ -487,6 +503,42 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
                 candidate_divs.append(div)
 
         return candidate_divs
+
+    def _collect_fallback_candidate_nodes(self, soup: BeautifulSoup, seen_nodes: set) -> List:
+        """Collect additional row-like nodes when the primary pass had header rows or gaps."""
+        fallback_nodes = []
+        seen_texts = set()
+        for node in soup.find_all(["tr", "div", "li"]):
+            try:
+                node_id = id(node)
+                if node_id in seen_nodes:
+                    continue
+            except Exception:
+                pass
+
+            text = self._normalize_space(node.get_text(" ", strip=True))
+            if not text:
+                continue
+            if self._is_header_label_line(text):
+                continue
+            if node.find("a", href=re.compile(r"fichfilm\.php")):
+                key = self._title_key(text)
+                if key and key not in seen_texts:
+                    fallback_nodes.append(node)
+                    seen_texts.add(key)
+                continue
+            if node.find("td", class_=re.compile(r"col_poster_(titre|compteur|contenu_majeur)")):
+                key = self._title_key(text)
+                if key and key not in seen_texts:
+                    fallback_nodes.append(node)
+                    seen_texts.add(key)
+                continue
+            if re.match(r"^\s*(?:N\s*)?\d+\b", text):
+                key = self._title_key(text)
+                if key and key not in seen_texts:
+                    fallback_nodes.append(node)
+                    seen_texts.add(key)
+        return fallback_nodes
 
     def _extract_rank_from_node(self, node, lines: List[str]) -> Optional[int]:
         """Extract a ranking number from a candidate node."""
@@ -546,8 +598,8 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
         release_url = None
         if anchor is not None:
             title = self._normalize_space(anchor.get_text(" ", strip=True))
-            if title and (title.strip().lower() == "image" or self._is_header_label_line(title)):
-                title = None
+        if title and (title.strip().lower() == "image" or self._is_header_label_line(title)):
+            title = None
             href = str(anchor.get("href", ""))
             if href:
                 release_url = href if href.startswith("/") else f"/{href.lstrip('/')}"
@@ -555,6 +607,8 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
             title = self._find_title(lines)
         if not title:
             return None, "missing_title", {"extracted_rank": None, "rank_source": "missing"}
+        if self._is_header_label_line(title):
+            return None, "header_title", {"extracted_rank": None, "rank_source": "header"}
         if re.match(r"^N\s*°?\s*1\b", title, re.IGNORECASE):
             fallback_title = next(
                 (
@@ -851,6 +905,13 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
             if title_text:
                 release_urls[self._title_key(title_text)] = href if href.startswith("/") else f"/{href.lstrip('/')}"
         candidate_nodes = self._collect_candidate_nodes(soup)
+        seen_nodes = set()
+        for node in candidate_nodes:
+            try:
+                seen_nodes.add(id(node))
+            except Exception:
+                continue
+        candidate_nodes.extend(self._collect_fallback_candidate_nodes(soup, seen_nodes))
         logger.debug(
             "JPBoxOffice live parse: source_url=%s country=%s view=%s candidates=%s release_links=%s",
             source_url,
@@ -862,8 +923,10 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
 
         movies: List[BoxOfficeMovie] = []
         skipped_rows = []
+        skipped_header_rows = 0
         parsed_rows = []
         rows_seen = 0
+        candidate_rows = []
         for node in candidate_nodes:
             rows_seen += 1
             if len(movies) >= limit:
@@ -873,6 +936,8 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
                 node, fallback_rank=fallback_rank, release_urls=release_urls
             )
             if movie is None:
+                if reason == "header_title":
+                    skipped_header_rows += 1
                 skipped_rows.append(
                     {
                         "reason": reason or "unknown",
@@ -881,6 +946,15 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
                     }
                 )
                 continue
+            candidate_rows.append(
+                {
+                    "title": movie.title,
+                    "original_title": movie.original_title,
+                    "source_text": self._normalize_space(node.get_text(" ", strip=True))[:240],
+                    "rank": movie.rank,
+                    "source_href": movie.release_url,
+                }
+            )
             movies.append(movie)
             parsed_rows.append(
                 {
@@ -891,6 +965,7 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
                     "title": movie.title,
                     "original_title": movie.original_title,
                     "source_text": self._normalize_space(node.get_text(" ", strip=True))[:240],
+                    "source_href": movie.release_url,
                 }
             )
             logger.debug(
@@ -914,9 +989,13 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
             "source_url": source_url,
             "country": self.country,
             "view": self.view,
+            "requested_limit": limit,
             "rows_seen": rows_seen,
+            "valid_rows": rows_parsed,
+            "skipped_header_rows": skipped_header_rows,
             "rows_parsed": rows_parsed,
             "rows_skipped": rows_skipped,
+            "candidate_rows": candidate_rows,
             "parsed_rows": parsed_rows,
             "skipped_rows": skipped_rows,
         }
@@ -946,7 +1025,8 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
             raise BoxOfficeError(
                 "JPBoxOffice parse error: partial ranking parse "
                 f"(source_url={source_url}, country={self.country}, view={self.view}, "
-                f"rows_seen={rows_seen}, rows_parsed={rows_parsed}, rows_skipped={rows_skipped}, "
+                f"rows_seen={rows_seen}, valid_rows={rows_parsed}, skipped_header_rows={skipped_header_rows}, "
+                f"requested_limit={limit}, rows_skipped={rows_skipped}, "
                 f"skipped_rows={skipped_rows})"
             )
 

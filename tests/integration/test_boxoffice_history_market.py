@@ -229,6 +229,224 @@ def test_history_boxoffice_route_reads_market_file_and_keeps_radarr_fields(
     assert data[2]["radarr_has_file"] is False
 
 
+def _assert_history_response_has_no_duplicate_ids_and_no_confidence_zero_ids(data):
+    titles = [item["title"] for item in data]
+    assert "Titre" not in titles
+    assert "Title" not in titles
+
+    seen_tmdb = {}
+    seen_radarr = {}
+    for item in data:
+        confidence = float(item.get("match_confidence") or 0.0)
+        if confidence <= 0:
+            assert item.get("tmdb_id") is None
+            assert item.get("radarr_id") is None
+            assert item.get("radarr_status") is None
+        tmdb_id = item.get("tmdb_id")
+        radarr_id = item.get("radarr_id")
+        if tmdb_id is not None:
+            assert tmdb_id not in seen_tmdb
+            seen_tmdb[tmdb_id] = item["title"]
+        if radarr_id is not None:
+            assert radarr_id not in seen_radarr
+            seen_radarr[radarr_id] = item["title"]
+
+
+def test_history_boxoffice_route_sanitizes_fr_w02_header_and_duplicate_ids(
+    tmp_path, monkeypatch
+):
+    config_path = _seed_config(tmp_path)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    fr_dir = tmp_path / "weekly_pages" / "fr"
+    fr_dir.mkdir(parents=True)
+    with open(fr_dir / "2026W02.json", "w") as f:
+        json.dump(
+            {
+                "generated_at": "2026-05-25T10:00:00",
+                "market": "fr",
+                "provider": "jpboxoffice",
+                "provider_config": {"country": "fr"},
+                "year": 2026,
+                "week": 2,
+                "movies": [
+                    {
+                        "rank": 1,
+                        "title": "Titre",
+                        "radarr_id": 9167,
+                        "radarr_title": "Header Artifact",
+                        "radarr_status": "released",
+                        "radarr_has_file": True,
+                        "match_confidence": 0.0,
+                        "tmdb_id": 246655,
+                        "status": "Downloaded",
+                        "has_file": True,
+                    },
+                    {
+                        "rank": 2,
+                        "title": "La Femme de ménage",
+                        "original_title": "The Housemaid",
+                        "source_year": 2026,
+                        "radarr_id": 12582,
+                        "radarr_title": "La Femme de ménage",
+                        "radarr_status": "released",
+                        "radarr_has_file": True,
+                        "match_confidence": 0.98,
+                        "tmdb_id": 27047903,
+                        "status": "Downloaded",
+                        "has_file": True,
+                    },
+                    {
+                        "rank": 3,
+                        "title": "Avatar : de feu et de cendres",
+                        "original_title": "Avatar: Fire and Ash",
+                        "source_year": 2026,
+                        "radarr_id": 12510,
+                        "radarr_title": "Avatar: Fire and Ash",
+                        "radarr_status": "released",
+                        "radarr_has_file": False,
+                        "match_confidence": 0.97,
+                        "tmdb_id": 12345678,
+                        "status": "Missing",
+                        "has_file": False,
+                    },
+                    {
+                        "rank": 4,
+                        "title": "Mufasa: Le Roi Lion",
+                        "original_title": "Mufasa: The Lion King",
+                        "source_year": 2025,
+                        "radarr_id": 9167,
+                        "radarr_title": "Mufasa: The Lion King",
+                        "radarr_status": "released",
+                        "radarr_has_file": True,
+                        "match_confidence": 0.0,
+                        "tmdb_id": 246655,
+                        "status": "Downloaded",
+                        "has_file": True,
+                    },
+                    {"rank": 5, "title": "Le Mage du Kremlin", "match_confidence": 0.95, "tmdb_id": 300001, "radarr_id": 13001, "radarr_status": "released", "radarr_has_file": True, "status": "Downloaded", "has_file": True},
+                    {"rank": 6, "title": "L’Affaire Bojarski", "match_confidence": 0.94, "tmdb_id": 300002, "radarr_id": 13002, "radarr_status": "released", "radarr_has_file": False, "status": "Missing", "has_file": False},
+                    {"rank": 7, "title": "Zootopie 2", "match_confidence": 0.93, "tmdb_id": 300003, "radarr_id": 13003, "radarr_status": "released", "radarr_has_file": True, "status": "Downloaded", "has_file": True},
+                    {"rank": 8, "title": "Sonic 3", "match_confidence": 0.92, "tmdb_id": 300004, "radarr_id": 13004, "radarr_status": "released", "radarr_has_file": False, "status": "Missing", "has_file": False},
+                    {"rank": 9, "title": "Wicked", "match_confidence": 0.91, "tmdb_id": 300005, "radarr_id": 13005, "radarr_status": "released", "radarr_has_file": True, "status": "Downloaded", "has_file": True},
+                    {"rank": 10, "title": "Mickey 17", "match_confidence": 0.90, "tmdb_id": 300006, "radarr_id": 13006, "radarr_status": "released", "radarr_has_file": False, "status": "Missing", "has_file": False},
+                    {"rank": 11, "title": "Paddington au Pérou", "match_confidence": 0.89, "tmdb_id": 300007, "radarr_id": 13007, "radarr_status": "released", "radarr_has_file": False, "status": "Missing", "has_file": False},
+                ],
+            },
+            f,
+            indent=2,
+        )
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.get("/api/boxoffice/history/2026/W02?market=fr")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 10
+    assert [item["rank"] for item in data] == list(range(1, 11))
+    _assert_history_response_has_no_duplicate_ids_and_no_confidence_zero_ids(data)
+
+
+def test_history_boxoffice_route_sanitizes_fr_w21_confidence_and_duplicates(
+    tmp_path, monkeypatch
+):
+    config_path = _seed_config(tmp_path)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    fr_dir = tmp_path / "weekly_pages" / "fr"
+    fr_dir.mkdir(parents=True)
+    with open(fr_dir / "2026W21.json", "w") as f:
+        json.dump(
+            {
+                "generated_at": "2026-05-25T10:00:00",
+                "market": "fr",
+                "provider": "jpboxoffice",
+                "provider_config": {"country": "fr"},
+                "year": 2026,
+                "week": 21,
+                "movies": [
+                    {
+                        "rank": 1,
+                        "title": "La Femme de ménage",
+                        "original_title": "The Housemaid",
+                        "source_year": 2026,
+                        "radarr_id": 12582,
+                        "radarr_title": "La Femme de ménage",
+                        "radarr_status": "released",
+                        "radarr_has_file": True,
+                        "match_confidence": 0.98,
+                        "tmdb_id": 27047903,
+                        "status": "Downloaded",
+                        "has_file": True,
+                    },
+                    {
+                        "rank": 2,
+                        "title": "Avatar : de feu et de cendres",
+                        "original_title": "Avatar: Fire and Ash",
+                        "source_year": 2026,
+                        "radarr_id": 12510,
+                        "radarr_title": "Avatar: Fire and Ash",
+                        "radarr_status": "released",
+                        "radarr_has_file": False,
+                        "match_confidence": 0.97,
+                        "tmdb_id": 12345678,
+                        "status": "Missing",
+                        "has_file": False,
+                    },
+                    {
+                        "rank": 3,
+                        "title": "Low Confidence Movie A",
+                        "original_title": "Low Confidence Movie A",
+                        "source_year": 2026,
+                        "radarr_id": 9167,
+                        "radarr_title": "Shared Radarr Title",
+                        "radarr_status": "released",
+                        "radarr_has_file": True,
+                        "match_confidence": 0.0,
+                        "tmdb_id": 246655,
+                        "status": "Downloaded",
+                        "has_file": True,
+                    },
+                    {
+                        "rank": 4,
+                        "title": "Low Confidence Movie B",
+                        "original_title": "Low Confidence Movie B",
+                        "source_year": 2026,
+                        "radarr_id": 9167,
+                        "radarr_title": "Shared Radarr Title",
+                        "radarr_status": "released",
+                        "radarr_has_file": True,
+                        "match_confidence": 0.0,
+                        "tmdb_id": 246655,
+                        "status": "Downloaded",
+                        "has_file": True,
+                    },
+                    {"rank": 5, "title": "Le Mage du Kremlin", "match_confidence": 0.95, "tmdb_id": 300001, "radarr_id": 13001, "radarr_status": "released", "radarr_has_file": True, "status": "Downloaded", "has_file": True},
+                    {"rank": 6, "title": "L’Affaire Bojarski", "match_confidence": 0.94, "tmdb_id": 300002, "radarr_id": 13002, "radarr_status": "released", "radarr_has_file": False, "status": "Missing", "has_file": False},
+                    {"rank": 7, "title": "Zootopie 2", "match_confidence": 0.93, "tmdb_id": 300003, "radarr_id": 13003, "radarr_status": "released", "radarr_has_file": True, "status": "Downloaded", "has_file": True},
+                    {"rank": 8, "title": "Sonic 3", "match_confidence": 0.92, "tmdb_id": 300004, "radarr_id": 13004, "radarr_status": "released", "radarr_has_file": False, "status": "Missing", "has_file": False},
+                    {"rank": 9, "title": "Wicked", "match_confidence": 0.91, "tmdb_id": 300005, "radarr_id": 13005, "radarr_status": "released", "radarr_has_file": True, "status": "Downloaded", "has_file": True},
+                    {"rank": 10, "title": "Mickey 17", "match_confidence": 0.90, "tmdb_id": 300006, "radarr_id": 13006, "radarr_status": "released", "radarr_has_file": False, "status": "Missing", "has_file": False},
+                ],
+            },
+            f,
+            indent=2,
+        )
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.get("/api/boxoffice/history/2026/W21?market=fr")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 10
+    assert [item["rank"] for item in data] == list(range(1, 11))
+    _assert_history_response_has_no_duplicate_ids_and_no_confidence_zero_ids(data)
+
+
 @pytest.mark.parametrize(
     "market,country,view,min_year",
     [
@@ -448,9 +666,19 @@ def test_history_boxoffice_route_fr_w02_uses_row_order_rank_and_returns_10(
     data = resp.json()
     assert len(data) == 10
     assert [item["rank"] for item in data] == list(range(1, 11))
-    assert data[0]["title"] == "La Femme de ménage"
-    assert data[1]["rank"] == 2
-    assert data[1]["title"] == "Avatar : de feu et de cendres"
+    expected_titles = [
+        "La Femme de ménage",
+        "Avatar : de feu et de cendres",
+        "Le Mage du Kremlin",
+        "L'Affaire Bojarski",
+        "Zootopie 2",
+        "Primate",
+        "Hamnet",
+        "Le Chant des forêts",
+        "Greenland Migration",
+        "28 Ans Plus Tard : Le Temple Des Morts",
+    ]
+    assert [item["title"] for item in data] == expected_titles
     assert all(not item["title"].startswith("N°1 ") for item in data)
 
 

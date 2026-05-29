@@ -15,6 +15,7 @@ from ...core.boxoffice_provider import (
     provider_for_market,
 )
 from ...core.boxoffice_storage import resolve_weekly_page_path
+from ...core.history_sanitizer import sanitize_history_movies
 from ...core.market_settings import get_effective_market_settings
 from ...core.market_settings import get_market_capabilities
 from ...core.exceptions import BoxOfficeError
@@ -283,7 +284,7 @@ async def get_historical_box_office(
                 )
                 for movie in stored_movies
             ]
-            return movies
+            return sanitize_history_movies(movies)
 
         # Fallback to live provider only if no stored file exists.
         boxoffice_service = BoxOfficeService(market=market)
@@ -309,7 +310,7 @@ async def get_historical_box_office(
             if _is_parse_error(exc):
                 raise HTTPException(status_code=500, detail=str(exc))
             return []
-        return [
+        return sanitize_history_movies([
             {
                 "rank": movie.rank,
                 "title": movie.title,
@@ -327,7 +328,7 @@ async def get_historical_box_office(
                 ),
             }
             for movie in movies
-        ]
+        ])
     except ValueError as e:
         logger.error(f"Invalid market/provider for historical box office: {e}")
         raise HTTPException(status_code=400, detail=str(e))
