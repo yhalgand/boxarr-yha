@@ -569,6 +569,7 @@ def regenerate_weeks_with_movie(movie_title: str):
                     metadata.get("provider") or provider_for_market(market)
                 )
                 boxoffice_service = BoxOfficeService(market=market)
+                detail_fetcher = getattr(boxoffice_service, "extract_detail_metadata", None)
                 matcher = MovieMatcher()
 
                 # Get week's data
@@ -576,7 +577,16 @@ def regenerate_weeks_with_movie(movie_title: str):
                     year, week
                 )
                 matcher.build_movie_index(radarr_movies)
-                match_results = matcher.match_movies(box_office_movies, radarr_movies)
+                match_results = matcher.match_movies(
+                    box_office_movies,
+                    radarr_movies,
+                    market=market,
+                    search_movie_tmdb=(
+                        getattr(radarr_service, "search_movie_tmdb", None)
+                        or getattr(radarr_service, "search_movie", None)
+                    ),
+                    detail_fetcher=detail_fetcher,
+                )
 
                 # Generate updated data file
                 generator = WeeklyDataGenerator(

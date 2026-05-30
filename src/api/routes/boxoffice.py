@@ -47,6 +47,12 @@ class BoxOfficeMovieResponse(BaseModel):
     radarr_status: Optional[str] = None
     radarr_has_file: bool = False
     match_confidence: float = 0.0
+    tmdb_id: Optional[int] = None
+    source_href: Optional[str] = None
+    source_title: Optional[str] = None
+    source_url: Optional[str] = None
+    jpboxoffice_id: Optional[int] = None
+    identity_status: Optional[str] = None
 
 
 def _build_history_movie_response(
@@ -149,6 +155,10 @@ async def get_current_box_office(
         if settings.radarr_api_key:
             radarr_service = RadarrService()
             matcher = MovieMatcher()
+            search_movie_tmdb = getattr(radarr_service, "search_movie_tmdb", None)
+            if search_movie_tmdb is None:
+                search_movie_tmdb = getattr(radarr_service, "search_movie", None)
+            detail_fetcher = getattr(boxoffice_service, "extract_detail_metadata", None)
 
             # Get all Radarr movies and build index
             radarr_movies = radarr_service.get_all_movies()
@@ -156,7 +166,13 @@ async def get_current_box_office(
 
             # Match each movie
             for movie in movies:
-                match_result = matcher.match_movie(movie, radarr_movies)
+                match_result = matcher.match_movie(
+                    movie,
+                    radarr_movies,
+                    market=market,
+                    search_movie_tmdb=search_movie_tmdb,
+                    detail_fetcher=detail_fetcher,
+                )
                 results.append(
                     BoxOfficeMovieResponse(
                         rank=movie.rank,
@@ -184,6 +200,16 @@ async def get_current_box_office(
                             else False
                         ),
                         match_confidence=match_result.confidence if match_result.confidence > 0 else 0.0,
+                        tmdb_id=(
+                            match_result.resolved_tmdb_id
+                            if getattr(match_result, "resolved_tmdb_id", None) is not None
+                            else None
+                        ),
+                        source_href=movie.source_href,
+                        source_title=movie.source_title,
+                        source_url=movie.source_url,
+                        jpboxoffice_id=movie.jpboxoffice_id,
+                        identity_status=getattr(match_result, "identity_status", None),
                     )
                 )
         else:
@@ -199,6 +225,11 @@ async def get_current_box_office(
                     is_new_release=(
                         movie.weeks_released == 1 if movie.weeks_released else False
                     ),
+                    source_href=movie.source_href,
+                    source_title=movie.source_title,
+                    source_url=movie.source_url,
+                    jpboxoffice_id=movie.jpboxoffice_id,
+                    identity_status="Unmatched / needs identity",
                 )
                 for movie in movies
             ]
@@ -284,7 +315,7 @@ async def get_historical_box_office(
                 )
                 for movie in stored_movies
             ]
-            return sanitize_history_movies(movies)
+            return sanitize_history_movies(movies, market=market)
 
         # Fallback to live provider only if no stored file exists.
         boxoffice_service = BoxOfficeService(market=market)
@@ -323,12 +354,17 @@ async def get_historical_box_office(
                 "radarr_status": None,
                 "radarr_has_file": False,
                 "match_confidence": 0.0,
+                "identity_status": "Unmatched / needs identity",
+                "source_href": movie.source_href,
+                "source_title": movie.source_title,
+                "source_url": movie.source_url,
+                "jpboxoffice_id": movie.jpboxoffice_id,
                 "is_new_release": (
                     movie.weeks_released == 1 if movie.weeks_released else False
                 ),
             }
             for movie in movies
-        ])
+        ], market=market)
     except ValueError as e:
         logger.error(f"Invalid market/provider for historical box office: {e}")
         raise HTTPException(status_code=400, detail=str(e))

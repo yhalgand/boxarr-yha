@@ -73,25 +73,31 @@ def auto_add_missing_movies(
 
     for result in unmatched:
         try:
-            # Resolve a reliable TMDb candidate from the box-office title(s).
-            search_movie_tmdb = getattr(
-                radarr_service, "search_movie_tmdb", radarr_service.search_movie
-            )
-            identity = resolve_movie_identity(
-                result.box_office_movie,
-                search_movie_tmdb,
-                market=market,
-            )
-
-            if not identity.matched or not identity.movie_info:
-                logger.warning(
-                    "Movie '%s' not resolved in TMDB (%s)",
-                    result.box_office_movie.title,
-                    identity.reason,
+            movie_info = getattr(result, "resolved_movie_info", None) or {}
+            resolved_tmdb_id = getattr(result, "resolved_tmdb_id", None)
+            search_movie_tmdb = getattr(radarr_service, "search_movie_tmdb", None)
+            if search_movie_tmdb is None:
+                search_movie_tmdb = getattr(radarr_service, "search_movie", None)
+            if not movie_info or resolved_tmdb_id is None:
+                identity = resolve_movie_identity(
+                    result.box_office_movie,
+                    search_movie_tmdb,
+                    market=market,
                 )
-                continue
 
-            movie_info = identity.movie_info
+                if not identity.matched or not identity.movie_info:
+                    logger.warning(
+                        "Movie '%s' not resolved in TMDB (%s)",
+                        result.box_office_movie.title,
+                        identity.reason,
+                    )
+                    continue
+
+                movie_info = identity.movie_info
+                resolved_tmdb_id = movie_info.get("tmdbId")
+            elif resolved_tmdb_id and not movie_info.get("tmdbId"):
+                movie_info = dict(movie_info)
+                movie_info["tmdbId"] = resolved_tmdb_id
 
             # Skip movies on the ignore list
             movie_tmdb_id = movie_info.get("tmdbId")

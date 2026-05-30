@@ -215,8 +215,10 @@ async def repair_missing_metadata(
 
                     sample_data = unique_movies[title]["sample_data"]
                     search_movie_tmdb = getattr(
-                        radarr_service, "search_movie_tmdb", radarr_service.search_movie
+                        radarr_service, "search_movie_tmdb", None
                     )
+                    if search_movie_tmdb is None:
+                        search_movie_tmdb = getattr(radarr_service, "search_movie", None)
                     identity = resolve_movie_identity(
                         BoxOfficeMovie(
                             rank=sample_data.get("rank", 0) or 0,

@@ -53,9 +53,9 @@ def test_duplicate_tmdb_and_radarr_matches_are_rejected(tmp_path, monkeypatch):
 
     generator = WeeklyDataGenerator(
         radarr_service=_FakeRadarrService(),
-        market="fr",
-        provider="jpboxoffice",
-        provider_config={"country": "fr"},
+        market="us",
+        provider="mojo",
+        provider_config={"area": "us"},
     )
 
     shared_movie = RadarrMovie(
@@ -67,13 +67,31 @@ def test_duplicate_tmdb_and_radarr_matches_are_rejected(tmp_path, monkeypatch):
     )
     results = [
         MatchResult(
-            box_office_movie=BoxOfficeMovie(rank=1, title="Shared Movie FR", original_title="Shared Movie EN"),
+            box_office_movie=BoxOfficeMovie(
+                rank=1,
+                title="Shared Movie FR",
+                original_title="Shared Movie EN",
+                source_href="/fichfilm.php?id=100&view=2",
+                source_url="https://www.jpbox-office.com/v9_tophebdo.php?idsem=1&view=2",
+                source_title="Shared Movie FR",
+                jpboxoffice_id=100,
+                country="fr",
+            ),
             radarr_movie=shared_movie,
             confidence=0.98,
             match_method="tmdb_exact",
         ),
         MatchResult(
-            box_office_movie=BoxOfficeMovie(rank=2, title="Different Movie FR", original_title="Different Movie EN"),
+            box_office_movie=BoxOfficeMovie(
+                rank=2,
+                title="Different Movie FR",
+                original_title="Different Movie EN",
+                source_href="/fichfilm.php?id=101&view=2",
+                source_url="https://www.jpbox-office.com/v9_tophebdo.php?idsem=1&view=2",
+                source_title="Different Movie FR",
+                jpboxoffice_id=101,
+                country="fr",
+            ),
             radarr_movie=shared_movie,
             confidence=0.97,
             match_method="tmdb_exact",
@@ -86,6 +104,10 @@ def test_duplicate_tmdb_and_radarr_matches_are_rejected(tmp_path, monkeypatch):
     assert payload["movies"][0]["tmdb_id"] == 5000
     assert payload["movies"][0]["radarr_id"] == 100
     assert payload["movies"][0]["match_confidence"] == 0.98
+    assert payload["movies"][0]["source_href"] == "/fichfilm.php?id=100&view=2"
+    assert payload["movies"][0]["source_title"] == "Shared Movie FR"
+    assert payload["movies"][0]["jpboxoffice_id"] == 100
+    assert payload["movies"][0]["country"] == "fr"
     assert payload["movies"][1]["tmdb_id"] is None
     assert payload["movies"][1]["radarr_id"] is None
     assert payload["movies"][1]["match_confidence"] == 0.0

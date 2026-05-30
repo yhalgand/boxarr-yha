@@ -261,6 +261,233 @@ class TestMovieTitleMatching:
         assert result.is_matched
         assert result.radarr_movie.title == "L'Affaire Bojarski"
 
+    def test_french_tmdb_confirmed_matching_rejects_false_positives(self):
+        """FR matching should only trust TMDb-confirmed Radarr matches."""
+
+        def fake_search(term: str, language=None, region=None):
+            lowered = term.lower()
+            if "bojarski" in lowered:
+                return [
+                    {
+                        "title": "X-Men: Apocalypse",
+                        "originalTitle": "X-Men: Apocalypse",
+                        "tmdbId": 20001,
+                        "year": 2016,
+                    }
+                ]
+            if "forêts" in lowered or "forets" in lowered:
+                return [
+                    {
+                        "title": "3-Iron",
+                        "originalTitle": "3-Iron",
+                        "tmdbId": 20002,
+                        "year": 2004,
+                    }
+                ]
+            if "greenland" in lowered:
+                return [
+                    {
+                        "title": "2:22",
+                        "originalTitle": "2:22",
+                        "tmdbId": 20003,
+                        "year": 2017,
+                    }
+                ]
+            if "mage" in lowered:
+                return [
+                    {
+                        "title": "Le Mage du Kremlin",
+                        "originalTitle": "The Kremlin Wizard",
+                        "tmdbId": 20004,
+                        "year": 2026,
+                    }
+                ]
+            if "femme" in lowered or "housemaid" in lowered:
+                return [
+                    {
+                        "title": "La Femme de ménage",
+                        "originalTitle": "The Housemaid",
+                        "alternateTitles": [{"title": "The Housemaid"}],
+                        "tmdbId": 20005,
+                        "year": 2026,
+                        "remotePoster": "poster",
+                    }
+                ]
+            if "avatar" in lowered:
+                return [
+                    {
+                        "title": "Avatar : de feu et de cendres",
+                        "originalTitle": "Avatar: Fire and Ash",
+                        "alternateTitles": [{"title": "Avatar: Fire and Ash"}],
+                        "tmdbId": 20006,
+                        "year": 2026,
+                        "remotePoster": "poster",
+                    }
+                ]
+            return []
+
+        radarr_movies = [
+            self._create_radarr_movie(201, "X-Men: Apocalypse", 2016),
+            self._create_radarr_movie(202, "3-Iron", 2004),
+            self._create_radarr_movie(203, "2:22", 2017),
+            self._create_radarr_movie(204, "n", 2026),
+            self._create_radarr_movie(205, "The Housemaid", 2026),
+            self._create_radarr_movie(206, "Avatar: Fire and Ash", 2026),
+        ]
+        # Align TMDB ids with the fake search responses.
+        radarr_movies[0].tmdbId = 20001
+        radarr_movies[1].tmdbId = 20002
+        radarr_movies[2].tmdbId = 20003
+        radarr_movies[3].tmdbId = 20004
+        radarr_movies[4].tmdbId = 20005
+        radarr_movies[5].tmdbId = 20006
+        self.matcher.build_movie_index(radarr_movies)
+
+        false_positive_titles = [
+            "L'Affaire Bojarski",
+            "Le Chant des forêts",
+            "Greenland Migration",
+            "Le Mage du Kremlin",
+        ]
+        for rank, title in enumerate(false_positive_titles, start=1):
+            result = self.matcher.match_movie(
+                BoxOfficeMovie(rank=rank, title=title, year=2026),
+                radarr_movies,
+                market="fr",
+                search_movie_tmdb=fake_search,
+            )
+            assert not result.is_matched
+            assert result.confidence == 0.0
+            assert result.debug["rejection_reason"] is not None
+
+        positive_avatar = self.matcher.match_movie(
+            BoxOfficeMovie(
+                rank=9,
+                title="Avatar : de feu et de cendres",
+                original_title="Avatar: Fire and Ash",
+                year=2026,
+            ),
+            radarr_movies,
+            market="fr",
+            search_movie_tmdb=fake_search,
+        )
+        assert positive_avatar.is_matched
+        assert positive_avatar.radarr_movie.title == "Avatar: Fire and Ash"
+        assert positive_avatar.match_method == "tmdb_confirmed"
+        assert positive_avatar.confidence > 0.0
+
+        positive_housemaid = self.matcher.match_movie(
+            BoxOfficeMovie(
+                rank=10,
+                title="La Femme de ménage",
+                original_title="The Housemaid",
+                year=2026,
+            ),
+            radarr_movies,
+            market="fr",
+            search_movie_tmdb=fake_search,
+        )
+        assert positive_housemaid.is_matched
+        assert positive_housemaid.radarr_movie.title == "The Housemaid"
+        assert positive_housemaid.match_method == "tmdb_confirmed"
+        assert positive_housemaid.confidence > 0.0
+
+    def test_french_tmdb_confirmed_matching_uses_detail_enrichment(self):
+        """FR matching should use JPBoxOffice detail metadata when it helps confirm identity."""
+        detail_calls = []
+
+        def detail_fetcher(source_href):
+            detail_calls.append(source_href)
+            return {
+                "original_title": "The Singing Forests",
+                "english_title": "The Singing Forests",
+                "director": "Patrice Forest",
+                "year": 2026,
+            }
+
+        def fake_search(term: str, language=None, region=None):
+            lowered = term.lower()
+            if "singing forests" in lowered:
+                return [
+                    {
+                        "title": "The Singing Forests",
+                        "originalTitle": "The Singing Forests",
+                        "tmdbId": 20007,
+                        "year": 2026,
+                    }
+                ]
+            return []
+
+        radarr_movies = [self._create_radarr_movie(207, "The Singing Forests", 2026)]
+        radarr_movies[0].tmdbId = 20007
+        self.matcher.build_movie_index(radarr_movies)
+
+        result = self.matcher.match_movie(
+            BoxOfficeMovie(
+                rank=8,
+                title="Le Chant des forêts",
+                source_href="/fichfilm.php?id=50007&view=2",
+                jpboxoffice_id=50007,
+            ),
+            radarr_movies,
+            market="fr",
+            search_movie_tmdb=fake_search,
+            detail_fetcher=detail_fetcher,
+        )
+
+        assert detail_calls == ["/fichfilm.php?id=50007&view=2"]
+        assert result.is_matched
+        assert result.radarr_movie.title == "The Singing Forests"
+        assert result.match_method == "tmdb_confirmed"
+        assert result.resolved_tmdb_id == 20007
+        assert result.identity_status == "Matched in Radarr"
+
+    def test_french_tmdb_confirmed_matching_without_radarr_preserves_tmdb_identity(self):
+        """FR matching should keep a confirmed TMDB identity even when Radarr has no entry."""
+        detail_calls = []
+
+        def detail_fetcher(source_href):
+            detail_calls.append(source_href)
+            return {
+                "original_title": "The Kremlin Wizard",
+                "english_title": "The Kremlin Wizard",
+                "director": "Patrice Kremlin",
+                "year": 2026,
+            }
+
+        def fake_search(term: str, language=None, region=None):
+            if "kremlin" in term.lower():
+                return [
+                    {
+                        "title": "Le Mage du Kremlin",
+                        "originalTitle": "The Kremlin Wizard",
+                        "tmdbId": 20008,
+                        "year": 2026,
+                        "remotePoster": "poster",
+                    }
+                ]
+            return []
+
+        result = self.matcher.match_movie(
+            BoxOfficeMovie(
+                rank=7,
+                title="Le Mage du Kremlin",
+                source_href="/fichfilm.php?id=50008&view=2",
+                jpboxoffice_id=50008,
+            ),
+            [],
+            market="fr",
+            search_movie_tmdb=fake_search,
+            detail_fetcher=detail_fetcher,
+        )
+
+        assert detail_calls == ["/fichfilm.php?id=50008&view=2"]
+        assert not result.is_matched
+        assert result.resolved_tmdb_id == 20008
+        assert result.confidence > 0.0
+        assert result.match_method == "tmdb_confirmed"
+        assert result.identity_status == "TMDB confirmed / not in Radarr"
+
 
 class TestMatcherEdgeCases:
     """Test edge cases and error handling in the matcher."""

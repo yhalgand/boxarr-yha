@@ -173,6 +173,12 @@ def _payload_to_boxoffice_movies(payload: Dict[str, Any]) -> List[BoxOfficeMovie
                 year=movie.get("year") or movie.get("source_year"),
                 imdb_id=movie.get("imdb_id"),
                 release_url=movie.get("release_url"),
+                source_href=movie.get("source_href") or movie.get("release_url"),
+                source_url=movie.get("source_url"),
+                source_title=movie.get("source_title") or movie.get("title"),
+                market=movie.get("market"),
+                country=movie.get("country"),
+                jpboxoffice_id=movie.get("jpboxoffice_id"),
             )
         )
     return movies
@@ -421,6 +427,13 @@ def _backfill_add_sync(
             )
         )
         radarr_service = RadarrService()
+        boxoffice_service = None
+        detail_fetcher = None
+        if market_key == "fr":
+            from ...core.boxoffice import BoxOfficeService
+
+            boxoffice_service = BoxOfficeService(market=market_key)
+            detail_fetcher = getattr(boxoffice_service, "extract_detail_metadata", None)
         matcher = MovieMatcher()
         radarr_movies = get_all_movies_with_optional_cache_bypass(
             radarr_service, ignore_cache=True
@@ -442,7 +455,18 @@ def _backfill_add_sync(
                 refetch_required.append(str(path))
             box_office_movies = _payload_to_boxoffice_movies(week_payload)
             match_results = [
-                matcher.match_movie(box_office_movie, radarr_movies)
+                matcher.match_movie(
+                    box_office_movie,
+                    radarr_movies,
+                    market=market_key if market_key == "fr" else None,
+                    search_movie_tmdb=(
+                        getattr(radarr_service, "search_movie_tmdb", None)
+                        or getattr(radarr_service, "search_movie", None)
+                    )
+                    if market_key == "fr"
+                    else None,
+                    detail_fetcher=detail_fetcher,
+                )
                 for box_office_movie in box_office_movies
             ]
             matched_count = sum(1 for result in match_results if result.is_matched)

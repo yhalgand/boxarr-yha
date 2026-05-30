@@ -2,6 +2,7 @@
 
 from src.core.boxoffice import BoxOfficeMovie
 from src.core.movie_identity import resolve_movie_identity
+from src.utils.config import settings
 
 
 def test_resolve_avatar_from_french_and_original_titles():
@@ -111,3 +112,114 @@ def test_resolve_unknown_movie_rejects_false_positive():
     assert resolution.movie_info is not None
     assert resolution.movie_info["tmdbId"] == 333333
     assert resolution.confidence < 0.84
+
+
+def test_resolve_french_false_positive_rejects_unrelated_candidate():
+    def fake_search(term: str, language=None, region=None):
+        if "bojarski" in term.lower():
+            return [
+                {
+                    "title": "X-Men: Apocalypse",
+                    "originalTitle": "X-Men: Apocalypse",
+                    "tmdbId": 999001,
+                    "year": 2016,
+                }
+            ]
+        return []
+
+    movie = BoxOfficeMovie(
+        rank=6,
+        title="L'Affaire Bojarski",
+        original_title="L'Affaire Bojarski",
+        year=2026,
+    )
+
+    resolution = resolve_movie_identity(movie, fake_search, market="fr")
+
+    assert resolution.matched is False
+    assert resolution.movie_info is not None
+    assert resolution.movie_info["tmdbId"] == 999001
+    assert "confidence threshold" in resolution.debug["rejection_reason"] or "confirmation" in resolution.debug["rejection_reason"]
+
+
+def test_resolve_french_localized_title_confirms_positive_match():
+    def fake_search(term: str, language=None, region=None):
+        if "femme" in term.lower() or "housemaid" in term.lower():
+            return [
+                {
+                    "title": "La Femme de ménage",
+                    "originalTitle": "The Housemaid",
+                    "alternateTitles": [{"title": "The Housemaid"}],
+                    "tmdbId": 424200,
+                    "year": 2026,
+                    "remotePoster": "poster",
+                }
+            ]
+        return []
+
+    movie = BoxOfficeMovie(
+        rank=1,
+        title="La Femme de ménage",
+        original_title="The Housemaid",
+        year=2026,
+    )
+
+    resolution = resolve_movie_identity(movie, fake_search, market="fr")
+
+    assert resolution.matched is True
+    assert resolution.movie_info is not None
+    assert resolution.movie_info["tmdbId"] == 424200
+    assert resolution.confidence >= 0.84
+    assert resolution.debug["selected_candidate"] is not None
+    assert resolution.debug["selected_candidate"]["title_similarity"] >= 0.55
+
+
+def test_resolve_movie_identity_uses_detail_metadata_and_override(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "boxarr_data_directory", tmp_path)
+
+    overrides_path = tmp_path / "identity_overrides.json"
+    overrides_path.write_text(
+        """
+        {
+          "markets": {
+            "fr": {
+              "jpboxoffice_ids": {
+                "24871": {
+                  "tmdb_id": 424242,
+                  "notes": "manual override"
+                }
+              }
+            }
+          }
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    calls = []
+
+    def fake_search(term: str, language=None, region=None):
+        calls.append((term, language, region))
+        return []
+
+    movie = BoxOfficeMovie(
+        rank=10,
+        title="Le Mage du Kremlin",
+        source_href="/fichfilm.php?id=24871&view=2",
+        jpboxoffice_id=24871,
+        identity_metadata={
+            "english_title": "The Kremlin Wizard",
+            "original_title": "Le Mage du Kremlin",
+            "director": "J. Doe",
+            "year": 2026,
+        },
+    )
+
+    resolution = resolve_movie_identity(movie, fake_search, market="fr")
+
+    assert resolution.matched is True
+    assert resolution.movie_info is not None
+    assert resolution.movie_info["tmdbId"] == 424242
+    assert resolution.reason == "manual override"
+    assert resolution.debug["selected_candidate"]["source"] == "manual_override"
+    assert calls == []

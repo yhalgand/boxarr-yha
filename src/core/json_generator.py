@@ -161,6 +161,12 @@ class WeeklyDataGenerator:
                 "theater_count": result.box_office_movie.theater_count,
                 "original_title": result.box_office_movie.original_title,
                 "source_year": result.box_office_movie.year,
+                "source_href": result.box_office_movie.source_href,
+                "source_url": result.box_office_movie.source_url,
+                "source_title": result.box_office_movie.source_title,
+                "jpboxoffice_id": result.box_office_movie.jpboxoffice_id,
+                "market": result.box_office_movie.market or self.market,
+                "country": result.box_office_movie.country,
                 "radarr_id": None,
                 "radarr_title": None,
                 "status": "Not in Radarr",
@@ -178,7 +184,9 @@ class WeeklyDataGenerator:
                 "tmdb_id": None,
                 "original_language": None,
                 "match_confidence": float(result.confidence or 0.0),
-                "match_method": result.match_method if result.is_matched else "none",
+                "match_method": result.match_method or "none",
+                "identity_status": getattr(result, "identity_status", None)
+                or "Unmatched / needs identity",
                 "is_new_release": (
                     result.box_office_movie.weeks_released == 1
                     if result.box_office_movie.weeks_released is not None
@@ -186,11 +194,14 @@ class WeeklyDataGenerator:
                 ),
             }
 
+            resolved_tmdb_id = getattr(result, "resolved_tmdb_id", None)
+            resolved_movie_info = getattr(result, "resolved_movie_info", None) or {}
+            title_key = _normalize_title_key(
+                result.box_office_movie.original_title or result.box_office_movie.title
+            )
+
             if result.is_matched and result.radarr_movie and result.confidence > 0:
                 movie = result.radarr_movie
-                title_key = _normalize_title_key(
-                    result.box_office_movie.original_title or result.box_office_movie.title
-                )
                 tmdb_id = movie.tmdbId
                 radarr_id = movie.id
                 duplicate_conflict = False
@@ -219,6 +230,7 @@ class WeeklyDataGenerator:
                             "genres": None,
                             "overview": None,
                             "imdb_id": None,
+                            "identity_status": "Duplicate identity rejected",
                         }
                     )
                     movie_data["match_confidence"] = 0.0
@@ -252,6 +264,7 @@ class WeeklyDataGenerator:
                                 and movie.qualityProfileId != ultra_hd_id
                                 and settings.boxarr_features_quality_upgrade
                             ),
+                            "identity_status": "Matched in Radarr",
                         }
                     )
 
@@ -272,9 +285,68 @@ class WeeklyDataGenerator:
                         movie_data["status"] = "Pending"
                         movie_data["status_color"] = "#ed8936"
                         movie_data["status_icon"] = "⏳"
+            elif resolved_tmdb_id and result.confidence > 0:
+                duplicate_conflict = False
+                if resolved_tmdb_id in seen_tmdb_ids and seen_tmdb_ids[resolved_tmdb_id] != title_key:
+                    duplicate_conflict = True
+
+                if duplicate_conflict:
+                    logger.warning(
+                        "Rejecting duplicate TMDB identity for '%s' (tmdb_id=%s)",
+                        result.box_office_movie.title,
+                        resolved_tmdb_id,
+                    )
+                    movie_data.update(
+                        {
+                            "tmdb_id": None,
+                            "poster": None,
+                            "year": None,
+                            "genres": None,
+                            "overview": None,
+                            "imdb_id": None,
+                            "identity_status": "Duplicate identity rejected",
+                        }
+                    )
+                    movie_data["match_confidence"] = 0.0
+                    movie_data["match_method"] = "duplicate_rejected"
+                else:
+                    seen_tmdb_ids[resolved_tmdb_id] = title_key
+                    movie_data.update(
+                        {
+                            "tmdb_id": resolved_tmdb_id,
+                            "year": resolved_movie_info.get("year") or movie_data.get("source_year"),
+                            "overview": (
+                                resolved_movie_info.get("overview", "")[:150] + "..."
+                                if resolved_movie_info.get("overview")
+                                and len(resolved_movie_info.get("overview", "")) > 150
+                                else resolved_movie_info.get("overview")
+                            ),
+                            "poster": resolved_movie_info.get("remotePoster"),
+                            "imdb_id": resolved_movie_info.get("imdbId"),
+                            "genres": (
+                                ", ".join(resolved_movie_info.get("genres", [])[:2])
+                                if resolved_movie_info.get("genres")
+                                else None
+                            ),
+                            "original_language": (
+                                resolved_movie_info.get("originalLanguage", {}).get("name")
+                                if isinstance(
+                                    resolved_movie_info.get("originalLanguage"),
+                                    dict,
+                                )
+                                else None
+                            ),
+                            "identity_status": getattr(result, "identity_status", None)
+                            or "Resolved / not in Radarr",
+                            "status": getattr(result, "identity_status", None)
+                            or "Resolved / not in Radarr",
+                            "status_color": "#ed8936",
+                            "status_icon": "🧭",
+                        }
+                    )
             else:
-                # For unmatched movies, ALWAYS try to get data from TMDB
-                # This ensures we have poster and description for dashboard display
+                # For unresolved movies, only attach TMDB metadata when we can
+                # positively confirm an identity. Confidence 0 stays blank.
                 if self.radarr_service:
                     try:
                         search_movie_tmdb = getattr(
@@ -287,11 +359,17 @@ class WeeklyDataGenerator:
                             search_movie_tmdb,
                             market=self.market,
                         )
-                        if identity.matched and identity.movie_info:
+                        if (
+                            identity.matched
+                            and identity.movie_info
+                            and float(identity.confidence or 0.0) > 0
+                        ):
                             tmdb_movie = identity.movie_info
+                            resolved_tmdb_id = tmdb_movie.get("tmdbId")
                             movie_data.update(
                                 {
-                                    "tmdb_id": tmdb_movie.get("tmdbId"),
+                                    "match_confidence": float(identity.confidence or 0.0),
+                                    "tmdb_id": resolved_tmdb_id,
                                     "year": tmdb_movie.get("year"),
                                     "overview": (
                                         tmdb_movie.get("overview", "")[:150] + "..."
@@ -316,6 +394,10 @@ class WeeklyDataGenerator:
                                         )
                                         else None
                                     ),
+                                    "identity_status": "Resolved / not in Radarr",
+                                    "status": "Resolved / not in Radarr",
+                                    "status_color": "#ed8936",
+                                    "status_icon": "🧭",
                                 }
                             )
                             logger.info(
@@ -337,7 +419,7 @@ class WeeklyDataGenerator:
 
             movies_data.append(movie_data)
 
-        movies_data = sanitize_history_movies(movies_data)
+        movies_data = sanitize_history_movies(movies_data, market=self.market)
 
         # Save metadata with full movie data
         market_policy = get_market_policy(settings, self.market)

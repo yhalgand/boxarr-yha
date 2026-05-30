@@ -358,6 +358,7 @@ async def update_specific_week(
 
         # Get box office data
         boxoffice_service = BoxOfficeService(market=market)
+        detail_fetcher = getattr(boxoffice_service, "extract_detail_metadata", None)
         limit = settings.boxarr_features_box_office_limit
         box_office_movies = boxoffice_service.fetch_weekend_box_office(
             year, week, limit=limit
@@ -377,12 +378,21 @@ async def update_specific_week(
         if settings.radarr_api_key:
             radarr_service = RadarrService()
             matcher = MovieMatcher()
+            search_movie_tmdb = getattr(radarr_service, "search_movie_tmdb", None)
+            if search_movie_tmdb is None:
+                search_movie_tmdb = getattr(radarr_service, "search_movie", None)
 
             radarr_movies = get_all_movies_with_optional_cache_bypass(
                 radarr_service, ignore_cache=True
             )
             matcher.build_movie_index(radarr_movies)
-            match_results = matcher.match_movies(box_office_movies, radarr_movies)
+            match_results = matcher.match_movies(
+                box_office_movies,
+                radarr_movies,
+                market=market,
+                search_movie_tmdb=search_movie_tmdb,
+                detail_fetcher=detail_fetcher,
+            )
 
             # Auto-add if enabled
             if settings.boxarr_features_auto_add:
@@ -401,7 +411,11 @@ async def update_specific_week(
                     )
                     matcher.build_movie_index(radarr_movies)
                     match_results = matcher.match_movies(
-                        box_office_movies, radarr_movies
+                        box_office_movies,
+                        radarr_movies,
+                        market=market,
+                        search_movie_tmdb=search_movie_tmdb,
+                        detail_fetcher=detail_fetcher,
                     )
         else:
             # No Radarr, create unmatched results

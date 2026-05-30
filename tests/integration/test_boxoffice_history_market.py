@@ -447,6 +447,63 @@ def test_history_boxoffice_route_sanitizes_fr_w21_confidence_and_duplicates(
     _assert_history_response_has_no_duplicate_ids_and_no_confidence_zero_ids(data)
 
 
+def test_history_boxoffice_route_clears_dirty_fr_jpboxoffice_matches(
+    tmp_path, monkeypatch
+):
+    config_path = _seed_historical_market_config(tmp_path, "fr", "fr")
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    fr_dir = tmp_path / "weekly_pages" / "fr"
+    fr_dir.mkdir(parents=True)
+    with open(fr_dir / "2026W02.json", "w") as f:
+        json.dump(
+            {
+                "generated_at": "2026-05-25T10:00:00",
+                "market": "fr",
+                "provider": "jpboxoffice",
+                "provider_config": {"country": "fr"},
+                "year": 2026,
+                "week": 2,
+                "movies": [
+                    {
+                        "rank": 1,
+                        "title": "L'Affaire Bojarski",
+                        "provider": "jpboxoffice",
+                        "match_method": "fuzzy",
+                        "match_confidence": 0.95,
+                        "tmdb_id": 12345,
+                        "radarr_id": 67890,
+                        "radarr_title": "X-Men: Apocalypse",
+                        "radarr_status": "released",
+                        "radarr_has_file": True,
+                        "has_file": True,
+                        "quality_profile_name": "HD-1080p",
+                        "year": 2016,
+                        "genres": "Action",
+                    }
+                ],
+            },
+            f,
+            indent=2,
+        )
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.get("/api/boxoffice/history/2026/W02?market=fr")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["tmdb_id"] is None
+    assert data[0]["radarr_id"] is None
+    assert data[0]["radarr_title"] is None
+    assert data[0]["radarr_status"] is None
+    assert data[0]["radarr_has_file"] is False
+    assert data[0]["has_file"] is False
+    assert data[0]["quality_profile_name"] is None
+
+
 @pytest.mark.parametrize(
     "market,country,view,min_year",
     [
@@ -542,6 +599,10 @@ def test_history_boxoffice_route_de_returns_200_with_mocked_live_fetch(
                     total_gross=456.0,
                     weeks_released=1,
                     theater_count=100,
+                    source_href="/fichfilm.php?id=50001&view=4",
+                    source_url="https://www.jpbox-office.com/v9_tophebdo.php?idsem=2901&view=4",
+                    source_title="German Movie",
+                    jpboxoffice_id=50001,
                 )
             ]
 
@@ -559,6 +620,9 @@ def test_history_boxoffice_route_de_returns_200_with_mocked_live_fetch(
     assert data[0]["title"] == "German Movie"
     assert data[0]["weeks_released"] == 1
     assert data[0]["is_new_release"] is True
+    assert data[0]["source_href"] == "/fichfilm.php?id=50001&view=4"
+    assert data[0]["jpboxoffice_id"] == 50001
+    assert data[0]["identity_status"] == "Unmatched / needs identity"
 
 
 def test_history_boxoffice_route_de_returns_200_on_live_fetch_error(tmp_path, monkeypatch):

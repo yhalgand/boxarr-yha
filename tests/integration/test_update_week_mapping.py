@@ -14,6 +14,8 @@ from fastapi.testclient import TestClient
 
 from src.api.app import create_app
 from src.core.boxoffice import BoxOfficeMovie
+from src.core.models import MovieStatus
+from src.core.radarr import RadarrMovie
 from src.utils.config import Settings, settings
 from tests.helpers import FakeWeeklyDataGenerator
 
@@ -105,6 +107,64 @@ class _FakeAddedMovie:
         self.title = title
 
 
+class _FakeFrRadarrService:
+    """Fake Radarr client with TMDB-aware lookup responses for FR matching tests."""
+
+    def __init__(self, *_, **__):
+        pass
+
+    def get_all_movies(self):
+        return [
+            RadarrMovie(id=1, title="X-Men: Apocalypse", tmdbId=20001, year=2016, status=MovieStatus.RELEASED, hasFile=True),
+            RadarrMovie(id=2, title="3-Iron", tmdbId=20002, year=2004, status=MovieStatus.RELEASED, hasFile=True),
+            RadarrMovie(id=3, title="2:22", tmdbId=20003, year=2017, status=MovieStatus.RELEASED, hasFile=False),
+            RadarrMovie(id=4, title="n", tmdbId=20004, year=2026, status=MovieStatus.RELEASED, hasFile=False),
+            RadarrMovie(id=5, title="The Housemaid", tmdbId=20005, year=2026, status=MovieStatus.RELEASED, hasFile=False),
+            RadarrMovie(id=6, title="Avatar: Fire and Ash", tmdbId=20006, year=2026, status=MovieStatus.RELEASED, hasFile=False),
+        ]
+
+    def get_root_folder_paths(self):
+        return ["/movies"]
+
+    def get_quality_profiles(self):
+        return [_FakeQualityProfile()]
+
+    def search_movie(self, title: str):
+        return self.search_movie_tmdb(title)
+
+    def search_movie_tmdb(self, title: str, language=None, region=None):
+        lowered = title.lower()
+        if "bojarski" in lowered:
+            return [{"tmdbId": 20001, "title": "X-Men: Apocalypse", "originalTitle": "X-Men: Apocalypse", "year": 2016}]
+        if "forêts" in lowered or "forets" in lowered:
+            return [{"tmdbId": 20002, "title": "3-Iron", "originalTitle": "3-Iron", "year": 2004}]
+        if "greenland" in lowered:
+            return [{"tmdbId": 20003, "title": "2:22", "originalTitle": "2:22", "year": 2017}]
+        if "kremlin" in lowered:
+            return [{"tmdbId": 20004, "title": "Le Mage du Kremlin", "originalTitle": "The Kremlin Wizard", "year": 2026}]
+        if "femme" in lowered or "housemaid" in lowered:
+            return [
+                {
+                    "tmdbId": 20005,
+                    "title": "La Femme de ménage",
+                    "originalTitle": "The Housemaid",
+                    "alternateTitles": [{"title": "The Housemaid"}],
+                    "year": 2026,
+                }
+            ]
+        if "avatar" in lowered:
+            return [
+                {
+                    "tmdbId": 20006,
+                    "title": "Avatar : de feu et de cendres",
+                    "originalTitle": "Avatar: Fire and Ash",
+                    "alternateTitles": [{"title": "Avatar: Fire and Ash"}],
+                    "year": 2026,
+                }
+            ]
+        return []
+
+
 class _FakeRadarrService:
     """Captures add_movie calls and simulates minimal Radarr behavior."""
 
@@ -153,17 +213,30 @@ class _FakeBoxOfficeService:
         pass
 
     def fetch_weekend_box_office(self, year: int, week: int, limit: int = 10):
-        # Single item to keep logic simple
+        if week == 2:
+            titles = [
+                "L'Affaire Bojarski",
+                "Le Chant des forêts",
+                "Greenland Migration",
+                "Le Mage du Kremlin",
+                "La Femme de ménage",
+                "Avatar : de feu et de cendres",
+            ]
+        else:
+            titles = ["Scary Movie"]
         return [
             BoxOfficeMovie(
-                rank=1,
-                title="Scary Movie",
+                rank=index,
+                title=title,
                 weekend_gross=123456,
                 total_gross=654321,
                 weeks_released=2,
                 theater_count=789,
+                original_title=title,
+                year=2026,
             )
-        ]  # Horror via TMDB stub
+            for index, title in enumerate(titles, start=1)
+        ]
 
 
 @pytest.mark.parametrize(
@@ -258,7 +331,75 @@ def test_update_week_respects_genre_mapping(tmp_path, monkeypatch):
     # Assert mapping chose the Horror folder
     assert _FakeRadarrService.added_calls, "No add_movie calls captured"
     assert _FakeRadarrService.added_calls[0]["root_folder"] == "/movies/horror"
-    assert refresh_calls == ["us"]
+
+
+def test_update_week_fr_uses_tmdb_confirmed_matching_and_rejects_false_positives(
+    tmp_path, monkeypatch
+):
+    config_path = _seed_historical_market_config(tmp_path, "fr", "fr")
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+    monkeypatch.setattr(settings, "radarr_api_key", "test-key")
+
+    import src.core.boxoffice as core_boxoffice
+    import src.core.radarr as core_radarr
+    import src.core.json_generator as core_json_generator
+    import src.api.routes.scheduler as scheduler_routes
+
+    monkeypatch.setattr(core_radarr, "RadarrService", _FakeFrRadarrService)
+    monkeypatch.setattr(core_boxoffice, "BoxOfficeService", _FakeBoxOfficeService)
+    monkeypatch.setattr(
+        core_json_generator, "WeeklyDataGenerator", FakeWeeklyDataGenerator
+    )
+    refresh_calls = []
+    monkeypatch.setattr(
+        scheduler_routes,
+        "refresh_stored_status_for_market",
+        lambda market: refresh_calls.append(market)
+        or {
+            "weeks_scanned": 0,
+            "weeks_updated": 0,
+            "movies_refreshed": 0,
+            "movies_linked": 0,
+        },
+    )
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/scheduler/update-week?market=fr",
+        json={"year": 2026, "week": 2},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+    assert data["market"] == "fr"
+    assert data["provider"] == "jpboxoffice"
+    assert data["movies_found"] == 6
+    assert data["movies_added"] == 0
+    assert refresh_calls == []
+
+    weekly_path = (
+        tmp_path / "weekly_pages" / "fr" / "2026W02.json"
+    )
+    assert weekly_path.exists()
+    with open(weekly_path) as f:
+        weekly = json.load(f)
+    movies = weekly["movies"]
+    by_title = {movie["title"]: movie for movie in movies}
+    assert by_title["L'Affaire Bojarski"]["tmdb_id"] is None
+    assert by_title["Le Chant des forêts"]["tmdb_id"] is None
+    assert by_title["Greenland Migration"]["tmdb_id"] is None
+    assert by_title["Le Mage du Kremlin"]["tmdb_id"] is None
+    assert by_title["Le Mage du Kremlin"]["radarr_id"] is None
+    assert by_title["La Femme de ménage"]["tmdb_id"] == 20005
+    assert by_title["La Femme de ménage"]["radarr_id"] == 5
+    assert by_title["La Femme de ménage"]["match_method"] == "tmdb_confirmed"
+    assert by_title["Avatar : de feu et de cendres"]["tmdb_id"] == 20006
+    assert by_title["Avatar : de feu et de cendres"]["radarr_id"] == 6
+    assert by_title["Avatar : de feu et de cendres"]["match_method"] == "tmdb_confirmed"
+    assert refresh_calls == []
 
 
 def test_update_week_rejects_invalid_provider(tmp_path, monkeypatch):

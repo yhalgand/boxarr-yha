@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from bs4 import BeautifulSoup
@@ -46,6 +46,13 @@ class BoxOfficeMovie:
     year: Optional[int] = None
     imdb_id: Optional[str] = None
     release_url: Optional[str] = None
+    source_href: Optional[str] = None
+    source_url: Optional[str] = None
+    source_title: Optional[str] = None
+    market: Optional[str] = None
+    country: Optional[str] = None
+    jpboxoffice_id: Optional[int] = None
+    identity_metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         """Convert to dictionary."""
@@ -576,6 +583,7 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
         self,
         node,
         fallback_rank: int,
+        source_url: Optional[str] = None,
         release_urls: Optional[Dict[str, str]] = None,
     ) -> Tuple[Optional[BoxOfficeMovie], Optional[str], Dict[str, Any]]:
         """Parse a single ranking candidate into a movie, or return a skip reason."""
@@ -646,6 +654,12 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
             original_title=original_title,
             year=year,
             release_url=release_url,
+            source_href=release_url,
+            source_title=title,
+            source_url=source_url,
+            market=self.provider_key,
+            country=self.country,
+            jpboxoffice_id=self._extract_jpboxoffice_id(release_url),
         )
 
         return movie, None, {
@@ -766,6 +780,89 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
                 return None
         return None
 
+    def _extract_jpboxoffice_id(self, href: Optional[str]) -> Optional[int]:
+        if not href:
+            return None
+        match = re.search(r"[?&]id=(\d+)", href)
+        if not match:
+            return None
+        try:
+            return int(match.group(1))
+        except ValueError:
+            return None
+
+    def extract_detail_metadata(self, release_url: Optional[str]) -> Dict[str, Any]:
+        """Extract extra JPBoxOffice identity metadata from a detail page."""
+        if not release_url:
+            return {}
+        detail_url = release_url if release_url.startswith("http") else f"{self.BASE_URL}{release_url}"
+        try:
+            response = self.client.get(detail_url)
+            response.raise_for_status()
+        except Exception as exc:
+            logger.debug("Failed to fetch JPBoxOffice detail page %s: %s", detail_url, exc)
+            return {}
+
+        html = response.text or ""
+        soup = BeautifulSoup(html, "html.parser")
+        metadata: Dict[str, Any] = {
+            "source_href": release_url,
+            "source_url": detail_url,
+            "jpboxoffice_id": self._extract_jpboxoffice_id(release_url),
+        }
+
+        def _first_text(*selectors: str) -> Optional[str]:
+            for selector in selectors:
+                node = soup.select_one(selector)
+                if node:
+                    text = self._normalize_space(node.get_text(" ", strip=True))
+                    if text:
+                        return text
+            return None
+
+        title = _first_text("meta[property='og:title']", "h1", "title")
+        if title and ":" in title:
+            metadata["english_title"] = title
+
+        link_patterns = {
+            "imdb_id": r"pro\.imdb\.com/title/(tt\d+)/",
+            "tmdb_id": r"themoviedb\.org/movie/(\d+)",
+        }
+        for key, pattern in link_patterns.items():
+            match = re.search(pattern, html, re.IGNORECASE)
+            if match:
+                try:
+                    metadata[key] = int(match.group(1)) if key == "tmdb_id" else match.group(1)
+                except ValueError:
+                    continue
+
+        text = self._normalize_space(" ".join(soup.stripped_strings))
+        for label, key in [
+            (r"(?:Titre original|Original title)\s*[:\-]?\s*([^\n\r|]+)", "original_title"),
+            (r"(?:Titre international|International title)\s*[:\-]?\s*([^\n\r|]+)", "international_title"),
+            (r"(?:Titre anglais|English title)\s*[:\-]?\s*([^\n\r|]+)", "english_title"),
+            (r"(?:Réalisateur|Director)\s*[:\-]?\s*([^\n\r|]+)", "director"),
+            (r"(?:Pays|Country)\s*[:\-]?\s*([^\n\r|]+)", "country_name"),
+            (r"(?:Distributeur|Distributor)\s*[:\-]?\s*([^\n\r|]+)", "distributor"),
+            (r"(?:Durée|Runtime)\s*[:\-]?\s*([^\n\r|]+)", "runtime_text"),
+            (r"(?:Sortie|Release date)\s*[:\-]?\s*([^\n\r|]+)", "release_date_text"),
+        ]:
+            match = re.search(label, text, re.IGNORECASE)
+            if match:
+                metadata[key] = self._normalize_space(match.group(1))
+
+        for key in ("original_title", "international_title", "english_title"):
+            if key in metadata and metadata[key] == "":
+                metadata.pop(key, None)
+
+        year_text = metadata.get("release_date_text") or metadata.get("runtime_text")
+        if isinstance(year_text, str):
+            year_match = re.search(r"(19|20)\d{2}", year_text)
+            if year_match:
+                metadata["year"] = int(year_match.group(0))
+
+        return metadata
+
     def _extract_fr_title_metadata(
         self, title_cell, title: str
     ) -> Tuple[Optional[str], Optional[int]]:
@@ -863,6 +960,7 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
         rank: int,
         block_lines: List[str],
         limit: int,
+        source_url: Optional[str] = None,
         release_urls: Optional[Dict[str, str]] = None,
     ) -> Optional[BoxOfficeMovie]:
         if rank > limit:
@@ -877,7 +975,6 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
             logger.debug(f"Skipping row without parseable metrics for title={title}: {block_lines}")
             return None
 
-        is_new_release = metrics["weeks_released"] == 1
         release_url = None
         if release_urls:
             release_url = release_urls.get(self._title_key(title))
@@ -890,6 +987,12 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
             weeks_released=metrics["weeks_released"],
             theater_count=metrics["theater_count"],
             release_url=release_url,
+            source_href=release_url,
+            source_title=title,
+            source_url=source_url,
+            market=self.provider_key,
+            country=self.country,
+            jpboxoffice_id=self._extract_jpboxoffice_id(release_url),
         )
 
     def _parse_weekly_page(
@@ -933,7 +1036,10 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
                 break
             fallback_rank = len(movies) + 1
             movie, reason, parsed_meta = self._parse_candidate_node(
-                node, fallback_rank=fallback_rank, release_urls=release_urls
+                node,
+                fallback_rank=fallback_rank,
+                source_url=source_url,
+                release_urls=release_urls,
             )
             if movie is None:
                 if reason == "header_title":

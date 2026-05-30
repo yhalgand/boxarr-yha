@@ -82,6 +82,12 @@ class FakeWeeklyDataGenerator:
                 "theater_count": box_movie.theater_count,
                 "original_title": box_movie.original_title,
                 "source_year": box_movie.year,
+                "source_href": box_movie.source_href,
+                "source_url": box_movie.source_url,
+                "source_title": box_movie.source_title,
+                "jpboxoffice_id": box_movie.jpboxoffice_id,
+                "market": box_movie.market or self.market,
+                "country": box_movie.country,
                 "radarr_id": None,
                 "radarr_title": None,
                 "status": "Not in Radarr",
@@ -98,6 +104,10 @@ class FakeWeeklyDataGenerator:
                 "imdb_id": None,
                 "tmdb_id": None,
                 "original_language": None,
+                "identity_status": getattr(result, "identity_status", None)
+                or "Unmatched / needs identity",
+                "match_confidence": float(getattr(result, "confidence", 0.0) or 0.0),
+                "match_method": getattr(result, "match_method", "none") or "none",
                 "is_new_release": (
                     box_movie.weeks_released == 1
                     if box_movie.weeks_released is not None
@@ -126,6 +136,7 @@ class FakeWeeklyDataGenerator:
                         "original_language": movie.original_language,
                         "poster": movie.poster_url,
                         "can_upgrade_quality": False,
+                        "identity_status": "Matched in Radarr",
                     }
                 )
                 if movie.hasFile:
@@ -136,6 +147,38 @@ class FakeWeeklyDataGenerator:
                     movie_data["status"] = "Missing"
                     movie_data["status_color"] = "#f56565"
                     movie_data["status_icon"] = "❌"
+            elif getattr(result, "resolved_tmdb_id", None) and float(getattr(result, "confidence", 0.0) or 0.0) > 0:
+                movie_info = getattr(result, "resolved_movie_info", None) or {}
+                movie_data.update(
+                    {
+                        "tmdb_id": getattr(result, "resolved_tmdb_id", None),
+                        "year": movie_info.get("year"),
+                        "overview": (
+                            movie_info.get("overview", "")[:150] + "..."
+                            if movie_info.get("overview")
+                            and len(movie_info.get("overview", "")) > 150
+                            else movie_info.get("overview")
+                        ),
+                        "poster": movie_info.get("remotePoster"),
+                        "imdb_id": movie_info.get("imdbId"),
+                        "genres": (
+                            ", ".join(movie_info.get("genres", [])[:2])
+                            if movie_info.get("genres")
+                            else None
+                        ),
+                        "original_language": (
+                            movie_info.get("originalLanguage", {}).get("name")
+                            if isinstance(movie_info.get("originalLanguage"), dict)
+                            else None
+                        ),
+                        "identity_status": getattr(result, "identity_status", None)
+                        or "Resolved / not in Radarr",
+                        "status": getattr(result, "identity_status", None)
+                        or "Resolved / not in Radarr",
+                        "status_color": "#ed8936",
+                        "status_icon": "🧭",
+                    }
+                )
 
             movies_data.append(movie_data)
 

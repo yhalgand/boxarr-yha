@@ -2,12 +2,13 @@
 
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..utils.logger import get_logger
 from .boxoffice import BoxOfficeMovie
+from .movie_identity import resolve_movie_identity
 from .radarr import RadarrMovie
 
 logger = get_logger(__name__)
@@ -21,6 +22,10 @@ class MatchResult:
     radarr_movie: Optional[RadarrMovie] = None
     confidence: float = 0.0
     match_method: str = "none"
+    resolved_tmdb_id: Optional[int] = None
+    resolved_movie_info: Optional[Dict[str, Any]] = None
+    identity_status: str = "Unmatched / needs identity"
+    debug: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_matched(self) -> bool:
@@ -95,6 +100,7 @@ class MovieMatcher:
         self.min_confidence = min_confidence
         self._movie_cache: Dict[str, RadarrMovie] = {}
         self._imdb_index: Dict[str, RadarrMovie] = {}
+        self._tmdb_index: Dict[int, RadarrMovie] = {}
         self._index_built = False
 
     def build_movie_index(self, movies: List[RadarrMovie]) -> None:
@@ -106,10 +112,16 @@ class MovieMatcher:
         """
         self._movie_cache.clear()
         self._imdb_index.clear()
+        self._tmdb_index.clear()
 
         for movie in movies:
             if movie.imdbId:
                 self._imdb_index[movie.imdbId] = movie
+            if getattr(movie, "tmdbId", None):
+                try:
+                    self._tmdb_index[int(movie.tmdbId)] = movie
+                except (TypeError, ValueError):
+                    pass
 
         def _is_sequel(title: str) -> bool:
             # Has trailing number or roman numeral
@@ -148,6 +160,168 @@ class MovieMatcher:
 
         logger.info(f"Built movie index with {len(movies)} movies")
         self._index_built = True
+
+    def _is_junk_title(self, title: Optional[str]) -> bool:
+        normalized = self.normalize_title(title or "")
+        if len(normalized) < 2:
+            return True
+        if normalized in {"n", "na", "n a", "unknown", "untitled"}:
+            return True
+        return False
+
+    def _apply_detail_metadata(
+        self,
+        box_office_movie: BoxOfficeMovie,
+        detail_fetcher: Optional[Callable[[Optional[str]], Dict[str, Any]]],
+    ) -> None:
+        if not detail_fetcher:
+            return
+        source_href = getattr(box_office_movie, "source_href", None) or getattr(
+            box_office_movie, "release_url", None
+        )
+        if not source_href:
+            return
+        try:
+            detail = detail_fetcher(source_href)
+        except Exception as exc:
+            logger.debug(
+                "Could not enrich JPBoxOffice detail metadata for '%s': %s",
+                box_office_movie.title,
+                exc,
+            )
+            return
+        if not isinstance(detail, dict) or not detail:
+            return
+        metadata = getattr(box_office_movie, "identity_metadata", None)
+        if not isinstance(metadata, dict):
+            metadata = {}
+            box_office_movie.identity_metadata = metadata
+        metadata.update(detail)
+        for field_name in ("original_title", "international_title", "english_title"):
+            value = detail.get(field_name)
+            if isinstance(value, str) and value.strip() and not getattr(
+                box_office_movie, field_name, None
+            ):
+                setattr(box_office_movie, field_name, value.strip())
+        detail_year = detail.get("year")
+        if box_office_movie.year is None and isinstance(detail_year, int):
+            box_office_movie.year = detail_year
+
+    def _best_confirmed_radarr_match(
+        self,
+        box_office_movie: BoxOfficeMovie,
+        radarr_movies: List[RadarrMovie],
+        search_movie_tmdb: Optional[Callable[..., List[Dict[str, Any]]]],
+        detail_fetcher: Optional[Callable[[Optional[str]], Dict[str, Any]]] = None,
+    ) -> MatchResult:
+        """Strict FR matcher that requires TMDB confirmation before Radarr linkage."""
+        debug: Dict[str, Any] = {
+            "source_title": box_office_movie.title,
+            "cleaned_title": self.normalize_title(box_office_movie.title),
+            "tmdb_query": None,
+            "tmdb_language": "fr-FR",
+            "tmdb_region": "FR",
+            "candidates": [],
+            "selected_candidate": None,
+            "radarr_title": None,
+            "rejection_reason": None,
+        }
+
+        if search_movie_tmdb is None:
+            debug["rejection_reason"] = "missing tmdb search callable"
+            return MatchResult(
+                box_office_movie=box_office_movie,
+                confidence=0.0,
+                match_method="none",
+                debug=debug,
+            )
+
+        self._apply_detail_metadata(box_office_movie, detail_fetcher)
+        identity = resolve_movie_identity(
+            box_office_movie,
+            search_movie_tmdb,
+            market="fr",
+        )
+        debug.update(identity.debug or {})
+        debug["candidates"] = identity.debug.get("candidates", [])
+
+        if not identity.matched or not identity.movie_info:
+            debug["rejection_reason"] = identity.reason or "tmdb resolution rejected"
+            return MatchResult(
+                box_office_movie=box_office_movie,
+                confidence=0.0,
+                match_method="none",
+                debug=debug,
+            )
+
+        movie_info = identity.movie_info
+        try:
+            tmdb_id = int(movie_info.get("tmdbId"))
+        except (TypeError, ValueError):
+            debug["rejection_reason"] = "resolved tmdb candidate missing tmdbId"
+            return MatchResult(
+                box_office_movie=box_office_movie,
+                confidence=0.0,
+                match_method="none",
+                debug=debug,
+            )
+
+        resolved_identity_status = "TMDB confirmed / not in Radarr"
+        resolved_match_method = "tmdb_confirmed"
+        if identity.reason == "manual override":
+            resolved_identity_status = "Manual confirmed / not in Radarr"
+            resolved_match_method = "manual_confirmed"
+
+        radarr_movie = self._tmdb_index.get(tmdb_id)
+        if not radarr_movie:
+            radarr_movie = next(
+                (movie for movie in radarr_movies if getattr(movie, "tmdbId", None) == tmdb_id),
+                None,
+            )
+        if not radarr_movie:
+            debug["rejection_reason"] = f"tmdbId {tmdb_id} not present in Radarr"
+            return MatchResult(
+                box_office_movie=box_office_movie,
+                confidence=float(identity.confidence or 0.0),
+                match_method=resolved_match_method,
+                resolved_tmdb_id=tmdb_id,
+                resolved_movie_info=movie_info,
+                identity_status=resolved_identity_status,
+                debug=debug,
+            )
+
+        if self._is_junk_title(radarr_movie.title):
+            debug["rejection_reason"] = f"junk radarr title '{radarr_movie.title}'"
+            return MatchResult(
+                box_office_movie=box_office_movie,
+                confidence=0.0,
+                match_method="none",
+                debug=debug,
+            )
+
+        title_similarity = float(identity.debug.get("title_similarity") or 0.0)
+        confidence = round((float(identity.confidence or 0.0) + title_similarity) / 2, 3)
+        selected_candidate = dict(identity.debug.get("selected_candidate") or {})
+        selected_candidate.update(
+            {
+                "radarr_title": radarr_movie.title,
+                "radarr_id": radarr_movie.id,
+                "confidence": confidence,
+            }
+        )
+        debug["radarr_title"] = radarr_movie.title
+        debug["selected_candidate"] = selected_candidate
+        debug["rejection_reason"] = None
+        return MatchResult(
+            box_office_movie=box_office_movie,
+            radarr_movie=radarr_movie,
+            confidence=confidence,
+            match_method=resolved_match_method,
+            resolved_tmdb_id=tmdb_id,
+            resolved_movie_info=movie_info,
+            identity_status="Matched in Radarr",
+            debug=debug,
+        )
 
     def normalize_title(self, title: str) -> str:
         """
@@ -312,6 +486,8 @@ class MovieMatcher:
                 radarr_movie=result,
                 confidence=1.0,
                 match_method="exact",
+                resolved_tmdb_id=getattr(result, "tmdbId", None),
+                identity_status="Matched in Radarr",
             )
 
         # Try special cases (sequels, remakes, etc.)
@@ -322,6 +498,8 @@ class MovieMatcher:
                 radarr_movie=result,
                 confidence=0.85,
                 match_method="special",
+                resolved_tmdb_id=getattr(result, "tmdbId", None),
+                identity_status="Matched in Radarr",
             )
 
         # Try normalized match (including number conversions)
@@ -332,6 +510,8 @@ class MovieMatcher:
                 radarr_movie=result,
                 confidence=0.95,
                 match_method="normalized",
+                resolved_tmdb_id=getattr(result, "tmdbId", None),
+                identity_status="Matched in Radarr",
             )
 
         # Try fuzzy matching
@@ -342,6 +522,8 @@ class MovieMatcher:
                 radarr_movie=result,
                 confidence=confidence,
                 match_method="fuzzy",
+                resolved_tmdb_id=getattr(result, "tmdbId", None),
+                identity_status="Matched in Radarr",
             )
 
         # No match found
@@ -350,6 +532,7 @@ class MovieMatcher:
             radarr_movie=None,
             confidence=0.0,
             match_method="none",
+            identity_status="Unmatched / needs identity",
         )
 
     def _match_title_variants(
@@ -570,7 +753,12 @@ class MovieMatcher:
         return results
 
     def match_movie(
-        self, box_office_movie: BoxOfficeMovie, radarr_movies: List[RadarrMovie]
+        self,
+        box_office_movie: BoxOfficeMovie,
+        radarr_movies: List[RadarrMovie],
+        market: Optional[str] = None,
+        search_movie_tmdb: Optional[Callable[..., List[Dict[str, Any]]]] = None,
+        detail_fetcher: Optional[Callable[[Optional[str]], Dict[str, Any]]] = None,
     ) -> MatchResult:
         """
         Alias for match_single to maintain compatibility with routes.
@@ -586,6 +774,14 @@ class MovieMatcher:
         if not self._index_built:
             self.build_movie_index(radarr_movies)
 
+        if market == "fr":
+            return self._best_confirmed_radarr_match(
+                box_office_movie,
+                radarr_movies,
+                search_movie_tmdb,
+                detail_fetcher=detail_fetcher,
+            )
+
         # Try IMDb match first (language-agnostic)
         imdb_match = self._try_imdb_match(box_office_movie.imdb_id)
         if imdb_match:
@@ -594,6 +790,8 @@ class MovieMatcher:
                 radarr_movie=imdb_match,
                 confidence=1.0,
                 match_method="imdb_id",
+                resolved_tmdb_id=getattr(imdb_match, "tmdbId", None),
+                identity_status="Matched in Radarr",
             )
 
         # Fall back to title matching, preferring the original title when available.
@@ -618,7 +816,12 @@ class MovieMatcher:
         return result
 
     def match_movies(
-        self, box_office_movies: List[BoxOfficeMovie], radarr_movies: List[RadarrMovie]
+        self,
+        box_office_movies: List[BoxOfficeMovie],
+        radarr_movies: List[RadarrMovie],
+        market: Optional[str] = None,
+        search_movie_tmdb: Optional[Callable[..., List[Dict[str, Any]]]] = None,
+        detail_fetcher: Optional[Callable[[Optional[str]], Dict[str, Any]]] = None,
     ) -> List[MatchResult]:
         """
         Alias for match_batch to maintain compatibility with routes.
@@ -630,4 +833,31 @@ class MovieMatcher:
         Returns:
             List of MatchResult objects
         """
-        return self.match_batch(box_office_movies, radarr_movies)
+        if market is None and search_movie_tmdb is None:
+            return self.match_batch(box_office_movies, radarr_movies)
+
+        self.build_movie_index(radarr_movies)
+        results = []
+        for box_movie in box_office_movies:
+            match_result = self.match_movie(
+                box_movie,
+                radarr_movies,
+                market=market,
+                search_movie_tmdb=search_movie_tmdb,
+                detail_fetcher=detail_fetcher,
+            )
+            results.append(match_result)
+
+            if match_result.is_matched:
+                logger.debug(
+                    f"Matched '{box_movie.title}' to '{match_result.radarr_movie.title}' "
+                    f"(confidence: {match_result.confidence:.2f}, method: {match_result.match_method})"
+                )
+            else:
+                logger.debug(f"No match found for '{box_movie.title}'")
+
+        matched_count = sum(1 for r in results if r.is_matched)
+        logger.info(
+            f"Matched {matched_count}/{len(box_office_movies)} box office movies"
+        )
+        return results
