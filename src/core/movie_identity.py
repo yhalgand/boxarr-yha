@@ -359,6 +359,8 @@ def resolve_movie_identity(
             }
             debug = {
                 "source_title": movie.title,
+                "normalized_source_title": getattr(movie, "normalized_source_title", None)
+                or _normalize_text(movie.title),
                 "cleaned_title": _normalize_text(movie.title),
                 "tmdb_query": None,
                 "tmdb_language": _search_locale_for_market(market)["language"],
@@ -395,12 +397,14 @@ def resolve_movie_identity(
     locale = _search_locale_for_market(market)
     source_title = movie.title
     cleaned_title = _normalize_text(movie.title)
+    normalized_source_title = getattr(movie, "normalized_source_title", None) or cleaned_title
     if not terms:
         return MovieIdentityResolution(
             matched=False,
             reason="no search terms available",
             debug={
                 "source_title": source_title,
+                "normalized_source_title": normalized_source_title,
                 "cleaned_title": cleaned_title,
                 "tmdb_language": locale["language"],
                 "tmdb_region": locale["region"],
@@ -502,6 +506,7 @@ def resolve_movie_identity(
                     candidates=candidate_log,
                     debug={
                         "source_title": source_title,
+                        "normalized_source_title": normalized_source_title,
                         "cleaned_title": cleaned_title,
                         "tmdb_query": best_term,
                         "tmdb_language": locale["language"],
@@ -557,6 +562,7 @@ def resolve_movie_identity(
             candidates=candidate_log,
             debug={
                 "source_title": source_title,
+                "normalized_source_title": normalized_source_title,
                 "cleaned_title": cleaned_title,
                 "tmdb_query": best_term,
                 "tmdb_language": locale["language"],
@@ -587,6 +593,7 @@ def resolve_movie_identity(
         candidates=candidate_log,
         debug={
             "source_title": source_title,
+            "normalized_source_title": normalized_source_title,
             "cleaned_title": cleaned_title,
             "tmdb_query": best_term,
             "tmdb_language": locale["language"],

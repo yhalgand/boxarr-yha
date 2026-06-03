@@ -2,7 +2,13 @@
 
 import pytest
 
-from src.core.boxoffice import JPBoxOfficeFRProvider, MojoUSProvider, create_provider
+from src.core.boxoffice import (
+    AllocineFRProvider,
+    FranceBoxOfficeProvider,
+    JPBoxOfficeFRProvider,
+    MojoUSProvider,
+    create_provider,
+)
 from src.core.boxoffice_provider import (
     DEFAULT_MARKET,
     DEFAULT_PROVIDER,
@@ -30,11 +36,14 @@ def test_market_and_provider_mapping():
     assert normalize_provider("mojo_us") == "mojo"
     assert normalize_provider("jpboxoffice_fr") == "jpboxoffice"
     assert provider_from_market("us") == "mojo"
-    assert provider_from_market("fr") == "jpboxoffice"
+    assert provider_from_market("fr") == "france_boxoffice"
     assert market_from_provider("mojo_us") == "us"
     assert market_from_provider("jpboxoffice_fr") == "fr"
+    assert market_from_provider("allocine_fr") == "fr"
     assert market_from_provider("mojo") == "us"
     assert market_from_provider("jpboxoffice") == "fr"
+    assert market_from_provider("allocine") == "fr"
+    assert market_from_provider("france_boxoffice") == "fr"
 
     with pytest.raises(ValueError):
         normalize_market("de")
@@ -115,6 +124,12 @@ def test_iterators_do_not_fall_back_to_legacy_for_fr(tmp_path):
 def test_fr_provider_is_real_provider_class():
     provider = create_provider("jpboxoffice_fr")
     assert isinstance(provider, JPBoxOfficeFRProvider)
+
+    allocine = create_provider("allocine_fr")
+    assert isinstance(allocine, AllocineFRProvider)
+
+    france = create_provider("france_boxoffice")
+    assert isinstance(france, FranceBoxOfficeProvider)
 
 
 def test_generic_providers_accept_canonical_config():

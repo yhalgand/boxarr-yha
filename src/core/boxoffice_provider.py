@@ -10,7 +10,15 @@ from typing import Any, Dict, List, Optional, Tuple
 from .exceptions import BoxOfficeError
 
 SUPPORTED_MARKETS: Tuple[str, ...] = ("us", "fr")
-SUPPORTED_PROVIDERS: Tuple[str, ...] = ("mojo", "jpboxoffice", "mojo_us", "jpboxoffice_fr")
+SUPPORTED_PROVIDERS: Tuple[str, ...] = (
+    "mojo",
+    "jpboxoffice",
+    "allocine",
+    "france_boxoffice",
+    "mojo_us",
+    "jpboxoffice_fr",
+    "allocine_fr",
+)
 DEFAULT_MARKET = "us"
 DEFAULT_PROVIDER = "mojo"
 JPBOXOFFICE_COUNTRY_SPECS: Dict[str, Dict[str, Any]] = {
@@ -80,8 +88,8 @@ MARKET_DEFINITIONS: Dict[str, Dict[str, str]] = {
     },
     "fr": {
         "label": "France Box Office",
-        "provider": "jpboxoffice",
-        "source": "jpboxoffice",
+        "provider": "france_boxoffice",
+        "source": "allocine+jpboxoffice",
         "units": "admissions",
     },
 }
@@ -91,13 +99,27 @@ MARKET_TO_PROVIDER: Dict[str, str] = {
 PROVIDER_TO_MARKET: Dict[str, str] = {
     provider: market for market, provider in MARKET_TO_PROVIDER.items()
 }
+PROVIDER_TO_MARKET.update(
+    {
+        "jpboxoffice": "fr",
+        "allocine": "fr",
+    }
+)
 PROVIDER_ALIAS_MAP: Dict[str, Tuple[str, Dict[str, Any]]] = {
     "mojo_us": ("mojo", {"area": "us"}),
     "jpboxoffice_fr": ("jpboxoffice", {"country": "fr"}),
+    "allocine_fr": ("allocine", {"country": "fr"}),
 }
 PROVIDER_FAMILY_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "mojo": {"area": "us"},
     "jpboxoffice": {"country": "fr"},
+    "allocine": {"country": "fr", "min_entries": 10},
+    "france_boxoffice": {
+        "country": "fr",
+        "primary": "allocine",
+        "fallback": "jpboxoffice",
+        "min_entries": 10,
+    },
 }
 
 
@@ -167,6 +189,42 @@ def get_boxoffice_provider_capabilities(
             },
         }
 
+    if normalized_provider == "allocine":
+        normalized_config = normalize_provider_config(normalized_provider, provider_config)
+        country = str(normalized_config.get("country", "fr")).strip().lower()
+        supported = country == "fr"
+        return {
+            "provider": "allocine",
+            "country": country,
+            "country_label": "France" if supported else None,
+            "live": {"supports_live_fetch": supported},
+            "historical": {
+                "supports_historical_update": supported,
+                "min_year": 1998 if supported else None,
+                "soft_min_year": 2001 if supported else None,
+                "max_year": current_year,
+                "min_entries": int(normalized_config.get("min_entries", 10) or 10),
+            },
+        }
+
+    if normalized_provider == "france_boxoffice":
+        normalized_config = normalize_provider_config(normalized_provider, provider_config)
+        return {
+            "provider": "france_boxoffice",
+            "country": "fr",
+            "country_label": "France",
+            "primary_provider": normalized_config.get("primary", "allocine"),
+            "fallback_provider": normalized_config.get("fallback", "jpboxoffice"),
+            "live": {"supports_live_fetch": True},
+            "historical": {
+                "supports_historical_update": True,
+                "min_year": 1998,
+                "soft_min_year": 2001,
+                "max_year": current_year,
+                "min_entries": int(normalized_config.get("min_entries", 10) or 10),
+            },
+        }
+
     return {
         "provider": normalized_provider,
         "live": {"supports_live_fetch": False},
@@ -210,6 +268,12 @@ def provider_aliases(
         aliases.append(
             f"jpboxoffice_{str(normalized_config['country']).strip().lower()}"
         )
+    elif normalized_provider == "allocine" and normalized_config.get("country"):
+        aliases.append(
+            f"allocine_{str(normalized_config['country']).strip().lower()}"
+        )
+    elif normalized_provider == "france_boxoffice":
+        aliases.extend(["allocine_fr", "jpboxoffice_fr"])
 
     return aliases
 

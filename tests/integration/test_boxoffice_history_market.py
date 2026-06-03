@@ -88,6 +88,46 @@ def _country_fixture_html(html: str, view: int) -> str:
     return html.replace("view=2", f"view={view}")
 
 
+def test_history_boxoffice_route_exposes_allocine_movie_id(tmp_path, monkeypatch):
+    config_path = _seed_config(tmp_path)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+    monkeypatch.setattr(settings, "radarr_api_key", "")
+
+    class _AllocineService:
+        def __init__(self, *_, **__):
+            pass
+
+        def fetch_weekend_box_office(self, year, week, limit=10):
+            return [
+                BoxOfficeMovie(
+                    rank=1,
+                    title="Un p'tit truc en plus",
+                    weekend_gross=1131341,
+                    source_href="/film/fichefilm_gen_cfilm=300001.html",
+                    source_url="https://www.allocine.fr/boxoffice/france/sem-2024-05-01/",
+                    source_title="Un p'tit truc en plus",
+                    normalized_source_title="un ptit truc en plus",
+                    market="fr",
+                    country="fr",
+                    allocine_movie_id=300001,
+                )
+            ]
+
+    import src.api.routes.boxoffice as boxoffice_routes
+
+    monkeypatch.setattr(boxoffice_routes, "BoxOfficeService", _AllocineService)
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.get("/api/boxoffice/history/2024/W18?market=fr")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["allocine_movie_id"] == 300001
+    assert data[0]["jpboxoffice_id"] is None
+
+
 def test_history_boxoffice_route_reads_market_file_and_keeps_radarr_fields(
     tmp_path, monkeypatch
 ):
@@ -533,7 +573,7 @@ def test_history_boxoffice_route_smoke_fetches_supported_jpboxoffice_countries(
     def fake_get(url: str):
         if f"v9_hebdomadaire.php?view={view}&year={min_year}" in url or f"v9_hebdomadaire.php?view={view}&year=2026" in url:
             return _response(url, year_html)
-        if f"v9_tophebdo.php?idsem=2926&view={view}" in url:
+        if "v9_tophebdo.php" in url and f"view={view}" in url:
             return _response(url, weekly_html)
         if f"fichfilm.php?id=12345&view={view}" in url:
             return _response(
@@ -695,7 +735,7 @@ def test_history_boxoffice_route_fr_w02_uses_row_order_rank_and_returns_10(
     def fake_get(url: str):
         if "v9_hebdomadaire.php?view=2&year=2026" in url:
             return _response(url, year_html)
-        if "v9_tophebdo.php?idsem=2902&view=2" in url:
+        if "v9_tophebdo.php?idsem=2924&view=2" in url:
             return _response(url, weekly_html)
         if "fichfilm.php?id=12345&view=2" in url:
             return _response(

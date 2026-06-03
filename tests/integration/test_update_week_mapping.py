@@ -7,17 +7,50 @@ genre-based root folder mapping as the main scheduler/manual add paths.
 from pathlib import Path
 import json
 from datetime import datetime
+import httpx
 
 import yaml
 import pytest
 from fastapi.testclient import TestClient
 
 from src.api.app import create_app
-from src.core.boxoffice import BoxOfficeMovie
+from src.core.boxoffice import BoxOfficeError, BoxOfficeMovie
 from src.core.models import MovieStatus
 from src.core.radarr import RadarrMovie
 from src.utils.config import Settings, settings
 from tests.helpers import FakeWeeklyDataGenerator
+
+
+def _jpboxoffice_week_html(idsem: int, title: str, movie_title: str) -> str:
+    rows = []
+    for rank in range(1, 11):
+        rows.append(
+            f"""
+          <div class="movie-block">
+            <div>{rank}</div>
+            <div>Image</div>
+            <a href="/fichfilm.php?id={idsem}{rank:02d}&view=2">{movie_title} {rank}</a>
+            <div>{movie_title} {rank} Original</div>
+            <div>(Studio)</div>
+            <div>France / Drame / 2h00 1 100 000 120 200 000</div>
+          </div>
+            """
+        )
+    return f"""
+    <html>
+      <head><title>{title}</title></head>
+      <body>
+        <div class="weekly-fr">
+          {''.join(rows)}
+        </div>
+      </body>
+    </html>
+    """
+
+
+def _http_response(url: str, html: str) -> httpx.Response:
+    request = httpx.Request("GET", url)
+    return httpx.Response(200, request=request, content=html.encode("utf-8"))
 
 
 def _seed_config(dir_path: Path) -> Path:
@@ -391,8 +424,10 @@ def test_update_week_fr_uses_tmdb_confirmed_matching_and_rejects_false_positives
     assert by_title["L'Affaire Bojarski"]["tmdb_id"] is None
     assert by_title["Le Chant des forêts"]["tmdb_id"] is None
     assert by_title["Greenland Migration"]["tmdb_id"] is None
-    assert by_title["Le Mage du Kremlin"]["tmdb_id"] is None
+    assert by_title["Le Mage du Kremlin"]["tmdb_id"] == 20004
     assert by_title["Le Mage du Kremlin"]["radarr_id"] is None
+    assert by_title["Le Mage du Kremlin"]["match_method"] == "tmdb_confirmed"
+    assert by_title["Le Mage du Kremlin"]["match_confidence"] > 0
     assert by_title["La Femme de ménage"]["tmdb_id"] == 20005
     assert by_title["La Femme de ménage"]["radarr_id"] == 5
     assert by_title["La Femme de ménage"]["match_method"] == "tmdb_confirmed"
@@ -400,6 +435,55 @@ def test_update_week_fr_uses_tmdb_confirmed_matching_and_rejects_false_positives
     assert by_title["Avatar : de feu et de cendres"]["radarr_id"] == 6
     assert by_title["Avatar : de feu et de cendres"]["match_method"] == "tmdb_confirmed"
     assert refresh_calls == []
+
+
+def test_update_week_fr_skips_incomplete_jpboxoffice_week_cleanly(
+    tmp_path, monkeypatch
+):
+    config_path = _seed_historical_market_config(tmp_path, "fr", "fr")
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+    monkeypatch.setattr(settings, "radarr_api_key", "test-key")
+
+    import src.core.boxoffice as core_boxoffice
+    import src.core.json_generator as core_json_generator
+
+    class _IncompleteFrBoxOfficeService:
+        def __init__(self, *_, **__):
+            pass
+
+        def fetch_weekend_box_office(self, year: int, week: int, limit: int = 10):
+            raise BoxOfficeError(
+                "skipped_incomplete_week: source_url=https://www.jpbox-office.com/v9_tophebdo.php?idsem=2944&view=2 country=fr view=2 latest_completed_idsem=2943 date_range=DU 27 Mai AU 02 Juin 2026 (5 Jours)"
+            )
+
+        def extract_detail_metadata(self, release_url):
+            return {}
+
+        def get_root_folder_paths(self):
+            return ["/movies"]
+
+        def get_quality_profiles(self):
+            return [_FakeQualityProfile()]
+
+    monkeypatch.setattr(core_boxoffice, "BoxOfficeService", _IncompleteFrBoxOfficeService)
+    monkeypatch.setattr(
+        core_json_generator, "WeeklyDataGenerator", FakeWeeklyDataGenerator
+    )
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/scheduler/update-week?market=fr",
+        json={"year": 2026, "week": 22},
+    )
+    assert resp.status_code == 409
+    assert "skipped_incomplete_week" in resp.json()["detail"]
+    assert "latest_completed_idsem=2943" in resp.json()["detail"]
+
+    weekly_path = tmp_path / "weekly_pages" / "fr" / "2026W22.json"
+    assert not weekly_path.exists()
 
 
 def test_update_week_rejects_invalid_provider(tmp_path, monkeypatch):
@@ -441,13 +525,13 @@ def test_update_week_fr_uses_provider_wiring(tmp_path, monkeypatch):
     data = resp.json()
     assert data["success"] is True
     assert data["market"] == "fr"
-    assert data["provider"] == "jpboxoffice"
+    assert data["provider"] == "france_boxoffice"
 
     output_file = tmp_path / "weekly_pages" / "fr" / "2024W10.json"
     assert output_file.exists()
     payload = json.loads(output_file.read_text())
     assert payload["market"] == "fr"
-    assert payload["provider"] == "jpboxoffice"
+    assert payload["provider"] == "france_boxoffice"
     assert payload["policy_snapshot"]["market"] == "fr"
     assert payload["policy_snapshot"]["fetch_limit_used"] == 10
     assert payload["policy_snapshot"]["add_limit_used"] == 10
@@ -484,3 +568,240 @@ def test_update_week_query_market_wins_over_body_market(tmp_path, monkeypatch):
     output_file = tmp_path / "weekly_pages" / "fr" / "2026W02.json"
     assert output_file.exists()
     assert not (tmp_path / "weekly_pages" / "us" / "2026W02.json").exists()
+
+
+def test_update_week_existing_data_is_kept_on_upstream_failure(tmp_path, monkeypatch):
+    config_path = _seed_historical_market_config(tmp_path, "fr", "fr")
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+    monkeypatch.setattr(settings, "radarr_api_key", "")
+
+    existing_file = tmp_path / "weekly_pages" / "fr" / "2026W22.json"
+    existing_file.parent.mkdir(parents=True, exist_ok=True)
+    existing_file.write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-06-01T10:00:00",
+                "market": "fr",
+                "provider": "jpboxoffice",
+                "year": 2026,
+                "week": 22,
+                "movies": [{"rank": 1, "title": "Existing Movie"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class _FailingBoxOfficeService:
+        def __init__(self, *_, **__):
+            pass
+
+        def fetch_weekend_box_office(self, year: int, week: int, limit: int = 10):
+            raise BoxOfficeError("Failed to fetch JPBoxOffice data after retries: boom")
+
+    import src.core.boxoffice as core_boxoffice
+
+    monkeypatch.setattr(core_boxoffice, "BoxOfficeService", _FailingBoxOfficeService)
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/scheduler/update-week?market=fr",
+        json={"year": 2026, "week": 22},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is False
+    assert data["message"] == "refresh_failed_but_existing_data_kept"
+    assert "after retries" in data["detail"]
+    assert existing_file.exists()
+    assert json.loads(existing_file.read_text(encoding="utf-8"))["movies"][0]["title"] == "Existing Movie"
+
+
+def test_update_week_failure_does_not_poison_next_week(tmp_path, monkeypatch):
+    config_path = _seed_historical_market_config(tmp_path, "fr", "fr")
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+    monkeypatch.setattr(settings, "radarr_api_key", "")
+
+    class _FlakyThenStableBoxOfficeService:
+        calls = []
+
+        def __init__(self, *_, **__):
+            pass
+
+        def fetch_weekend_box_office(self, year: int, week: int, limit: int = 10):
+            self.calls.append((year, week))
+            if week == 21 and len([c for c in self.calls if c[1] == 21]) == 1:
+                raise BoxOfficeError("Failed to fetch JPBoxOffice data after retries: boom")
+            return [
+                BoxOfficeMovie(
+                    rank=1,
+                    title=f"Week {week}",
+                    weekend_gross=1000,
+                    total_gross=2000,
+                    weeks_released=1,
+                    theater_count=100,
+                    year=2026,
+                )
+            ]
+
+    import src.core.boxoffice as core_boxoffice
+    import src.core.json_generator as core_json_generator
+
+    monkeypatch.setattr(core_boxoffice, "BoxOfficeService", _FlakyThenStableBoxOfficeService)
+    monkeypatch.setattr(
+        core_json_generator, "WeeklyDataGenerator", FakeWeeklyDataGenerator
+    )
+
+    app = create_app()
+    client = TestClient(app)
+
+    first = client.post(
+        "/api/scheduler/update-week?market=fr",
+        json={"year": 2026, "week": 21},
+    )
+    assert first.status_code == 200
+    assert first.json()["success"] is False
+
+    second = client.post(
+        "/api/scheduler/update-week?market=fr",
+        json={"year": 2026, "week": 22},
+    )
+    assert second.status_code == 200
+    assert second.json()["success"] is True
+    assert second.json()["market"] == "fr"
+    assert second.json()["provider"] == "jpboxoffice"
+    assert (tmp_path / "weekly_pages" / "fr" / "2026W22.json").exists()
+
+
+def test_update_week_fr_explicit_weeks_use_direct_idsem_mapping(
+    tmp_path, monkeypatch
+):
+    config_path = _seed_historical_market_config(tmp_path, "fr", "fr")
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+    monkeypatch.setattr(settings, "radarr_api_key", "")
+
+    import src.core.boxoffice as core_boxoffice
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 6, 20, 12, 0, 0, tzinfo=tz)
+
+    page_by_idsem = {
+        2941: _jpboxoffice_week_html(2941, "DU 06 Mai AU 12 Mai 2026", "Week 19 Movie"),
+        2942: _jpboxoffice_week_html(2942, "DU 13 Mai AU 19 Mai 2026", "Week 20 Movie"),
+        2943: _jpboxoffice_week_html(2943, "DU 20 Mai AU 26 Mai 2026", "Week 21 Movie"),
+    }
+    requested_urls = []
+
+    class _FakeHttpClient:
+        def get(self, url: str):
+            requested_urls.append(url)
+            if "v9_hebdomadaire.php" in url:
+                raise AssertionError("explicit FR update must not call annual listing")
+            for idsem, html in page_by_idsem.items():
+                if f"idsem={idsem}&view=2" in url:
+                    return _http_response(url, html)
+            if "fichfilm.php" in url:
+                return _http_response(url, "<html><body></body></html>")
+            raise AssertionError(f"Unexpected URL: {url}")
+
+        def close(self):
+            pass
+
+    original_service = core_boxoffice.BoxOfficeService
+
+    class _DirectFrBoxOfficeService(original_service):
+        def __init__(self, *args, **kwargs):
+            kwargs["http_client"] = _FakeHttpClient()
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(core_boxoffice, "datetime", FixedDateTime)
+    monkeypatch.setattr(core_boxoffice, "BoxOfficeService", _DirectFrBoxOfficeService)
+
+    app = create_app()
+    client = TestClient(app)
+
+    for week, expected_idsem in [(19, 2941), (20, 2942), (21, 2943)]:
+        resp = client.post(
+            "/api/scheduler/update-week?market=fr",
+            json={"year": 2026, "week": week},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        output_file = tmp_path / "weekly_pages" / "fr" / f"2026W{week:02d}.json"
+        assert output_file.exists()
+        payload = json.loads(output_file.read_text(encoding="utf-8"))
+        assert payload["year"] == 2026
+        assert payload["week"] == week
+        assert payload["source_year"] == 2026
+        assert payload["source_week"] == week
+        assert payload["movies"][0]["source_week"] == week
+        source_url = payload["movies"][0]["source_url"]
+        assert f"idsem={expected_idsem}&view=2" in source_url
+        assert "idsem=2944&view=2" not in source_url
+        assert "idsem=2945&view=2" not in source_url
+
+    assert not any("v9_hebdomadaire.php" in url for url in requested_urls)
+
+
+def test_update_week_fr_explicit_week_mismatch_fails_without_writing(
+    tmp_path, monkeypatch
+):
+    config_path = _seed_historical_market_config(tmp_path, "fr", "fr")
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+    monkeypatch.setattr(settings, "radarr_api_key", "")
+
+    import src.core.boxoffice as core_boxoffice
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 6, 20, 12, 0, 0, tzinfo=tz)
+
+    wrong_page = _jpboxoffice_week_html(
+        2941,
+        "DU 14 Janvier AU 20 Janvier 2026",
+        "Wrong Week Movie",
+    )
+
+    class _FakeHttpClient:
+        def get(self, url: str):
+            if "v9_hebdomadaire.php" in url:
+                raise AssertionError("explicit FR update must not call annual listing")
+            if "idsem=2941&view=2" in url:
+                return _http_response(url, wrong_page)
+            raise AssertionError(f"Unexpected URL: {url}")
+
+        def close(self):
+            pass
+
+    original_service = core_boxoffice.BoxOfficeService
+
+    class _DirectFrBoxOfficeService(original_service):
+        def __init__(self, *args, **kwargs):
+            kwargs["http_client"] = _FakeHttpClient()
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(core_boxoffice, "datetime", FixedDateTime)
+    monkeypatch.setattr(core_boxoffice, "BoxOfficeService", _DirectFrBoxOfficeService)
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/scheduler/update-week?market=fr",
+        json={"year": 2026, "week": 19},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is False
+    assert data["message"] == "upstream_failed"
+    assert "explicit week mismatch" in data["detail"]
+    assert not (tmp_path / "weekly_pages" / "fr" / "2026W19.json").exists()

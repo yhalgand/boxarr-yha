@@ -20,6 +20,10 @@ from .boxoffice_storage import (
     market_weekly_page_path,
     market_weekly_pages_dir,
 )
+from .identity_reuse import (
+    apply_stable_identity_reuse,
+    build_stable_identity_cache,
+)
 from .models import MovieStatus
 from .radarr import (
     RadarrMovie,
@@ -144,20 +148,32 @@ def refresh_weekly_data_from_radarr(
     movies_by_id = {movie.id: movie for movie in radarr_movies}
     movies_by_tmdb_id = {movie.tmdbId: movie for movie in radarr_movies if movie.tmdbId}
 
-    weeks_scanned = 0
-    weeks_updated = 0
-    movies_refreshed = 0
-    movies_linked = 0
-
+    loaded_weeks: list[tuple[Path, dict]] = []
     for json_file in weekly_paths:
-        weeks_scanned += 1
-
         try:
             with open(json_file) as f:
                 data = json.load(f)
         except Exception as exc:
             logger.warning(f"Could not read weekly data file {json_file}: {exc}")
             continue
+        loaded_weeks.append((json_file, data))
+
+    identity_cache = build_stable_identity_cache(
+        (
+            movie
+            for _, data in loaded_weeks
+            for movie in data.get("movies", [])
+        ),
+        market=market,
+    )
+
+    weeks_scanned = 0
+    weeks_updated = 0
+    movies_refreshed = 0
+    movies_linked = 0
+
+    for json_file, data in loaded_weeks:
+        weeks_scanned += 1
 
         file_updated = False
         for stored_movie in data.get("movies", []):
@@ -172,6 +188,23 @@ def refresh_weekly_data_from_radarr(
                 radarr_movie = movies_by_tmdb_id.get(stored_tmdb_id)
 
             if not radarr_movie:
+                reused_identity = apply_stable_identity_reuse(
+                    stored_movie,
+                    identity_cache,
+                    market=market,
+                )
+                if reused_identity:
+                    movies_refreshed += 1
+                    file_updated = True
+
+                stored_match_method = str(stored_movie.get("match_method") or "").lower()
+                already_confirmed = (
+                    stored_movie.get("tmdb_id") is not None
+                    and stored_match_method in {"tmdb_confirmed", "manual_confirmed"}
+                )
+                if already_confirmed:
+                    continue
+
                 stale_fields_present = any(
                     stored_movie.get(field) is not None
                     for field in (
@@ -190,7 +223,7 @@ def refresh_weekly_data_from_radarr(
                     or stored_movie.get("status")
                     and stored_movie.get("status") != "Not in Radarr"
                 )
-                if not stale_fields_present:
+                if not stale_fields_present and not reused_identity:
                     continue
 
                 updates = _build_stale_movie_clear()

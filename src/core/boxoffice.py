@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import re
+import random
+import time
 from pathlib import Path
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from bs4 import BeautifulSoup
 
 from ..utils.logger import get_logger
+from .history_sanitizer import normalize_title_key
 from .boxoffice_provider import (
     DEFAULT_MARKET,
     DEFAULT_PROVIDER,
@@ -49,9 +52,11 @@ class BoxOfficeMovie:
     source_href: Optional[str] = None
     source_url: Optional[str] = None
     source_title: Optional[str] = None
+    normalized_source_title: Optional[str] = None
     market: Optional[str] = None
     country: Optional[str] = None
     jpboxoffice_id: Optional[int] = None
+    allocine_movie_id: Optional[int] = None
     identity_metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
@@ -204,6 +209,7 @@ class MojoUSProvider(BoxOfficeProvider):
                     weeks_released=weeks_released,
                     theater_count=theater_count,
                     release_url=release_url,
+                    normalized_source_title=normalize_title_key(title),
                 )
                 movies.append(movie)
                 logger.debug(f"Parsed movie: {movie}")
@@ -232,6 +238,7 @@ class MojoUSProvider(BoxOfficeProvider):
                 continue
 
             movie = BoxOfficeMovie(rank=rank, title=title, release_url=release_url)
+            movie.normalized_source_title = normalize_title_key(title)
             movies.append(movie)
             rank += 1
 
@@ -287,6 +294,381 @@ class MojoUSProvider(BoxOfficeProvider):
         return any(keyword.lower() in text.lower() for keyword in studio_keywords)
 
 
+class AllocineFRProvider(BoxOfficeProvider):
+    """AlloCiné France weekly box-office provider."""
+
+    provider_key = "allocine"
+    BASE_URL = "https://www.allocine.fr"
+    USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36 Boxarr/1.7.0"
+    )
+    REQUEST_TIMEOUT = 20.0
+
+    def __init__(
+        self,
+        http_client: Optional[httpx.Client] = None,
+        provider_config: Optional[Dict[str, object]] = None,
+    ):
+        super().__init__(
+            http_client
+            or httpx.Client(
+                headers={"User-Agent": self.USER_AGENT},
+                timeout=self.REQUEST_TIMEOUT,
+                follow_redirects=True,
+            )
+        )
+        self.provider_config = normalize_provider_config("allocine", provider_config)
+        self.country = str(self.provider_config.get("country", "fr")).strip().lower()
+        if self.country != "fr":
+            raise BoxOfficeError(
+                f"AlloCiné country '{self.country}' is not implemented yet"
+            )
+        self.min_entries = int(self.provider_config.get("min_entries", 10) or 10)
+        self.last_parse_diagnostics: Dict[str, Any] = {}
+        self.last_resolution_diagnostics: Dict[str, Any] = {}
+
+    def close(self) -> None:
+        if self.client:
+            self.client.close()
+
+    def _week_start_for_iso_week(self, year: int, week: int) -> datetime:
+        try:
+            return datetime.fromisocalendar(year, week, 3)
+        except ValueError as exc:
+            raise BoxOfficeError(f"Invalid AlloCiné week {year}W{week:02d}") from exc
+
+    def _week_url_for_start(self, week_start: datetime) -> str:
+        return f"{self.BASE_URL}/boxoffice/france/sem-{week_start:%Y-%m-%d}/"
+
+    def _fetch_html(self, url: str) -> str:
+        logger.info(f"Fetching AlloCiné data from: {url}")
+        try:
+            response = self.client.get(url)
+            response.raise_for_status()
+            return response.text
+        except httpx.HTTPError as exc:
+            raise BoxOfficeError(f"Failed to fetch AlloCiné data: {exc}") from exc
+        except Exception as exc:
+            raise BoxOfficeError(f"Failed to fetch AlloCiné data: {exc}") from exc
+
+    def _normalize_space(self, text: str) -> str:
+        return re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip()
+
+    def _parse_int(self, text: str, *, first_only: bool = False) -> Optional[int]:
+        if not text:
+            return None
+        matches = re.findall(r"\d[\d\s.]*", text)
+        if not matches:
+            return None
+        raw = matches[0] if first_only else matches[-1]
+        digits = re.sub(r"\D", "", raw)
+        if not digits:
+            return None
+        try:
+            return int(digits)
+        except ValueError:
+            return None
+
+    def _extract_allocine_id(self, href: Optional[str]) -> Optional[int]:
+        if not href:
+            return None
+        match = re.search(r"(?:film|video)-(\d+)|cfilm=(\d+)", href)
+        if not match:
+            return None
+        try:
+            return int(match.group(1) or match.group(2))
+        except ValueError:
+            return None
+
+    def _extract_weekly_admissions(self, node, anchor) -> Optional[int]:
+        cells = node.find_all(["td", "th"], recursive=False)
+        if cells:
+            title_index = None
+            for index, cell in enumerate(cells):
+                if anchor in cell.find_all("a", href=True) or cell.find("a", href=True) is anchor:
+                    title_index = index
+                    break
+            search_cells = cells[(title_index + 1) :] if title_index is not None else cells
+            for cell in search_cells:
+                value = self._parse_int(cell.get_text(" ", strip=True), first_only=True)
+                if value is not None:
+                    return value
+
+        text = self._normalize_space(node.get_text(" ", strip=True))
+        numbers = re.findall(r"\d[\d\s.]*", text)
+        parsed = []
+        for number in numbers:
+            value = self._parse_int(number, first_only=True)
+            if value is not None:
+                parsed.append(value)
+        # Skip likely rank/year values and keep the first admissions-like value.
+        for value in parsed:
+            if value >= 100:
+                return value
+        return parsed[0] if parsed else None
+
+    def _extract_page_week_start(self, html: str) -> Optional[datetime]:
+        soup = BeautifulSoup(html, "html.parser")
+        candidates = []
+        for selector in ("title", "h1", "h2"):
+            node = soup.find(selector)
+            if node:
+                candidates.append(self._normalize_space(node.get_text(" ", strip=True)))
+        candidates.append(self._normalize_space(soup.get_text(" ", strip=True)[:1200]))
+        month_map = {
+            "janvier": 1,
+            "février": 2,
+            "fevrier": 2,
+            "mars": 3,
+            "avril": 4,
+            "mai": 5,
+            "juin": 6,
+            "juillet": 7,
+            "août": 8,
+            "aout": 8,
+            "septembre": 9,
+            "octobre": 10,
+            "novembre": 11,
+            "décembre": 12,
+            "decembre": 12,
+        }
+        pattern = re.compile(
+            r"Semaine\s+du\s+(?:(?:[A-Za-zÀ-ÿ]+)\s+)?(\d{1,2})\s+([A-Za-zÀ-ÿ]+)\s+(\d{4})",
+            re.IGNORECASE,
+        )
+        for candidate in candidates:
+            match = pattern.search(candidate)
+            if not match:
+                continue
+            month = month_map.get(match.group(2).strip().lower())
+            if not month:
+                continue
+            try:
+                return datetime(int(match.group(3)), month, int(match.group(1)))
+            except ValueError:
+                continue
+        return None
+
+    def _row_candidates(self, soup: BeautifulSoup) -> List:
+        rows = []
+        for row in soup.find_all("tr"):
+            if row.find("a", href=re.compile(r"/film/|film-")):
+                rows.append(row)
+        if rows:
+            return rows
+
+        candidates = []
+        for node in soup.find_all(["li", "div", "article"]):
+            text = self._normalize_space(node.get_text(" ", strip=True))
+            if not text:
+                continue
+            if node.find("a", href=re.compile(r"/film/|film-")) and re.search(
+                r"\b\d[\d\s.]*\b", text
+            ):
+                candidates.append(node)
+        return candidates
+
+    def _parse_row(self, node, rank: int, source_url: str, week_start: datetime) -> Optional[BoxOfficeMovie]:
+        anchor = node.find("a", href=re.compile(r"/film/|film-"))
+        if anchor is None:
+            return None
+        title = self._normalize_space(anchor.get_text(" ", strip=True))
+        if not title or title.lower() in {"film", "titre"}:
+            return None
+        href = str(anchor.get("href", ""))
+        source_href = href if href.startswith("/") else f"/{href.lstrip('/')}"
+        admissions = self._extract_weekly_admissions(node, anchor)
+        allocine_movie_id = self._extract_allocine_id(source_href)
+        return BoxOfficeMovie(
+            rank=rank,
+            title=title,
+            weekend_gross=admissions,
+            release_url=source_href,
+            source_href=source_href,
+            source_url=source_url,
+            source_title=title,
+            normalized_source_title=normalize_title_key(title),
+            market="fr",
+            country="fr",
+            allocine_movie_id=allocine_movie_id,
+            identity_metadata={
+                "source_provider": "allocine",
+                "allocine_movie_id": allocine_movie_id,
+                "source_week_start_date": week_start.date().isoformat(),
+                "source_week_end_date": (week_start + timedelta(days=6)).date().isoformat(),
+                "metric": "admissions",
+            },
+        )
+
+    def _parse_weekly_page(
+        self, html: str, *, source_url: str, week_start: datetime, limit: int
+    ) -> List[BoxOfficeMovie]:
+        soup = BeautifulSoup(html, "html.parser")
+        rows = self._row_candidates(soup)
+        movies: List[BoxOfficeMovie] = []
+        skipped = []
+        seen_titles = set()
+        for node in rows:
+            if len(movies) >= limit:
+                break
+            movie = self._parse_row(node, len(movies) + 1, source_url, week_start)
+            if movie is None:
+                skipped.append(self._normalize_space(node.get_text(" ", strip=True))[:200])
+                continue
+            key = normalize_title_key(movie.title)
+            if key in seen_titles:
+                continue
+            seen_titles.add(key)
+            movies.append(movie)
+
+        self.last_parse_diagnostics = {
+            "source_url": source_url,
+            "provider": "allocine",
+            "country": "fr",
+            "requested_limit": limit,
+            "rows_seen": len(rows),
+            "rows_parsed": len(movies),
+            "rows_skipped": len(skipped),
+            "skipped_rows": skipped,
+        }
+        if len(movies) < min(limit, self.min_entries):
+            raise BoxOfficeError(
+                "AlloCiné parse error: insufficient ranking rows "
+                f"(source_url={source_url}, rows_seen={len(rows)}, "
+                f"rows_parsed={len(movies)}, requested_limit={limit}, "
+                f"min_entries={self.min_entries})"
+            )
+        return movies
+
+    def fetch_weekend_box_office(
+        self,
+        year: Optional[int] = None,
+        week: Optional[int] = None,
+        limit: int = 10,
+    ) -> List[BoxOfficeMovie]:
+        if year is None or week is None:
+            _, _, year, week = self.get_weekend_dates()
+        week_start = self._week_start_for_iso_week(year, week)
+        if week_start.weekday() != 2:
+            raise BoxOfficeError("AlloCiné box-office weeks must start on Wednesday")
+        url = self._week_url_for_start(week_start)
+        html = self._fetch_html(url)
+        actual_start = self._extract_page_week_start(html)
+        self.last_resolution_diagnostics = {
+            "source_url": url,
+            "requested_year": year,
+            "requested_week": week,
+            "expected_start_date": week_start.date().isoformat(),
+            "actual_start_date": actual_start.date().isoformat() if actual_start else None,
+        }
+        if actual_start and actual_start.date() != week_start.date():
+            raise BoxOfficeError(
+                "AlloCiné explicit week mismatch: "
+                f"source_url={url} requested={year}W{week:02d} "
+                f"expected_start={week_start.date().isoformat()} "
+                f"actual_start={actual_start.date().isoformat()}"
+            )
+        return self._parse_weekly_page(
+            html,
+            source_url=url,
+            week_start=week_start,
+            limit=limit,
+        )
+
+
+class FranceBoxOfficeProvider(BoxOfficeProvider):
+    """France provider wrapper: AlloCiné primary, JPBoxOffice fallback."""
+
+    provider_key = "france_boxoffice"
+
+    def __init__(
+        self,
+        http_client: Optional[httpx.Client] = None,
+        provider_config: Optional[Dict[str, object]] = None,
+    ):
+        super().__init__(
+            http_client
+            or httpx.Client(
+                headers={"User-Agent": AllocineFRProvider.USER_AGENT},
+                timeout=AllocineFRProvider.REQUEST_TIMEOUT,
+                follow_redirects=True,
+            )
+        )
+        self.provider_config = normalize_provider_config("france_boxoffice", provider_config)
+        if str(self.provider_config.get("country", "fr")).strip().lower() != "fr":
+            raise BoxOfficeError("france_boxoffice only supports country 'fr'")
+        self.primary = AllocineFRProvider(
+            http_client=self.client,
+            provider_config={"country": "fr", "min_entries": self.provider_config.get("min_entries", 10)},
+        )
+        self.fallback = JPBoxOfficeProvider(
+            http_client=self.client,
+            provider_config={"country": "fr"},
+        )
+        self.last_provider_used: Optional[str] = None
+        self.last_provider_errors: List[Dict[str, str]] = []
+        self.last_parse_diagnostics: Dict[str, Any] = {}
+        self.last_resolution_diagnostics: Dict[str, Any] = {}
+
+    def close(self) -> None:
+        if self.client:
+            self.client.close()
+
+    def fetch_weekend_box_office(
+        self,
+        year: Optional[int] = None,
+        week: Optional[int] = None,
+        limit: int = 10,
+    ) -> List[BoxOfficeMovie]:
+        errors: List[Dict[str, str]] = []
+        for provider in (self.primary, self.fallback):
+            try:
+                movies = provider.fetch_weekend_box_office(year, week, limit=limit)
+                self.last_provider_used = provider.provider_key
+                self.last_provider_errors = errors
+                self.last_parse_diagnostics = dict(
+                    getattr(provider, "last_parse_diagnostics", {}) or {}
+                )
+                self.last_resolution_diagnostics = dict(
+                    getattr(provider, "last_resolution_diagnostics", {}) or {}
+                )
+                return movies
+            except BoxOfficeError as exc:
+                errors.append({"provider": provider.provider_key, "error": str(exc)})
+                logger.warning(
+                    "France provider %s failed for %sW%s: %s",
+                    provider.provider_key,
+                    year,
+                    week,
+                    exc,
+                )
+                continue
+        self.last_provider_errors = errors
+        detail = "; ".join(f"{item['provider']}: {item['error']}" for item in errors)
+        raise BoxOfficeError(f"France box office providers failed: {detail}")
+
+    def get_current_week_movies(self, limit: int = 10) -> List[BoxOfficeMovie]:
+        latest_info = self.fallback._latest_completed_week_info(datetime.now())
+        year = int(latest_info["latest_completed_year"])
+        week = int(latest_info["latest_completed_week_number"])
+        return self.fetch_weekend_box_office(year, week, limit=limit)
+
+    def get_historical_movies(self, weeks_back: int = 1):
+        history = self.fallback.get_historical_movies(weeks_back=weeks_back)
+        self.last_provider_used = self.fallback.provider_key
+        self.last_parse_diagnostics = dict(
+            getattr(self.fallback, "last_parse_diagnostics", {}) or {}
+        )
+        self.last_resolution_diagnostics = dict(
+            getattr(self.fallback, "last_resolution_diagnostics", {}) or {}
+        )
+        return history
+
+    def extract_detail_metadata(self, release_url: Optional[str]) -> Dict[str, Any]:
+        return self.fallback.extract_detail_metadata(release_url)
+
+
 class JPBoxOfficeProvider(BoxOfficeProvider):
     """JPBoxOffice provider supporting multiple country-specific views.
 
@@ -302,10 +684,19 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
         "(KHTML, like Gecko) Chrome/124.0 Safari/537.36 Boxarr/1.7.0"
     )
     REQUEST_TIMEOUT = 30.0
+    DETAIL_REQUEST_TIMEOUT = 5.0
     DEBUG_DUMP_ENABLED = str(
         __import__("os").environ.get("BOXARR_JPBOXOFFICE_DEBUG_DUMP", "")
     ).strip().lower() in {"1", "true", "yes", "on"}
     DEBUG_DUMP_DIR = Path(__import__("os").environ.get("BOXARR_JPBOXOFFICE_DEBUG_DIR", "/tmp"))
+    # JPBoxOffice France weekly series that Boxarr treats as the calendar anchor.
+    # idsem 2943 is the completed Wednesday-Tuesday period 2026-05-20..2026-05-26.
+    # The Boxarr week label for JPBoxOffice is the ISO week containing the
+    # Wednesday start date, so that period is 2026W21.
+    CALENDAR_ANCHOR_WEEK_START = datetime(2026, 5, 20)
+    CALENDAR_ANCHOR_WEEK_END = datetime(2026, 5, 26)
+    CALENDAR_ANCHOR_IDSEM = 2943
+    CALENDAR_BUFFER_DAYS = 2
 
     def __init__(
         self,
@@ -331,26 +722,63 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
             )
         self.view = int(self.country_spec.get("view", 2))
         self.min_year = int(self.country_spec.get("min_year", 1982))
+        self.last_resolution_diagnostics: Dict[str, Any] = {}
+        self._html_cache: Dict[str, str] = {}
+        self._detail_metadata_cache: Dict[str, Dict[str, Any]] = {}
+        self._resolved_weekly_page_cache: Dict[Tuple[int, int], str] = {}
 
     def close(self) -> None:
         if self.client:
             self.client.close()
 
     def _fetch_html(self, url: str) -> str:
+        if url in self._html_cache:
+            return self._html_cache[url]
         logger.info(f"Fetching JPBoxOffice data from: {url}")
-        try:
-            response = self.client.get(url)
-            response.raise_for_status()
-            html = response.text
-            if self.DEBUG_DUMP_ENABLED:
-                self._dump_debug_html(url, html)
-            return html
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to fetch JPBoxOffice data: {e}")
-            raise BoxOfficeError(f"Failed to fetch JPBoxOffice data: {e}") from e
-        except Exception as e:
-            logger.error(f"Failed to fetch JPBoxOffice data: {e}")
-            raise BoxOfficeError(f"Failed to fetch JPBoxOffice data: {e}") from e
+        delays = [5, 15, 30]
+        last_error: Optional[Exception] = None
+        for attempt in range(1, len(delays) + 1):
+            try:
+                response = self.client.get(url)
+                response.raise_for_status()
+                html = response.text
+                if self.DEBUG_DUMP_ENABLED:
+                    self._dump_debug_html(url, html)
+                self._html_cache[url] = html
+                return html
+            except httpx.TimeoutException as e:
+                last_error = e
+            except httpx.HTTPStatusError as e:
+                status = getattr(e.response, "status_code", None)
+                if status not in {500, 502, 503, 504}:
+                    logger.error(f"Failed to fetch JPBoxOffice data: {e}")
+                    raise BoxOfficeError(f"Failed to fetch JPBoxOffice data: {e}") from e
+                last_error = e
+            except httpx.HTTPError as e:
+                last_error = e
+                logger.error(f"Failed to fetch JPBoxOffice data: {e}")
+                raise BoxOfficeError(f"Failed to fetch JPBoxOffice data: {e}") from e
+            except Exception as e:
+                last_error = e
+                logger.error(f"Failed to fetch JPBoxOffice data: {e}")
+                raise BoxOfficeError(f"Failed to fetch JPBoxOffice data: {e}") from e
+
+            if attempt < len(delays):
+                delay = delays[attempt - 1] * (1.0 + random.uniform(0.0, 0.2))
+                logger.warning(
+                    "JPBoxOffice fetch failed for %s (attempt %s/%s), retrying in %.1fs: %s",
+                    url,
+                    attempt,
+                    len(delays),
+                    delay,
+                    last_error,
+                )
+                time.sleep(delay)
+                continue
+
+            break
+        logger.error(f"Failed to fetch JPBoxOffice data after retries: {last_error}")
+        raise BoxOfficeError(f"Failed to fetch JPBoxOffice data after retries: {last_error}") from last_error
 
     def _dump_debug_html(self, url: str, html: str) -> None:
         try:
@@ -365,41 +793,368 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
     def _year_listing_url(self, year: int) -> str:
         return f"{self.BASE_URL}/v9_hebdomadaire.php?view={self.view}&year={year}"
 
-    def _resolve_weekly_page_url(self, year: int, week: int) -> str:
-        """Resolve the weekly page URL via the annual listing page."""
-        listing_html = self._fetch_html(self._year_listing_url(year))
+    def _week_page_url_for_idsem(self, idsem: int) -> str:
+        return f"{self.BASE_URL}/v9_tophebdo.php?idsem={idsem}&view={self.view}"
+
+    def _latest_completed_week_end_date(
+        self, reference_date: Optional[datetime] = None
+    ) -> datetime:
+        """Return the latest Tuesday that is safely eligible for parsing.
+
+        JPBoxOffice France weeks run Wednesday -> Tuesday. Pages are not
+        considered usable until Thursday, so we apply a one-day safety buffer
+        after Tuesday and only consider Tuesdays that are at least two days old.
+        """
+        reference = reference_date or datetime.now()
+        cutoff = reference.date() - timedelta(days=self.CALENDAR_BUFFER_DAYS)
+        days_since_tuesday = (cutoff.weekday() - 1) % 7
+        latest_end_date = cutoff - timedelta(days=days_since_tuesday)
+        return datetime.combine(latest_end_date, datetime.min.time())
+
+    def _latest_completed_week_info(
+        self, reference_date: Optional[datetime] = None
+    ) -> Dict[str, Any]:
+        latest_end = self._latest_completed_week_end_date(reference_date)
+        latest_start = latest_end - timedelta(days=6)
+        iso_year, iso_week, _ = latest_start.isocalendar()
+        reference = reference_date or datetime.now()
+        weeks_delta = (latest_end.date() - self.CALENDAR_ANCHOR_WEEK_END.date()).days // 7
+        latest_idsem = self.CALENDAR_ANCHOR_IDSEM + weeks_delta
+        next_end_date = latest_end.date() + timedelta(days=7)
+        next_start_date = next_end_date - timedelta(days=6)
+        next_iso_year, next_iso_week, _ = next_start_date.isocalendar()
+        next_eligible_date = next_end_date + timedelta(days=self.CALENDAR_BUFFER_DAYS)
+        skipped_incomplete_week = reference.date() < next_eligible_date
+        skipped_idsem = latest_idsem + 1 if skipped_incomplete_week else None
+        return {
+            "reference_date": reference.date().isoformat(),
+            "latest_completed_start_date": latest_start.date().isoformat(),
+            "latest_completed_end_date": latest_end.date().isoformat(),
+            "latest_completed_year": iso_year,
+            "latest_completed_week_number": iso_week,
+            "latest_completed_idsem": latest_idsem,
+            "latest_completed_url": self._week_page_url_for_idsem(latest_idsem),
+            "skipped_incomplete_week": skipped_incomplete_week,
+            "skipped_year": next_iso_year if skipped_incomplete_week else None,
+            "skipped_week_number": next_iso_week if skipped_incomplete_week else None,
+            "skipped_idsem": skipped_idsem,
+            "skipped_week_end_date": next_end_date.isoformat(),
+            "skipped_week_range": (
+                f"DU {next_end_date - timedelta(days=6):%d %B %Y} "
+                f"AU {next_end_date:%d %B %Y}"
+            ),
+        }
+
+    def _explicit_week_info(self, year: int, week: int) -> Optional[Dict[str, Any]]:
+        """Return direct JPBoxOffice mapping for explicit historical weeks.
+
+        Boxarr's week label is ISO year/week. JPBoxOffice France weeks run
+        Wednesday -> Tuesday, so we map an explicit request to the period whose
+        Wednesday falls inside the requested ISO week.
+        """
+        if self.country != "fr" or year != 2026:
+            return None
+        if week < 1:
+            return None
+        try:
+            start_date = datetime.fromisocalendar(year, week, 3)
+        except ValueError:
+            return None
+        end_date = start_date + timedelta(days=6)
+        weeks_delta = (start_date.date() - self.CALENDAR_ANCHOR_WEEK_START.date()).days // 7
+        idsem = self.CALENDAR_ANCHOR_IDSEM + weeks_delta
+        return {
+            "year": year,
+            "week": week,
+            "idsem": idsem,
+            "source_url": self._week_page_url_for_idsem(idsem),
+            "expected_start_date": start_date,
+            "expected_end_date": end_date,
+        }
+
+    def _validate_explicit_week_page(
+        self,
+        html: str,
+        explicit_info: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        range_info = self._parse_week_page_date_range(html)
+        start_date = range_info.get("start_date")
+        end_date = range_info.get("end_date")
+        expected_start = explicit_info["expected_start_date"]
+        expected_end = explicit_info["expected_end_date"]
+        diagnostics = {
+            "source_url": explicit_info["source_url"],
+            "requested_year": explicit_info["year"],
+            "requested_week": explicit_info["week"],
+            "idsem": explicit_info["idsem"],
+            "expected_start_date": expected_start.date().isoformat(),
+            "expected_end_date": expected_end.date().isoformat(),
+            "actual_title": range_info.get("title"),
+            "actual_start_date": start_date.date().isoformat() if start_date else None,
+            "actual_end_date": end_date.date().isoformat() if end_date else None,
+        }
+        if start_date and end_date:
+            if start_date.date() != expected_start.date() or end_date.date() != expected_end.date():
+                self.last_resolution_diagnostics = diagnostics
+                raise BoxOfficeError(
+                    "JPBoxOffice explicit week mismatch: "
+                    f"source_url={explicit_info['source_url']} "
+                    f"requested={explicit_info['year']}W{explicit_info['week']:02d} "
+                    f"expected_range={expected_start.date().isoformat()}..{expected_end.date().isoformat()} "
+                    f"actual_range={start_date.date().isoformat()}..{end_date.date().isoformat()}"
+                )
+            is_complete, complete_diagnostics = self._is_week_page_complete(html)
+            diagnostics.update(complete_diagnostics)
+            if not is_complete:
+                latest_info = self._latest_completed_week_info(datetime.now())
+                latest_completed_idsem = latest_info.get("latest_completed_idsem")
+                self.last_resolution_diagnostics = {
+                    **diagnostics,
+                    "skipped_incomplete_week": True,
+                    "latest_completed_idsem": latest_completed_idsem,
+                }
+                raise BoxOfficeError(
+                    "skipped_incomplete_week: "
+                    f"source_url={explicit_info['source_url']} "
+                    f"country={self.country} view={self.view} "
+                    f"latest_completed_idsem={latest_completed_idsem} "
+                    f"date_range={range_info.get('title')}"
+                )
+        self.last_resolution_diagnostics = diagnostics
+        return diagnostics
+
+    def _fetch_completed_week_movies(
+        self, reference_date: Optional[datetime] = None, limit: int = 10
+    ) -> List[BoxOfficeMovie]:
+        week_info = self._latest_completed_week_info(reference_date)
+        weekly_url = week_info["latest_completed_url"]
+        html = self._fetch_html(weekly_url)
+        movies = self._parse_weekly_page(html, limit=limit, source_url=weekly_url)
+        self.enrich_with_imdb_ids(movies)
+        self.last_resolution_diagnostics = {
+            **week_info,
+            "source_url": weekly_url,
+            "selected_href": weekly_url,
+        }
+        return movies
+
+    def _extract_week_listing_candidates(self, listing_html: str) -> List[Dict[str, Any]]:
         soup = BeautifulSoup(listing_html, "html.parser")
-
-        candidate_href = None
-        week_text = str(week)
-
+        candidates: List[Dict[str, Any]] = []
         for anchor in soup.find_all("a", href=True):
             href = str(anchor.get("href", ""))
             if "v9_tophebdo.php" not in href:
                 continue
+            text = self._normalize_space(anchor.get_text(" ", strip=True))
+            row = anchor.find_parent("tr")
+            row_text = self._normalize_space(row.get_text(" ", strip=True)) if row else text
+            week_number = None
+            for source_text in (text, row_text):
+                match = re.search(r"\bSemaine\s+(\d{1,2})\b", source_text, re.IGNORECASE)
+                if not match:
+                    match = re.search(r"\b(\d{1,2})\b", source_text)
+                if match:
+                    try:
+                        week_number = int(match.group(1))
+                        break
+                    except ValueError:
+                        continue
+            candidates.append(
+                {
+                    "href": href if href.startswith("http") else f"{self.BASE_URL}/{href.lstrip('/')}",
+                    "text": text,
+                    "row_text": row_text,
+                    "week_number": week_number,
+                }
+            )
+        return candidates
 
-            text = anchor.get_text(" ", strip=True)
-            if text == week_text:
-                candidate_href = href
+    def _parse_week_page_date_range(self, html: str) -> Dict[str, Optional[datetime]]:
+        soup = BeautifulSoup(html, "html.parser")
+        title_candidates = []
+        for selector in ("title", "h1", "h2", "h3"):
+            node = soup.find(selector)
+            if node:
+                title_candidates.append(self._normalize_space(node.get_text(" ", strip=True)))
+        title_candidates.append(self._normalize_space(soup.get_text(" ", strip=True)[:1000]))
+
+        month_map = {
+            "janvier": 1,
+            "février": 2,
+            "fevrier": 2,
+            "mars": 3,
+            "avril": 4,
+            "mai": 5,
+            "juin": 6,
+            "juillet": 7,
+            "août": 8,
+            "aout": 8,
+            "septembre": 9,
+            "octobre": 10,
+            "novembre": 11,
+            "décembre": 12,
+            "decembre": 12,
+        }
+        pattern = re.compile(
+            r"DU\s+(\d{1,2})\s+([A-Za-zÀ-ÿ]+)\s+AU\s+(\d{1,2})\s+([A-Za-zÀ-ÿ]+)\s+(\d{4})",
+            re.IGNORECASE,
+        )
+        for candidate in title_candidates:
+            match = pattern.search(candidate)
+            if not match:
+                continue
+            start_day = int(match.group(1))
+            start_month = month_map.get(match.group(2).strip().lower())
+            end_day = int(match.group(3))
+            end_month = month_map.get(match.group(4).strip().lower())
+            year = int(match.group(5))
+            if not start_month or not end_month:
+                continue
+            try:
+                start_date = datetime(year, start_month, start_day)
+                end_date = datetime(year, end_month, end_day)
+            except ValueError:
+                continue
+            return {
+                "title": candidate,
+                "start_date": start_date,
+                "end_date": end_date,
+            }
+        return {"title": None, "start_date": None, "end_date": None}
+
+    def _is_week_page_complete(
+        self, html: str, reference_date: Optional[datetime] = None
+    ) -> Tuple[bool, Dict[str, Any]]:
+        reference = reference_date or datetime.now()
+        range_info = self._parse_week_page_date_range(html)
+        end_date = range_info.get("end_date")
+        start_date = range_info.get("start_date")
+        complete = True
+        if end_date is not None:
+            complete = end_date.date() < reference.date()
+        return complete, {
+            "title": range_info.get("title"),
+            "start_date": start_date.isoformat() if start_date else None,
+            "end_date": end_date.isoformat() if end_date else None,
+            "reference_date": reference.date().isoformat(),
+            "complete": complete,
+        }
+
+    def _resolve_weekly_page_url(
+        self,
+        year: int,
+        week: int,
+        *,
+        allow_backtrack: bool = False,
+        reference_date: Optional[datetime] = None,
+    ) -> str:
+        """Resolve the weekly page URL via the annual listing page."""
+        listing_html = self._fetch_html(self._year_listing_url(year))
+        candidates = self._extract_week_listing_candidates(listing_html)
+        candidate_index = None
+        for index, candidate in enumerate(candidates):
+            text = candidate.get("text") or ""
+            row_text = candidate.get("row_text") or ""
+            if text == str(week):
+                candidate_index = index
+                break
+            if re.search(rf"\bSemaine\s+{week}\b", row_text, re.IGNORECASE):
+                candidate_index = index
+                break
+            if re.search(rf"\b{week}\b", row_text) and "Janvier" in row_text:
+                candidate_index = index
                 break
 
-            row = anchor.find_parent("tr")
-            if row:
-                row_text = " ".join(row.stripped_strings)
-                if re.search(rf"\bSemaine\s+{week}\b", row_text, re.IGNORECASE):
-                    candidate_href = href
-                    break
-                if re.search(rf"\b{week}\b", row_text) and "Janvier" in row_text:
-                    candidate_href = href
-
-        if not candidate_href:
+        if candidate_index is None:
             raise BoxOfficeError(
                 f"Could not resolve JPBoxOffice weekly page for {year}W{week:02d}"
             )
 
-        if candidate_href.startswith("http"):
-            return candidate_href
-        return f"{self.BASE_URL}/{candidate_href.lstrip('/')}"
+        cached_url = self._resolved_weekly_page_cache.get((year, week))
+        if cached_url and cached_url in self._html_cache:
+            cached_html = self._html_cache[cached_url]
+            is_complete, diagnostics = self._is_week_page_complete(
+                cached_html, reference_date=reference_date
+            )
+            if is_complete:
+                self.last_resolution_diagnostics = {
+                    **diagnostics,
+                    "candidate_href": cached_url,
+                    "candidate_week": week,
+                    "candidate_text": str(week),
+                    "requested_year": year,
+                    "requested_week": week,
+                    "allow_backtrack": allow_backtrack,
+                    "cache_hit": True,
+                }
+                return cached_url
+
+        first_incomplete_diagnostics: Optional[Dict[str, Any]] = None
+        for index in range(candidate_index, -1, -1):
+            candidate = candidates[index]
+            weekly_url = candidate["href"]
+            html = self._fetch_html(weekly_url)
+            is_complete, diagnostics = self._is_week_page_complete(
+                html, reference_date=reference_date
+            )
+            diagnostics.update(
+                {
+                    "candidate_href": weekly_url,
+                    "candidate_week": candidate.get("week_number"),
+                    "candidate_text": candidate.get("text"),
+                    "requested_year": year,
+                    "requested_week": week,
+                    "allow_backtrack": allow_backtrack,
+                }
+            )
+            self.last_resolution_diagnostics = diagnostics
+            if is_complete:
+                self._resolved_weekly_page_cache[(year, week)] = weekly_url
+                if first_incomplete_diagnostics:
+                    match = re.search(r"[?&]idsem=(\d+)", weekly_url)
+                    self.last_resolution_diagnostics = {
+                        **first_incomplete_diagnostics,
+                        "skipped_incomplete_week": True,
+                        "latest_completed_idsem": int(match.group(1)) if match else None,
+                        "selected_href": weekly_url,
+                    }
+                return weekly_url
+            if first_incomplete_diagnostics is None:
+                first_incomplete_diagnostics = diagnostics
+            if not allow_backtrack:
+                break
+
+        latest_completed_idsem = None
+        if first_incomplete_diagnostics:
+            for index in range(candidate_index - 1, -1, -1):
+                candidate = candidates[index]
+                html = self._fetch_html(candidate["href"])
+                is_complete, _ = self._is_week_page_complete(
+                    html, reference_date=reference_date
+                )
+                if is_complete:
+                    match = re.search(r"[?&]idsem=(\d+)", candidate["href"])
+                    if match:
+                        latest_completed_idsem = int(match.group(1))
+                    self._resolved_weekly_page_cache[(year, week)] = candidate["href"]
+                    break
+
+            self.last_resolution_diagnostics = {
+                **first_incomplete_diagnostics,
+                "skipped_incomplete_week": True,
+                "latest_completed_idsem": latest_completed_idsem,
+            }
+            raise BoxOfficeError(
+                "skipped_incomplete_week: "
+                f"source_url={first_incomplete_diagnostics.get('candidate_href')} "
+                f"country={self.country} view={self.view} "
+                f"latest_completed_idsem={latest_completed_idsem} "
+                f"date_range={first_incomplete_diagnostics.get('title')}"
+            )
+
+        raise BoxOfficeError(
+            f"Could not resolve completed JPBoxOffice weekly page for {year}W{week:02d}"
+        )
 
     def _normalize_space(self, text: str) -> str:
         return re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip()
@@ -656,6 +1411,7 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
             release_url=release_url,
             source_href=release_url,
             source_title=title,
+            normalized_source_title=normalize_title_key(title),
             source_url=source_url,
             market=self.provider_key,
             country=self.country,
@@ -796,11 +1552,18 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
         if not release_url:
             return {}
         detail_url = release_url if release_url.startswith("http") else f"{self.BASE_URL}{release_url}"
+        if detail_url in self._detail_metadata_cache:
+            return dict(self._detail_metadata_cache[detail_url])
         try:
-            response = self.client.get(detail_url)
+            try:
+                response = self.client.get(detail_url, timeout=self.DETAIL_REQUEST_TIMEOUT)
+            except TypeError:
+                # Some tests inject a minimal mock client that only accepts the URL.
+                response = self.client.get(detail_url)
             response.raise_for_status()
         except Exception as exc:
             logger.debug("Failed to fetch JPBoxOffice detail page %s: %s", detail_url, exc)
+            self._detail_metadata_cache[detail_url] = {}
             return {}
 
         html = response.text or ""
@@ -861,7 +1624,15 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
             if year_match:
                 metadata["year"] = int(year_match.group(0))
 
+        self._detail_metadata_cache[detail_url] = dict(metadata)
         return metadata
+
+    def enrich_with_imdb_ids(self, movies: List["BoxOfficeMovie"]) -> None:
+        """Avoid eager per-row detail requests while fetching JPBoxOffice charts."""
+        logger.debug(
+            "Skipping eager JPBoxOffice IMDb enrichment for %s chart rows",
+            len(movies),
+        )
 
     def _extract_fr_title_metadata(
         self, title_cell, title: str
@@ -989,6 +1760,7 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
             release_url=release_url,
             source_href=release_url,
             source_title=title,
+            normalized_source_title=normalize_title_key(title),
             source_url=source_url,
             market=self.provider_key,
             country=self.country,
@@ -1127,7 +1899,7 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
                 f"(source_url={source_url}, country={self.country}, view={self.view}, "
                 f"rows_seen={rows_seen}, rows_skipped={rows_skipped})"
             )
-        if rows_seen >= limit and rows_parsed < limit:
+        if limit >= 10 and rows_parsed < limit:
             raise BoxOfficeError(
                 "JPBoxOffice parse error: partial ranking parse "
                 f"(source_url={source_url}, country={self.country}, view={self.view}, "
@@ -1157,11 +1929,68 @@ class JPBoxOfficeProvider(BoxOfficeProvider):
         if year is None or week is None:
             _, _, year, week = self.get_weekend_dates()
 
-        weekly_url = self._resolve_weekly_page_url(year, week)
+        explicit_info = self._explicit_week_info(year, week)
+        weekly_url = (
+            explicit_info["source_url"]
+            if explicit_info
+            else self._resolve_weekly_page_url(year, week, allow_backtrack=False)
+        )
         html = self._fetch_html(weekly_url)
+        if explicit_info:
+            self._validate_explicit_week_page(html, explicit_info)
         movies = self._parse_weekly_page(html, limit=limit, source_url=weekly_url)
         self.enrich_with_imdb_ids(movies)
         return movies
+
+    def get_current_week_movies(self, limit: int = 10) -> List[BoxOfficeMovie]:
+        return self._fetch_completed_week_movies(reference_date=datetime.now(), limit=limit)
+
+    def get_historical_movies(
+        self, weeks_back: int = 1
+    ) -> Dict[str, List[BoxOfficeMovie]]:
+        if weeks_back <= 0:
+            return {}
+        latest_info = self._latest_completed_week_info(datetime.now())
+        latest_idsem = int(latest_info["latest_completed_idsem"])
+        latest_end_date = datetime.fromisoformat(latest_info["latest_completed_end_date"])
+
+        history: Dict[str, List[BoxOfficeMovie]] = {}
+        failures: List[Dict[str, Any]] = []
+        for offset in range(weeks_back):
+            week_start = latest_end_date - timedelta(days=6 + (offset * 7))
+            iso_year, week_number, _ = week_start.isocalendar()
+            idsem = latest_idsem - offset
+            weekly_url = self._week_page_url_for_idsem(idsem)
+            week_key = f"{iso_year}W{week_number:02d}"
+            try:
+                html = self._fetch_html(weekly_url)
+                movies = self._parse_weekly_page(html, limit=10, source_url=weekly_url)
+                self.enrich_with_imdb_ids(movies)
+                history[week_key] = movies
+            except BoxOfficeError as exc:
+                failures.append(
+                    {
+                        "week_key": week_key,
+                        "idsem": idsem,
+                        "source_url": weekly_url,
+                        "error": str(exc),
+                    }
+                )
+                logger.warning(
+                    "JPBoxOffice historical fetch failed for %s (idsem=%s): %s",
+                    week_key,
+                    idsem,
+                    exc,
+                )
+                continue
+
+        if failures:
+            self.last_resolution_diagnostics = {
+                **latest_info,
+                "historical_failures": failures,
+            }
+
+        return history
 
 
 def create_provider(
@@ -1175,6 +2004,14 @@ def create_provider(
         return MojoUSProvider(http_client=http_client, provider_config=provider_config)
     if normalized == "jpboxoffice":
         return JPBoxOfficeProvider(
+            http_client=http_client, provider_config=provider_config
+        )
+    if normalized == "allocine":
+        return AllocineFRProvider(
+            http_client=http_client, provider_config=provider_config
+        )
+    if normalized == "france_boxoffice":
+        return FranceBoxOfficeProvider(
             http_client=http_client, provider_config=provider_config
         )
 

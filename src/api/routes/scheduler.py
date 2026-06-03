@@ -20,6 +20,7 @@ from ...core.boxoffice_provider import (
 )
 from ...core.boxoffice_storage import (
     iter_history_paths,
+    resolve_weekly_page_path,
 )
 from ...core.exceptions import BoxOfficeError
 from ...core.market_settings import get_market_capabilities
@@ -453,7 +454,27 @@ async def update_specific_week(
         logger.error(f"Invalid market/provider for update-week: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except BoxOfficeError as e:
-        raise HTTPException(status_code=501, detail=str(e))
+        error_message = str(e)
+        if "skipped_incomplete_week" in error_message:
+            raise HTTPException(status_code=409, detail=error_message)
+
+        existing_weekly_file = resolve_weekly_page_path(
+            settings.boxarr_data_directory, market, year, week
+        )
+        message_key = (
+            "refresh_failed_but_existing_data_kept"
+            if existing_weekly_file.exists()
+            else "upstream_failed"
+        )
+        return {
+            "success": False,
+            "message": message_key,
+            "detail": error_message,
+            "movies_found": 0,
+            "movies_added": 0,
+            "market": market,
+            "provider": provider,
+        }
     except HTTPException:
         raise
     except Exception as e:

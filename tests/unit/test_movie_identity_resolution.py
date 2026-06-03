@@ -47,6 +47,7 @@ def test_resolve_avatar_from_french_and_original_titles():
     assert calls[0][2] == "FR"
     assert calls[0][0] == "Avatar : de feu et de cendres"
     assert resolution.debug["source_title"] == "Avatar : de feu et de cendres"
+    assert resolution.debug["normalized_source_title"] == "avatar de feu et de cendres"
     assert resolution.debug["tmdb_query"] is not None
     assert resolution.debug["tmdb_language"] == "fr-FR"
     assert resolution.debug["tmdb_region"] == "FR"

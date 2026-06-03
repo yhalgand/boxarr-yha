@@ -31,6 +31,11 @@ from ...core.market_settings import (
 )
 from ...core.market_policy import get_market_policy
 from ...core.ignore_list import IgnoreList
+from ...core.identity_reuse import (
+    identity_priority,
+    stable_identity_aliases,
+    stable_identity_key,
+)
 from ...core.models import MovieStatus
 from ...utils.config import settings
 from ...utils.logger import get_logger
@@ -254,8 +259,154 @@ async def aggregate_all_movies(market: str = DEFAULT_MARKET) -> List[dict]:
     if not weekly_files:
         return []
 
-    # Dictionary to store unique movies with their appearance weeks
+    # Dictionary to store unique movies with their appearance weeks.
+    # We index by all stable aliases so matched and unmatched occurrences can
+    # collapse onto the same overview card.
     movies_by_key: Dict[str, dict] = {}
+    priorities: Dict[str, tuple] = {}
+    alias_to_key: Dict[str, str] = {}
+
+    def _preferred_key(movie: dict) -> str:
+        stable_key = stable_identity_key(movie, market=market)
+        if stable_key:
+            return stable_key
+        if movie.get("tmdb_id"):
+            return f"tmdb_{movie['tmdb_id']}"
+        return f"{movie.get('title', 'unknown')}_{movie.get('year', 0)}"
+
+    def _movie_aliases(movie: dict) -> List[str]:
+        aliases = stable_identity_aliases(movie, market=market)
+        if aliases:
+            return aliases
+        fallback = _preferred_key(movie)
+        return [fallback] if fallback else []
+
+    def _merge_cards(primary_key: str, secondary_key: str) -> str:
+        if primary_key == secondary_key:
+            return primary_key
+        primary = movies_by_key.get(primary_key)
+        secondary = movies_by_key.get(secondary_key)
+        if not primary or not secondary:
+            return primary_key if primary else secondary_key
+
+        primary_priority = priorities.get(primary_key, (-1, 0.0, 0, 0))
+        secondary_priority = priorities.get(secondary_key, (-1, 0.0, 0, 0))
+        if secondary_priority > primary_priority:
+            primary_key, secondary_key = secondary_key, primary_key
+            primary, secondary = secondary, primary
+            primary_priority, secondary_priority = secondary_priority, primary_priority
+
+        primary_weeks = primary.setdefault("weeks", [])
+        for week in secondary.get("weeks", []):
+            if week not in primary_weeks:
+                primary_weeks.append(week)
+
+        if _coerce_int(secondary.get("best_rank"), 999) < _coerce_int(
+            primary.get("best_rank"), 999
+        ):
+            primary["best_rank"] = secondary.get("best_rank")
+        if _coerce_float(secondary.get("best_weekend_gross"), 0.0) > _coerce_float(
+            primary.get("best_weekend_gross"), 0.0
+        ):
+            primary["best_weekend_gross"] = secondary.get("best_weekend_gross")
+
+        for field in (
+            "title",
+            "year",
+            "poster",
+            "overview",
+            "genres",
+            "has_file",
+            "status",
+            "status_color",
+            "status_icon",
+            "quality_profile_name",
+            "quality_profile_id",
+            "radarr_id",
+            "radarr_title",
+            "radarr_status",
+            "radarr_has_file",
+            "tmdb_id",
+            "imdb_id",
+            "original_language",
+            "match_confidence",
+            "match_method",
+            "identity_status",
+            "source_href",
+            "source_url",
+            "source_title",
+            "normalized_source_title",
+            "jpboxoffice_id",
+            "allocine_movie_id",
+            "market",
+            "country",
+            "provider",
+            "provider_config",
+            "source_year",
+            "weekend_gross",
+            "total_gross",
+            "weeks_released",
+            "weeks_in_release",
+            "theater_count",
+            "can_upgrade_quality",
+        ):
+            value = secondary.get(field)
+            if value is not None and primary.get(field) in (None, ""):
+                primary[field] = value
+
+        for alias, mapped_key in list(alias_to_key.items()):
+            if mapped_key == secondary_key:
+                alias_to_key[alias] = primary_key
+
+        movies_by_key.pop(secondary_key, None)
+        priorities.pop(secondary_key, None)
+        return primary_key
+
+    def _copy_preferred_fields(target: dict, source: dict) -> None:
+        preferred_fields = [
+            "title",
+            "year",
+            "poster",
+            "overview",
+            "genres",
+            "has_file",
+            "status",
+            "status_color",
+            "status_icon",
+            "quality_profile_name",
+            "quality_profile_id",
+            "radarr_id",
+            "radarr_title",
+            "radarr_status",
+            "radarr_has_file",
+            "tmdb_id",
+            "imdb_id",
+            "original_language",
+            "match_confidence",
+            "match_method",
+            "identity_status",
+            "source_href",
+            "source_url",
+            "source_title",
+            "normalized_source_title",
+            "jpboxoffice_id",
+            "allocine_movie_id",
+            "market",
+            "country",
+            "provider",
+            "provider_config",
+            "source_year",
+            "weekend_gross",
+            "total_gross",
+            "weeks_released",
+            "weeks_in_release",
+            "theater_count",
+            "can_upgrade_quality",
+        ]
+        for field in preferred_fields:
+            value = source.get(field)
+            if value is not None and target.get(field) != value:
+                target[field] = value
 
     # Process all JSON files
     for json_file in weekly_files:
@@ -268,14 +419,31 @@ async def aggregate_all_movies(market: str = DEFAULT_MARKET) -> List[dict]:
             week_str = f"{year}W{week:02d}"
 
             for movie in metadata.get("movies", []):
-                # Use TMDB ID as primary key, fallback to title+year
-                if movie.get("tmdb_id"):
-                    key = f"tmdb_{movie['tmdb_id']}"
-                else:
-                    key = f"{movie.get('title', 'unknown')}_{movie.get('year', 0)}"
+                movie_copy = dict(movie)
+                if not movie_copy.get("normalized_source_title"):
+                    movie_copy["normalized_source_title"] = movie_copy.get(
+                        "source_title"
+                    ) or movie_copy.get("title")
+
+                aliases = _movie_aliases(movie_copy)
+                key = None
+                for alias in aliases:
+                    mapped_key = alias_to_key.get(alias)
+                    if mapped_key and mapped_key in movies_by_key:
+                        key = mapped_key
+                        break
+                if key is None:
+                    key = _preferred_key(movie_copy)
+                current_priority = identity_priority(movie_copy)
 
                 rank = _coerce_int(movie.get("rank"), 999)
                 weekend_gross = _coerce_float(movie.get("weekend_gross"), 0.0)
+
+                # If a later alias links to an existing canonical card, merge it.
+                for alias in aliases:
+                    mapped_key = alias_to_key.get(alias)
+                    if mapped_key and mapped_key != key and mapped_key in movies_by_key:
+                        key = _merge_cards(key, mapped_key)
 
                 if key in movies_by_key:
                     existing_rank = _coerce_int(
@@ -291,15 +459,44 @@ async def aggregate_all_movies(market: str = DEFAULT_MARKET) -> List[dict]:
                         movies_by_key[key]["best_rank"] = rank
                     if weekend_gross > existing_best_gross:
                         movies_by_key[key]["best_weekend_gross"] = weekend_gross
+                    existing_priority = priorities.get(key, (-1, 0.0, 0, 0))
+                    if current_priority > existing_priority:
+                        priorities[key] = current_priority
+                        _copy_preferred_fields(movies_by_key[key], movie_copy)
+                    else:
+                        for field in (
+                            "title",
+                            "source_href",
+                            "source_url",
+                            "source_title",
+                            "normalized_source_title",
+                            "jpboxoffice_id",
+                            "allocine_movie_id",
+                            "tmdb_id",
+                            "radarr_id",
+                            "radarr_title",
+                            "radarr_status",
+                            "match_confidence",
+                            "match_method",
+                            "identity_status",
+                                ):
+                            if movies_by_key[key].get(field) in (None, "") and movie_copy.get(
+                                field
+                            ) is not None:
+                                movies_by_key[key][field] = movie_copy.get(field)
                 else:
                     # New movie entry
-                    movie_copy = dict(movie)
                     movie_copy["weeks"] = [week_str]
                     movie_copy["rank"] = rank
                     movie_copy["best_rank"] = rank
                     movie_copy["weekend_gross"] = weekend_gross
                     movie_copy["best_weekend_gross"] = weekend_gross
                     movies_by_key[key] = movie_copy
+                    priorities[key] = current_priority
+                    for alias in aliases:
+                        alias_to_key[alias] = key
+                    if key not in alias_to_key:
+                        alias_to_key[key] = key
 
         except Exception as e:
             logger.warning(f"Error reading {json_file}: {e}")

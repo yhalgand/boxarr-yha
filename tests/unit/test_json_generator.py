@@ -71,6 +71,7 @@ def test_duplicate_tmdb_and_radarr_matches_are_rejected(tmp_path, monkeypatch):
                 rank=1,
                 title="Shared Movie FR",
                 original_title="Shared Movie EN",
+                normalized_source_title="shared movie fr",
                 source_href="/fichfilm.php?id=100&view=2",
                 source_url="https://www.jpbox-office.com/v9_tophebdo.php?idsem=1&view=2",
                 source_title="Shared Movie FR",
@@ -86,6 +87,7 @@ def test_duplicate_tmdb_and_radarr_matches_are_rejected(tmp_path, monkeypatch):
                 rank=2,
                 title="Different Movie FR",
                 original_title="Different Movie EN",
+                normalized_source_title="different movie fr",
                 source_href="/fichfilm.php?id=101&view=2",
                 source_url="https://www.jpbox-office.com/v9_tophebdo.php?idsem=1&view=2",
                 source_title="Different Movie FR",
@@ -105,6 +107,7 @@ def test_duplicate_tmdb_and_radarr_matches_are_rejected(tmp_path, monkeypatch):
     assert payload["movies"][0]["radarr_id"] == 100
     assert payload["movies"][0]["match_confidence"] == 0.98
     assert payload["movies"][0]["source_href"] == "/fichfilm.php?id=100&view=2"
+    assert payload["movies"][0]["normalized_source_title"] == "shared movie fr"
     assert payload["movies"][0]["source_title"] == "Shared Movie FR"
     assert payload["movies"][0]["jpboxoffice_id"] == 100
     assert payload["movies"][0]["country"] == "fr"
@@ -112,3 +115,40 @@ def test_duplicate_tmdb_and_radarr_matches_are_rejected(tmp_path, monkeypatch):
     assert payload["movies"][1]["radarr_id"] is None
     assert payload["movies"][1]["match_confidence"] == 0.0
     assert payload["movies"][1]["match_method"] == "duplicate_rejected"
+    assert payload["movies"][1]["normalized_source_title"] == "different movie fr"
+
+
+def test_weekly_json_keeps_allocine_movie_id(tmp_path, monkeypatch):
+    config_path = _seed_config(tmp_path)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    generator = WeeklyDataGenerator(
+        radarr_service=_FakeRadarrService(),
+        market="fr",
+        provider="france_boxoffice",
+        provider_config={"country": "fr", "primary": "allocine", "fallback": "jpboxoffice"},
+    )
+
+    results = [
+        MatchResult(
+            box_office_movie=BoxOfficeMovie(
+                rank=1,
+                title="Un p'tit truc en plus",
+                normalized_source_title="un ptit truc en plus",
+                source_href="/film/fichefilm_gen_cfilm=300001.html",
+                source_url="https://www.allocine.fr/boxoffice/france/sem-2024-05-01/",
+                source_title="Un p'tit truc en plus",
+                allocine_movie_id=300001,
+                country="fr",
+            ),
+            confidence=0.0,
+            match_method="none",
+        )
+    ]
+
+    output = generator.generate_weekly_data(results, year=2024, week=18)
+    payload = json.loads(Path(output).read_text(encoding="utf-8"))
+
+    assert payload["movies"][0]["allocine_movie_id"] == 300001
+    assert payload["movies"][0]["jpboxoffice_id"] is None

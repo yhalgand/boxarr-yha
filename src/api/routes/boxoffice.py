@@ -50,8 +50,10 @@ class BoxOfficeMovieResponse(BaseModel):
     tmdb_id: Optional[int] = None
     source_href: Optional[str] = None
     source_title: Optional[str] = None
+    normalized_source_title: Optional[str] = None
     source_url: Optional[str] = None
     jpboxoffice_id: Optional[int] = None
+    allocine_movie_id: Optional[int] = None
     identity_status: Optional[str] = None
 
 
@@ -207,8 +209,10 @@ async def get_current_box_office(
                         ),
                         source_href=movie.source_href,
                         source_title=movie.source_title,
+                        normalized_source_title=movie.normalized_source_title,
                         source_url=movie.source_url,
                         jpboxoffice_id=movie.jpboxoffice_id,
+                        allocine_movie_id=movie.allocine_movie_id,
                         identity_status=getattr(match_result, "identity_status", None),
                     )
                 )
@@ -227,8 +231,10 @@ async def get_current_box_office(
                     ),
                     source_href=movie.source_href,
                     source_title=movie.source_title,
+                    normalized_source_title=movie.normalized_source_title,
                     source_url=movie.source_url,
                     jpboxoffice_id=movie.jpboxoffice_id,
+                    allocine_movie_id=movie.allocine_movie_id,
                     identity_status="Unmatched / needs identity",
                 )
                 for movie in movies
@@ -239,6 +245,8 @@ async def get_current_box_office(
         logger.error(f"Invalid market/provider for box office current: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except BoxOfficeError as e:
+        if "skipped_incomplete_week" in str(e):
+            raise HTTPException(status_code=409, detail=str(e))
         if _is_parse_error(e):
             raise HTTPException(status_code=500, detail=str(e))
         raise HTTPException(status_code=501, detail=str(e))
@@ -359,6 +367,7 @@ async def get_historical_box_office(
                 "source_title": movie.source_title,
                 "source_url": movie.source_url,
                 "jpboxoffice_id": movie.jpboxoffice_id,
+                "allocine_movie_id": movie.allocine_movie_id,
                 "is_new_release": (
                     movie.weeks_released == 1 if movie.weeks_released else False
                 ),

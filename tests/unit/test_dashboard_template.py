@@ -40,6 +40,13 @@ def test_dashboard_template_contains_cleanup_modal_and_shared_modal_language():
         "range(historical_max_year, historical_min_year - 1, -1)",
         "historical_min_year",
         "historical_max_year",
+        "this.requestDelayMs = 15000;",
+        "Updating Completed Historical Range",
+        "completed historical fetches only",
+        "const data = await this.readResponseData(response);",
+        "if (!response.ok || data.success === false) {",
+        "this.extractErrorMessage(",
+        "await new Promise(resolve => setTimeout(resolve, this.requestDelayMs));",
     ]
     for snippet in required_snippets:
         assert snippet in content, f"missing dashboard template snippet: {snippet}"

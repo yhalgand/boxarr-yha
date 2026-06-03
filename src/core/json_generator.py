@@ -163,8 +163,11 @@ class WeeklyDataGenerator:
                 "source_year": result.box_office_movie.year,
                 "source_href": result.box_office_movie.source_href,
                 "source_url": result.box_office_movie.source_url,
+                "source_week": week,
                 "source_title": result.box_office_movie.source_title,
+                "normalized_source_title": result.box_office_movie.normalized_source_title,
                 "jpboxoffice_id": result.box_office_movie.jpboxoffice_id,
+                "allocine_movie_id": result.box_office_movie.allocine_movie_id,
                 "market": result.box_office_movie.market or self.market,
                 "country": result.box_office_movie.country,
                 "radarr_id": None,
@@ -352,8 +355,14 @@ class WeeklyDataGenerator:
                         search_movie_tmdb = getattr(
                             self.radarr_service,
                             "search_movie_tmdb",
-                            self.radarr_service.search_movie,
+                            None,
                         )
+                        if search_movie_tmdb is None:
+                            search_movie_tmdb = getattr(
+                                self.radarr_service,
+                                "search_movie",
+                                None,
+                            )
                         identity = resolve_movie_identity(
                             result.box_office_movie,
                             search_movie_tmdb,
@@ -398,6 +407,7 @@ class WeeklyDataGenerator:
                                     "status": "Resolved / not in Radarr",
                                     "status_color": "#ed8936",
                                     "status_icon": "🧭",
+                                    "normalized_source_title": result.box_office_movie.normalized_source_title,
                                 }
                             )
                             logger.info(
@@ -432,6 +442,8 @@ class WeeklyDataGenerator:
             "policy_snapshot": build_policy_snapshot(market_policy, year, week),
             "year": year,
             "week": week,
+            "source_year": year,
+            "source_week": week,
             "friday": friday.isoformat(),
             "sunday": sunday.isoformat(),
             "total_movies": len(movies_data),

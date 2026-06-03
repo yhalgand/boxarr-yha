@@ -27,9 +27,11 @@ def test_default_markets_fallback_to_us_and_fr():
     assert "us" in configured
     assert "fr" in configured
     assert configured["us"]["provider"] == "mojo"
-    assert configured["fr"]["provider"] == "jpboxoffice"
+    assert configured["fr"]["provider"] == "france_boxoffice"
+    assert configured["fr"]["provider_config"]["primary"] == "allocine"
+    assert configured["fr"]["provider_config"]["fallback"] == "jpboxoffice"
     assert configured["us"]["aliases"] == ["mojo_us"]
-    assert configured["fr"]["aliases"] == ["jpboxoffice_fr"]
+    assert configured["fr"]["aliases"] == ["allocine_fr", "jpboxoffice_fr"]
 
     effective_us = get_effective_market_settings(settings, "us")
     assert effective_us["effective"]["box_office_fetch_limit"] == settings.boxarr_features_box_office_limit
@@ -49,6 +51,18 @@ def test_canonical_active_tags_filters_legacy_boxarr_inputs():
     )
 
     assert tags == ["boxarr-added", "boxarr-market-us", "boxarr-us"]
+
+
+def test_effective_auto_tag_text_normalizes_legacy_global_value():
+    settings = _make_settings()
+    settings.boxarr_features_auto_tag_text = "boxarr"
+
+    effective = get_effective_market_settings(settings, "fr")
+
+    assert effective["global"]["auto_tag_text"] == "boxarr"
+    assert effective["effective"]["auto_tag_text"] == "boxarr-added"
+    assert effective["tag_policy"]["auto_tag_text"] == "boxarr-added"
+    assert effective["effective"]["tags"] == ["boxarr-added", "boxarr-market-fr"]
 
 
 def test_supported_jpboxoffice_countries_expose_capabilities():

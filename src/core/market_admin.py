@@ -99,6 +99,14 @@ def infer_provider_config(
         config.setdefault("area", market_key)
     elif provider_key == "jpboxoffice":
         config.setdefault("country", market_key)
+    elif provider_key == "allocine":
+        config.setdefault("country", "fr" if market_key == "fr" else market_key)
+        config.setdefault("min_entries", 10)
+    elif provider_key == "france_boxoffice":
+        config.setdefault("country", "fr")
+        config.setdefault("primary", "allocine")
+        config.setdefault("fallback", "jpboxoffice")
+        config.setdefault("min_entries", 10)
 
     return config
 

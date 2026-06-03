@@ -1,5 +1,6 @@
 """Tests for the JPBoxOffice provider across supported JPBoxOffice countries."""
 
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -23,6 +24,31 @@ def _load_fixture(name: str) -> str:
 
 def _country_fixture_html(html: str, view: int) -> str:
     return html.replace("view=2", f"view={view}")
+
+
+def _week_html_with_rows(idsem: int, title: str, movie_prefix: str, view: int = 2, count: int = 10) -> str:
+    rows = []
+    for rank in range(1, count + 1):
+        movie_title = f"{movie_prefix} {rank}"
+        rows.append(
+            f"""
+            <div class="movie-block">
+              <div>{rank}</div>
+              <div>Image</div>
+              <a href="/fichfilm.php?id={idsem}{rank:02d}&view={view}">{movie_title}</a>
+              <div>{movie_title} Original</div>
+              <div>(Studio)</div>
+              <div>France / Genre / 2h00 1 000 000 100 2 000 000</div>
+            </div>
+            """
+        )
+    return f"<html><head><title>{title}</title></head><body>{''.join(rows)}</body></html>"
+
+
+class _FixedDateTime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return cls(2026, 6, 1, 12, 0, 0, tzinfo=tz)
 
 
 @pytest.mark.parametrize(
@@ -70,7 +96,10 @@ def test_supported_jpboxoffice_countries_use_country_specific_view_and_parse(
     def fake_get(url: str):
         if f"v9_hebdomadaire.php?view={expected_view}&year=2026" in url:
             return _response(url, year_html)
-        if f"v9_tophebdo.php?idsem=2926&view={expected_view}" in url:
+        if (
+            f"v9_tophebdo.php?idsem=2926&view={expected_view}" in url
+            or f"v9_tophebdo.php?idsem=2928&view={expected_view}" in url
+        ):
             return _response(url, weekly_html)
         if f"fichfilm.php?id=12345&view={expected_view}" in url:
             return _response(
@@ -99,16 +128,17 @@ def test_supported_jpboxoffice_countries_use_country_specific_view_and_parse(
         provider_config={"country": country},
     )
     movies = service.fetch_weekend_box_office(2026, 4, limit=10)
+    requested_urls = [str(call.args[0]) for call in client.get.call_args_list]
 
     assert len(movies) == 10
     assert [movie.rank for movie in movies[:10]] == list(range(1, 11))
+    assert not any("fichfilm.php" in url for url in requested_urls)
     assert movies[0].title == "La Femme de ménage"
     assert movies[0].original_title == "The Housemaid"
     assert movies[0].weekend_gross is not None
     assert movies[0].total_gross is not None
     assert movies[0].weeks_released is not None
     assert movies[0].theater_count is not None
-    assert movies[0].imdb_id == "tt1234567"
 
     assert movies[1].title == "Avatar : de feu et de cendres"
     assert movies[1].original_title == "Avatar: Fire and Ash"
@@ -116,7 +146,6 @@ def test_supported_jpboxoffice_countries_use_country_specific_view_and_parse(
     assert movies[1].total_gross is not None
     assert movies[1].weeks_released is not None
     assert movies[1].theater_count is not None
-    assert movies[1].imdb_id == "tt7654321"
 
     assert movies[3].rank == 4
     assert movies[3].title
@@ -135,7 +164,7 @@ def test_supported_jpboxoffice_countries_use_country_specific_view_and_parse(
     assert diagnostics["rows_skipped"] >= 0
 
 
-def test_fr_provider_parses_fixture_and_enriches_imdb():
+def test_fr_provider_parses_fixture_without_eager_detail_fetches():
     year_html = _load_fixture("jpboxoffice_fr_year_2026.html")
     weekly_html = _load_fixture("jpboxoffice_fr_week_2026w02.html")
 
@@ -168,9 +197,11 @@ def test_fr_provider_parses_fixture_and_enriches_imdb():
         provider_config={"country": "fr"},
     )
     movies = service.fetch_weekend_box_office(2026, 4, limit=10)
+    requested_urls = [str(call.args[0]) for call in client.get.call_args_list]
 
     assert len(movies) == 10
     assert [movie.rank for movie in movies[:10]] == list(range(1, 11))
+    assert not any("fichfilm.php" in url for url in requested_urls)
     assert all(movie.title != "Titre" for movie in movies)
     assert movies[0].title == "La Femme de ménage"
     assert movies[0].original_title == "The Housemaid"
@@ -178,7 +209,6 @@ def test_fr_provider_parses_fixture_and_enriches_imdb():
     assert movies[0].total_gross is not None
     assert movies[0].weeks_released is not None
     assert movies[0].theater_count is not None
-    assert movies[0].imdb_id == "tt1234567"
 
     assert movies[1].title == "Avatar : de feu et de cendres"
     assert movies[1].original_title == "Avatar: Fire and Ash"
@@ -187,7 +217,6 @@ def test_fr_provider_parses_fixture_and_enriches_imdb():
     assert movies[1].total_gross is not None
     assert movies[1].weeks_released is not None
     assert movies[1].theater_count is not None
-    assert movies[1].imdb_id == "tt7654321"
 
     assert movies[3].rank == 4
     assert movies[3].title
@@ -267,9 +296,11 @@ def test_supported_country_saved_weekly_fixtures_parse_10_rows(
         provider_config={"country": country},
     )
     movies = service.fetch_weekend_box_office(2024, 1, limit=10)
+    requested_urls = [str(call.args[0]) for call in client.get.call_args_list]
 
     assert len(movies) == 10
     assert [movie.rank for movie in movies[:10]] == list(range(1, 11))
+    assert not any("fichfilm.php" in url for url in requested_urls)
     diagnostics = getattr(service._provider, "last_parse_diagnostics", {})
     assert diagnostics["rows_seen"] >= 10
     assert diagnostics["rows_parsed"] == 10
@@ -318,7 +349,7 @@ def test_jpboxoffice_rows_without_numeric_fields_still_parse(monkeypatch):
         provider="jpboxoffice",
         provider_config={"country": "kr"},
     )
-    movies = service.fetch_weekend_box_office(2024, 1, limit=10)
+    movies = service.fetch_weekend_box_office(2024, 1, limit=2)
 
     assert len(movies) == 2
     assert movies[0].title == "Korean Movie 1"
@@ -357,7 +388,7 @@ def test_fr_provider_parses_saved_fixture():
     client.get.side_effect = fake_get
     client.close = MagicMock()
 
-    service = BoxOfficeService(http_client=client, market="fr")
+    service = BoxOfficeService(http_client=client, market="fr", provider="jpboxoffice", provider_config={"country": "fr"})
     movies = service.fetch_weekend_box_office(2024, 1, limit=10)
 
     assert len(movies) == 10
@@ -396,14 +427,14 @@ def test_fr_provider_skips_header_row_and_parses_week_2026w01():
     def fake_get(url: str):
         if "v9_hebdomadaire.php?view=2&year=2026" in url:
             return _response(url, year_html)
-        if "v9_tophebdo.php?idsem=2901&view=2" in url:
+        if "v9_tophebdo.php?idsem=2923&view=2" in url:
             return _response(url, weekly_html)
         return _response(url, "<html><body></body></html>")
 
     client.get.side_effect = fake_get
     client.close = MagicMock()
 
-    service = BoxOfficeService(http_client=client, market="fr")
+    service = BoxOfficeService(http_client=client, market="fr", provider="jpboxoffice", provider_config={"country": "fr"})
     movies = service.fetch_weekend_box_office(2026, 1, limit=10)
 
     assert len(movies) == 10
@@ -422,7 +453,7 @@ def test_fr_provider_skips_header_row_and_parses_week_2026w01():
 def test_fr_provider_parses_week_2026w02_header_rows_and_keeps_top10():
     year_html = (
         "<html><body><div class='annual-listing'>"
-        "<a href='/v9_tophebdo.php?idsem=2926&view=2'>2</a>"
+        "<a href='/v9_tophebdo.php?idsem=2924&view=2'>2</a>"
         "</div></body></html>"
     )
     weekly_html = _load_fixture("jpboxoffice_fr_week_2026w02.html")
@@ -432,14 +463,14 @@ def test_fr_provider_parses_week_2026w02_header_rows_and_keeps_top10():
     def fake_get(url: str):
         if "v9_hebdomadaire.php?view=2&year=2026" in url:
             return _response(url, year_html)
-        if "v9_tophebdo.php?idsem=2926&view=2" in url:
+        if "v9_tophebdo.php?idsem=2924&view=2" in url:
             return _response(url, weekly_html)
         return _response(url, "<html><body></body></html>")
 
     client.get.side_effect = fake_get
     client.close = MagicMock()
 
-    service = BoxOfficeService(http_client=client, market="fr")
+    service = BoxOfficeService(http_client=client, market="fr", provider="jpboxoffice", provider_config={"country": "fr"})
     movies = service.fetch_weekend_box_office(2026, 2, limit=10)
 
     assert len(movies) == 10
@@ -482,14 +513,14 @@ def test_fr_provider_ignores_sidebar_artifacts_in_2026w21_fixture():
     def fake_get(url: str):
         if "v9_hebdomadaire.php?view=2&year=2026" in url:
             return _response(url, year_html)
-        if "v9_tophebdo.php?idsem=2926&view=2" in url:
+        if "v9_tophebdo.php?idsem=2943&view=2" in url:
             return _response(url, weekly_html)
         raise AssertionError(f"Unexpected URL: {url}")
 
     client.get.side_effect = fake_get
     client.close = MagicMock()
 
-    service = BoxOfficeService(http_client=client, market="fr")
+    service = BoxOfficeService(http_client=client, market="fr", provider="jpboxoffice", provider_config={"country": "fr"})
     movies = service.fetch_weekend_box_office(2026, 21, limit=10)
 
     assert len(movies) == 10
@@ -525,9 +556,237 @@ def test_fr_provider_raises_clean_error_on_empty_page():
     client.get.side_effect = fake_get
     client.close = MagicMock()
 
-    service = BoxOfficeService(http_client=client, market="fr")
+    service = BoxOfficeService(http_client=client, market="fr", provider="jpboxoffice", provider_config={"country": "fr"})
 
     with pytest.raises(BoxOfficeError) as excinfo:
         service.fetch_weekend_box_office(2026, 4, limit=10)
 
-    assert "JPBoxOffice" in str(excinfo.value)
+    assert "partial ranking parse" in str(excinfo.value)
+
+
+def test_fr_provider_rejects_one_row_wrong_chart_page():
+    one_row_html = _week_html_with_rows(
+        2943,
+        "DU 20 Mai AU 26 Mai 2026",
+        "For Whom The Bell Tolls (Pour qui sonne le glas)",
+        count=1,
+    )
+
+    client = MagicMock()
+
+    def fake_get(url: str):
+        if "v9_tophebdo.php?idsem=2943&view=2" in url:
+            return _response(url, one_row_html)
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    client.get.side_effect = fake_get
+    client.close = MagicMock()
+
+    service = BoxOfficeService(http_client=client, market="fr", provider="jpboxoffice", provider_config={"country": "fr"})
+
+    with pytest.raises(BoxOfficeError) as excinfo:
+        service.fetch_weekend_box_office(2026, 21, limit=10)
+
+    message = str(excinfo.value)
+    assert "partial ranking parse" in message
+    assert "valid_rows=1" in message
+
+
+@pytest.mark.parametrize(
+    "reference_date,expected_latest_idsem,expected_title",
+    [
+        (datetime(2026, 6, 1, 12, 0, 0), 2943, "Week 21 1"),
+        (datetime(2026, 6, 3, 12, 0, 0), 2943, "Week 21 1"),
+        (datetime(2026, 6, 4, 12, 0, 0), 2944, "Week 22 1"),
+    ],
+)
+def test_jpboxoffice_current_week_uses_latest_completed_calendar_week(
+    monkeypatch,
+    reference_date,
+    expected_latest_idsem,
+    expected_title,
+):
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return reference_date
+
+    weekly_pages = {
+        2943: _week_html_with_rows(2943, "DU 20 Mai AU 26 Mai 2026", "Week 21"),
+        2944: _week_html_with_rows(2944, "DU 27 Mai AU 02 Juin 2026 (5 Jours)", "Week 22"),
+    }
+
+    client = MagicMock()
+    requested_urls = []
+
+    def fake_get(url: str):
+        requested_urls.append(url)
+        for idsem, html in weekly_pages.items():
+            if f"idsem={idsem}&view=2" in url:
+                return _response(url, html)
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    client.get.side_effect = fake_get
+    client.close = MagicMock()
+
+    monkeypatch.setattr("src.core.boxoffice.datetime", FixedDateTime)
+
+    service = BoxOfficeService(http_client=client, market="fr", provider="jpboxoffice", provider_config={"country": "fr"})
+    current_movies = service.get_current_week_movies(limit=10)
+    assert len(current_movies) == 10
+    assert current_movies[0].title == expected_title
+    assert any(f"idsem={expected_latest_idsem}" in url for url in requested_urls)
+    assert not any("v9_hebdomadaire.php" in url for url in requested_urls)
+    if expected_latest_idsem == 2943:
+        assert not any("idsem=2944&view=2" in url for url in requested_urls)
+    else:
+        assert any("idsem=2944&view=2" in url for url in requested_urls)
+    current_diagnostics = getattr(service._provider, "last_resolution_diagnostics", {})
+    assert current_diagnostics.get("latest_completed_idsem") == expected_latest_idsem
+
+def test_jpboxoffice_historical_last_completed_weeks_are_calendar_based(monkeypatch):
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 6, 1, 12, 0, 0, tzinfo=tz)
+
+    weekly_pages = {
+        2940: _week_html_with_rows(2940, "DU 29 Avril AU 05 Mai 2026", "Week 18"),
+        2941: _week_html_with_rows(2941, "DU 06 Mai AU 12 Mai 2026", "Week 19"),
+        2942: _week_html_with_rows(2942, "DU 13 Mai AU 19 Mai 2026", "Week 20"),
+        2943: _week_html_with_rows(2943, "DU 20 Mai AU 26 Mai 2026", "Week 21"),
+    }
+
+    client = MagicMock()
+    requested_urls = []
+
+    def fake_get(url: str):
+        requested_urls.append(url)
+        for idsem, html in weekly_pages.items():
+            if f"idsem={idsem}&view=2" in url:
+                return _response(url, html)
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    client.get.side_effect = fake_get
+    client.close = MagicMock()
+
+    monkeypatch.setattr("src.core.boxoffice.datetime", FixedDateTime)
+
+    service = BoxOfficeService(http_client=client, market="fr", provider="jpboxoffice", provider_config={"country": "fr"})
+    history = service.get_historical_movies(weeks_back=4)
+
+    assert list(history.keys()) == ["2026W21", "2026W20", "2026W19", "2026W18"]
+    assert [movies[0].title for movies in history.values()] == [
+        "Week 21 1",
+        "Week 20 1",
+        "Week 19 1",
+        "Week 18 1",
+    ]
+    assert not any("v9_hebdomadaire.php" in url for url in requested_urls)
+    assert all(
+        f"idsem={idsem}" in " ".join(requested_urls)
+        for idsem in (2940, 2941, 2942, 2943)
+    )
+
+
+def test_jpboxoffice_explicit_incomplete_week_raises_skip_message(monkeypatch):
+    incomplete_html = "<html><head><title>DU 27 Mai AU 02 Juin 2026 (5 Jours)</title></head><body><p>current week</p></body></html>"
+
+    client = MagicMock()
+
+    def fake_get(url: str):
+        if "idsem=2944&view=2" in url:
+            return _response(url, incomplete_html)
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    client.get.side_effect = fake_get
+    client.close = MagicMock()
+    monkeypatch.setattr("src.core.boxoffice.datetime", _FixedDateTime)
+
+    service = BoxOfficeService(http_client=client, market="fr", provider="jpboxoffice", provider_config={"country": "fr"})
+
+    with pytest.raises(BoxOfficeError) as excinfo:
+        service.fetch_weekend_box_office(2026, 22, limit=10)
+
+    message = str(excinfo.value)
+    assert "skipped_incomplete_week" in message
+    assert "latest_completed_idsem=2943" in message
+
+
+def test_jpboxoffice_retries_transient_500_then_succeeds(monkeypatch):
+    year_html = (
+        "<html><body><div class='annual-listing'>"
+        "<a href='/v9_tophebdo.php?idsem=2943&view=2'>21</a>"
+        "</div></body></html>"
+    )
+    weekly_html = _load_fixture("jpboxoffice_fr_week_2026w21.html")
+    client = MagicMock()
+    sleep_calls = []
+
+    def fake_sleep(seconds):
+        sleep_calls.append(round(seconds, 1))
+
+    monkeypatch.setattr("src.core.boxoffice.time.sleep", fake_sleep)
+    monkeypatch.setattr("src.core.boxoffice.random.uniform", lambda *_args, **_kwargs: 0.0)
+
+    call_count = {"weekly": 0}
+
+    def fake_get(url: str):
+        if "v9_hebdomadaire.php?view=2&year=2026" in url:
+            return _response(url, year_html)
+        if "v9_tophebdo.php?idsem=2943&view=2" in url:
+            call_count["weekly"] += 1
+            if call_count["weekly"] == 1:
+                request = httpx.Request("GET", url)
+                response = httpx.Response(500, request=request, content=b"")
+                response.raise_for_status()
+            return _response(url, weekly_html)
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    client.get.side_effect = fake_get
+    client.close = MagicMock()
+
+    service = BoxOfficeService(http_client=client, market="fr", provider="jpboxoffice", provider_config={"country": "fr"})
+    movies = service.fetch_weekend_box_office(2026, 21, limit=10)
+
+    assert len(movies) == 10
+    assert [movie.rank for movie in movies] == list(range(1, 11))
+    assert sleep_calls[:1] == [5]
+    assert call_count["weekly"] == 2
+
+
+def test_jpboxoffice_retries_exhaust_and_reports_clean_error(monkeypatch):
+    year_html = (
+        "<html><body><div class='annual-listing'>"
+        "<a href='/v9_tophebdo.php?idsem=2943&view=2'>21</a>"
+        "</div></body></html>"
+    )
+    client = MagicMock()
+    sleep_calls = []
+
+    def fake_sleep(seconds):
+        sleep_calls.append(round(seconds, 1))
+
+    monkeypatch.setattr("src.core.boxoffice.time.sleep", fake_sleep)
+    monkeypatch.setattr("src.core.boxoffice.random.uniform", lambda *_args, **_kwargs: 0.0)
+
+    def fake_get(url: str):
+        if "v9_hebdomadaire.php?view=2&year=2026" in url:
+            return _response(url, year_html)
+        if "v9_tophebdo.php?idsem=2943&view=2" in url:
+            request = httpx.Request("GET", url)
+            response = httpx.Response(500, request=request, content=b"")
+            response.raise_for_status()
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    client.get.side_effect = fake_get
+    client.close = MagicMock()
+
+    service = BoxOfficeService(http_client=client, market="fr", provider="jpboxoffice", provider_config={"country": "fr"})
+
+    with pytest.raises(BoxOfficeError) as excinfo:
+        service.fetch_weekend_box_office(2026, 21, limit=10)
+
+    assert "after retries" in str(excinfo.value)
+    assert sleep_calls[:2] == [5, 15]
+    assert len(sleep_calls) == 2

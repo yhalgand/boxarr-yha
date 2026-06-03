@@ -25,8 +25,13 @@ _DEFAULT_MARKET_CONFIGS: Dict[str, Dict[str, Any]] = {
     },
     "fr": {
         "label": "France Box Office",
-        "provider": "jpboxoffice",
-        "provider_config": {"country": "fr"},
+        "provider": "france_boxoffice",
+        "provider_config": {
+            "country": "fr",
+            "primary": "allocine",
+            "fallback": "jpboxoffice",
+            "min_entries": 10,
+        },
         "enabled": True,
     },
 }
@@ -118,6 +123,14 @@ def canonical_active_tags(
         active_tags.append(normalized)
 
     return active_tags
+
+
+def canonical_auto_tag_text(value: Optional[Any]) -> str:
+    """Return the canonical active auto-tag text, filtering legacy values."""
+    normalized = str(value or "").strip()
+    if not normalized or normalized.lower() in _LEGACY_ACTIVE_TAGS:
+        return "boxarr-added"
+    return normalized
 
 
 def _canonicalize_provider_fields(
@@ -309,7 +322,8 @@ def get_effective_market_settings(settings_obj: Settings, market: str) -> Dict[s
         effective[field_name] = resolved["value"]
         sources[field_name] = resolved["source"]
 
-    auto_tag_text = effective.get("auto_tag_text") or "boxarr-added"
+    auto_tag_text = canonical_auto_tag_text(effective.get("auto_tag_text"))
+    effective["auto_tag_text"] = auto_tag_text
     tags = overrides.get("tags")
     if tags is not None:
         effective["tags"] = canonical_active_tags(

@@ -205,6 +205,11 @@ async def get_market_configuration():
         effective = get_effective_market_settings(current_settings, market_key)
         definition_dict = market_config_to_dict(definition)
         markets[market_key] = {
+            "label": definition_dict.get("label"),
+            "provider": definition_dict.get("provider"),
+            "provider_config": definition_dict.get("provider_config", {}),
+            "aliases": definition_dict.get("aliases", []),
+            "enabled": definition_dict.get("enabled", True),
             "definition": definition_dict,
             "overrides": effective.get("overrides", {}),
             "effective": effective.get("effective", {}),

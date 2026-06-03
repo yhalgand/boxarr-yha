@@ -292,10 +292,14 @@ class MovieMatcher:
 
         if self._is_junk_title(radarr_movie.title):
             debug["rejection_reason"] = f"junk radarr title '{radarr_movie.title}'"
+            debug["radarr_title"] = radarr_movie.title
             return MatchResult(
                 box_office_movie=box_office_movie,
-                confidence=0.0,
-                match_method="none",
+                confidence=float(identity.confidence or 0.0),
+                match_method=resolved_match_method,
+                resolved_tmdb_id=tmdb_id,
+                resolved_movie_info=movie_info,
+                identity_status=resolved_identity_status,
                 debug=debug,
             )
 

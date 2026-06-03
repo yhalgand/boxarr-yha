@@ -85,6 +85,7 @@ class FakeWeeklyDataGenerator:
                 "source_href": box_movie.source_href,
                 "source_url": box_movie.source_url,
                 "source_title": box_movie.source_title,
+                "normalized_source_title": box_movie.normalized_source_title,
                 "jpboxoffice_id": box_movie.jpboxoffice_id,
                 "market": box_movie.market or self.market,
                 "country": box_movie.country,
@@ -177,6 +178,7 @@ class FakeWeeklyDataGenerator:
                         or "Resolved / not in Radarr",
                         "status_color": "#ed8936",
                         "status_icon": "🧭",
+                        "normalized_source_title": box_movie.normalized_source_title,
                     }
                 )
 

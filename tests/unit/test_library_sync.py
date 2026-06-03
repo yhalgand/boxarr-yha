@@ -218,3 +218,127 @@ def test_refresh_weekly_data_from_radarr_updates_stale_entries(tmp_path, monkeyp
     assert "status_refreshed_at" in refreshed
     assert refreshed["market"] == "us"
     assert refreshed["provider"] == "mojo"
+
+
+def test_refresh_weekly_data_from_radarr_reuses_stable_identity_across_weeks(
+    tmp_path, monkeypatch
+):
+    weekly_pages_dir = tmp_path / "weekly_pages" / "fr"
+    weekly_pages_dir.mkdir(parents=True)
+
+    shared_source = {
+        "source_href": "/fichfilm.php?id=24871&view=2",
+        "source_url": "https://www.jpbox-office.com/v9_tophebdo.php?idsem=2926&view=2",
+        "source_title": "Le Mage du Kremlin",
+        "normalized_source_title": "le mage du kremlin",
+        "jpboxoffice_id": 24871,
+    }
+
+    confirmed_week = weekly_pages_dir / "2026W21.json"
+    confirmed_week.write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-05-25T10:00:00",
+                "market": "fr",
+                "provider": "jpboxoffice",
+                "year": 2026,
+                "week": 21,
+                "matched_movies": 0,
+                "movies": [
+                    {
+                        "rank": 1,
+                        "title": "Le Mage du Kremlin",
+                        "match_confidence": 0.95,
+                        "match_method": "tmdb_confirmed",
+                        "identity_status": "TMDB confirmed / not in Radarr",
+                        "tmdb_id": 5001,
+                        "radarr_id": None,
+                        "radarr_title": None,
+                        "radarr_status": None,
+                        "radarr_has_file": False,
+                        "has_file": False,
+                        "quality_profile_id": None,
+                        "quality_profile_name": None,
+                        "poster": None,
+                        "year": 2026,
+                        "genres": None,
+                        "overview": None,
+                        "imdb_id": None,
+                        "original_language": None,
+                        **shared_source,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    unresolved_week = weekly_pages_dir / "2026W20.json"
+    unresolved_week.write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-05-18T10:00:00",
+                "market": "fr",
+                "provider": "jpboxoffice",
+                "year": 2026,
+                "week": 20,
+                "matched_movies": 0,
+                "movies": [
+                    {
+                        "rank": 1,
+                        "title": "Le Mage du Kremlin",
+                        "match_confidence": 0.0,
+                        "match_method": "unmatched",
+                        "identity_status": "Unmatched / needs identity",
+                        "tmdb_id": None,
+                        "radarr_id": None,
+                        "radarr_title": None,
+                        "radarr_status": None,
+                        "radarr_has_file": False,
+                        "has_file": False,
+                        "quality_profile_id": None,
+                        "quality_profile_name": None,
+                        "poster": None,
+                        "year": None,
+                        "genres": None,
+                        "overview": None,
+                        "imdb_id": None,
+                        "original_language": None,
+                        **shared_source,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "src.core.library_sync.settings.boxarr_features_quality_upgrade", False
+    )
+
+    fake_service = _FakeRadarrService(
+        movies=[],
+        profiles=[_FakeProfile(1, "HD-1080p")],
+    )
+
+    results = refresh_weekly_data_from_radarr(
+        radarr_service=fake_service,
+        data_directory=tmp_path,
+        ignore_cache=True,
+        market="fr",
+    )
+
+    assert results["weeks_scanned"] == 2
+    assert results["weeks_updated"] == 1
+    assert results["movies_refreshed"] == 1
+
+    unresolved_payload = json.loads(unresolved_week.read_text(encoding="utf-8"))
+    movie = unresolved_payload["movies"][0]
+    assert movie["tmdb_id"] == 5001
+    assert movie["match_confidence"] == 0.95
+    assert movie["match_method"] == "tmdb_confirmed"
+    assert movie["identity_status"] == "TMDB confirmed / not in Radarr"

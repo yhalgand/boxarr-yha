@@ -347,7 +347,6 @@ class TestMovieTitleMatching:
             "L'Affaire Bojarski",
             "Le Chant des forêts",
             "Greenland Migration",
-            "Le Mage du Kremlin",
         ]
         for rank, title in enumerate(false_positive_titles, start=1):
             result = self.matcher.match_movie(
@@ -359,6 +358,24 @@ class TestMovieTitleMatching:
             assert not result.is_matched
             assert result.confidence == 0.0
             assert result.debug["rejection_reason"] is not None
+
+        mage = self.matcher.match_movie(
+            BoxOfficeMovie(
+                rank=5,
+                title="Le Mage du Kremlin",
+                original_title="Le Mage du Kremlin",
+                year=2026,
+            ),
+            radarr_movies,
+            market="fr",
+            search_movie_tmdb=fake_search,
+        )
+        assert not mage.is_matched
+        assert mage.resolved_tmdb_id == 20004
+        assert mage.match_method == "tmdb_confirmed"
+        assert mage.confidence > 0.0
+        assert mage.identity_status == "TMDB confirmed / not in Radarr"
+        assert mage.debug["rejection_reason"] == "junk radarr title 'n'"
 
         positive_avatar = self.matcher.match_movie(
             BoxOfficeMovie(

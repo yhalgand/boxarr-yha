@@ -1274,7 +1274,7 @@
                 <!-- Range Summary -->
                 <div class="range-summary" id="rangeSummary">
                     <div class="summary-text">
-                        <span id="weekCount">0</span> weeks selected
+                        <span id="weekCount">0</span> completed weeks selected
                         <span class="date-range" id="dateRange"></span>
                     </div>
                     <div class="existing-weeks-info" id="existingWeeksInfo" style="display: none;">
@@ -1300,7 +1300,7 @@
                     {% endif %}
                     
                     <p style="margin-top: 1rem; font-size: 0.85rem; color: var(--text-primary);">
-                        💡 <strong>Note:</strong> This behavior applies to all historical fetches. You can change these settings in <a href="{{ request.scope.get('root_path', '') }}/setup?market={{ market }}" style="color: var(--primary-color); text-decoration: underline;">Settings</a>.
+                        💡 <strong>Note:</strong> This behavior applies to all completed historical fetches only. In-progress JPBoxOffice weeks are skipped automatically. You can change these settings in <a href="{{ request.scope.get('root_path', '') }}/setup?market={{ market }}" style="color: var(--primary-color); text-decoration: underline;">Settings</a>.
                     </p>
                 </div>
             </div>
@@ -1560,6 +1560,7 @@ class RangeProcessor {
         this.results = [];
         this.cancelled = false;
         this.existingWeeks = new Set();
+        this.requestDelayMs = 15000;
     }
     
     calculateWeeks(startYear, startWeek, endYear, endWeek) {
@@ -1631,16 +1632,30 @@ class RangeProcessor {
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({year, week, market})
                 });
-                
-                const data = await response.json();
-                this.results.push({year, week, ...data});
-                
-                // Update progress bar
-                this.updateProgress(i + 1, `Completed ${weekStr}`);
-                
-                // Small delay between requests
+
+                const data = await this.readResponseData(response);
+                if (!response.ok || data.success === false) {
+                    const errorMessage = this.extractErrorMessage(
+                        data,
+                        `HTTP ${response.status}`
+                    );
+                    this.results.push({
+                        year,
+                        week,
+                        success: false,
+                        error: errorMessage,
+                        status: response.status,
+                        ...data,
+                    });
+                    this.updateProgress(i + 1, `Failed ${weekStr}`);
+                } else {
+                    this.results.push({year, week, success: true, ...data});
+                    this.updateProgress(i + 1, `Completed ${weekStr}`);
+                }
+
+                // Back off between requests so JPBoxOffice has time to settle.
                 if (i < this.weeks.length - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                    await new Promise(resolve => setTimeout(resolve, this.requestDelayMs));
                 }
             } catch (error) {
                 console.error(`Error processing week ${weekStr}:`, error);
@@ -1654,6 +1669,34 @@ class RangeProcessor {
         }
         
         this.showSummary();
+    }
+
+    async readResponseData(response) {
+        const raw = await response.text();
+        if (!raw) {
+            return {};
+        }
+        try {
+            return JSON.parse(raw);
+        } catch (error) {
+            return {
+                message: raw,
+                detail: raw,
+            };
+        }
+    }
+
+    extractErrorMessage(data, fallbackMessage) {
+        if (!data || typeof data !== 'object') {
+            return fallbackMessage;
+        }
+        const candidates = [data.detail, data.message, data.error];
+        for (const candidate of candidates) {
+            if (typeof candidate === 'string' && candidate.trim()) {
+                return candidate.trim();
+            }
+        }
+        return fallbackMessage;
     }
     
     showProgressBar() {
@@ -1669,7 +1712,7 @@ class RangeProcessor {
         
         document.getElementById('progressTotal').textContent = this.weeks.length;
         document.getElementById('progressCurrent').textContent = '0';
-        document.getElementById('progressTitle').textContent = 'Updating Historical Range';
+        document.getElementById('progressTitle').textContent = 'Updating Completed Historical Range';
     }
     
     updateProgress(current, message) {

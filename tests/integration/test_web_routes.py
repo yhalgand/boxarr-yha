@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from bs4 import BeautifulSoup
 from fastapi.testclient import TestClient
 
 from src.api.app import create_app
@@ -45,10 +46,13 @@ def _seed_weekly_page(
     provider: str,
     provider_config: dict,
     movie_specs: list[dict],
+    *,
+    year: int = 2026,
+    week: int = 21,
 ) -> Path:
     market_dir = dir_path / "weekly_pages" / market
     market_dir.mkdir(parents=True, exist_ok=True)
-    path = market_dir / "2026W21.json"
+    path = market_dir / f"{year}W{week:02d}.json"
 
     payload = {
         "generated_at": "2026-05-25T10:00:00",
@@ -57,8 +61,8 @@ def _seed_weekly_page(
         "provider_config": provider_config,
         "source": provider,
         "units": "admissions" if market == "fr" else "gross",
-        "year": 2026,
-        "week": 21,
+        "year": year,
+        "week": week,
         "policy_snapshot": {
             "market": market,
             "provider": provider,
@@ -79,8 +83,8 @@ def _seed_weekly_page(
             },
             "policy_applied_at": "2026-05-25T10:00:00",
             "policy_version": 1,
-            "year": 2026,
-            "week": 21,
+            "year": year,
+            "week": week,
         },
         "movies": movie_specs,
     }
@@ -118,6 +122,10 @@ def _seed_fixture_data(dir_path: Path) -> None:
                 "poster": "https://image.example/us.jpg",
                 "imdb_id": "tt9000001",
                 "genres": "Action, Adventure",
+                "source_href": "/release/us-blockbuster",
+                "source_url": "https://www.boxofficemojo.com/weekend/2026W21/",
+                "source_title": "US Blockbuster",
+                "normalized_source_title": "us blockbuster",
             },
             {
                 "rank": 2,
@@ -141,6 +149,10 @@ def _seed_fixture_data(dir_path: Path) -> None:
                 "poster": "",
                 "imdb_id": "",
                 "genres": "Drama",
+                "source_href": "/release/us-indie",
+                "source_url": "https://www.boxofficemojo.com/weekend/2026W21/",
+                "source_title": "US Indie",
+                "normalized_source_title": "us indie",
             },
         ],
     )
@@ -173,6 +185,11 @@ def _seed_fixture_data(dir_path: Path) -> None:
                 "poster": "https://image.example/fr1.jpg",
                 "imdb_id": "tt1234567",
                 "genres": "Animation / Adventure",
+                "source_href": "/fichfilm.php?id=1001&view=2",
+                "source_url": "https://www.jpbox-office.com/v9_tophebdo.php?idsem=2926&view=2",
+                "source_title": "Mufasa: Le Roi Lion",
+                "normalized_source_title": "mufasa le roi lion",
+                "jpboxoffice_id": 1001,
             },
             {
                 "rank": 2,
@@ -196,6 +213,11 @@ def _seed_fixture_data(dir_path: Path) -> None:
                 "poster": "https://image.example/fr2.jpg",
                 "imdb_id": "tt7654321",
                 "genres": "Science-Fiction",
+                "source_href": "/fichfilm.php?id=1002&view=2",
+                "source_url": "https://www.jpbox-office.com/v9_tophebdo.php?idsem=2926&view=2",
+                "source_title": "Avatar : de feu et de cendres",
+                "normalized_source_title": "avatar de feu et de cendres",
+                "jpboxoffice_id": 1002,
             },
         ],
     )
@@ -411,3 +433,103 @@ def test_web_route_pages_do_not_return_tracebacks(web_client):
         response = web_client.get(path)
         assert "Traceback" not in response.text
         assert "Internal Server Error" not in response.text
+
+
+def test_overview_merges_matched_and_unmatched_fr_occurrences(
+    tmp_path, monkeypatch
+):
+    config_path = _seed_config_without_markets(tmp_path)
+    _seed_fixture_data(tmp_path)
+    _seed_weekly_page(
+        tmp_path,
+        "fr",
+        "jpboxoffice",
+        {"country": "fr"},
+        [
+            {
+                "rank": 1,
+                "title": "Le Mage du Kremlin",
+                "year": 2026,
+                "weekend_gross": 123456,
+                "total_gross": 223456,
+                "weeks_released": 1,
+                "weeks_in_release": 1,
+                "theater_count": 500,
+                "radarr_id": None,
+                "radarr_title": None,
+                "radarr_status": None,
+                "radarr_has_file": False,
+                "match_confidence": 0.0,
+                "tmdb_id": None,
+                "status": "Not in Radarr",
+                "has_file": False,
+                "quality_profile_name": None,
+                "can_upgrade_quality": False,
+                "poster": None,
+                "imdb_id": None,
+                "genres": "Drama",
+                "source_href": "/fichfilm.php?id=24871&view=2",
+                "source_url": "https://www.jpbox-office.com/v9_tophebdo.php?idsem=2926&view=2",
+                "source_title": "Le Mage du Kremlin",
+                "normalized_source_title": "le mage du kremlin",
+                "jpboxoffice_id": 24871,
+            }
+        ],
+        year=2026,
+        week=20,
+    )
+    _seed_weekly_page(
+        tmp_path,
+        "fr",
+        "jpboxoffice",
+        {"country": "fr"},
+        [
+            {
+                "rank": 1,
+                "title": "Le Mage du Kremlin",
+                "year": 2026,
+                "weekend_gross": 223456,
+                "total_gross": 323456,
+                "weeks_released": 1,
+                "weeks_in_release": 1,
+                "theater_count": 550,
+                "radarr_id": 777,
+                "radarr_title": "Le Mage du Kremlin",
+                "radarr_status": "released",
+                "radarr_has_file": True,
+                "match_confidence": 0.95,
+                "match_method": "tmdb_confirmed",
+                "tmdb_id": 900777,
+                "status": "Downloaded",
+                "has_file": True,
+                "quality_profile_name": "HD-1080p",
+                "can_upgrade_quality": False,
+                "poster": "https://image.example/kremlin.jpg",
+                "imdb_id": "tt9000777",
+                "genres": "Drama",
+                "identity_status": "Matched in Radarr",
+                "source_href": "/fichfilm.php?id=24871&view=2",
+                "source_url": "https://www.jpbox-office.com/v9_tophebdo.php?idsem=2926&view=2",
+                "source_title": "Le Mage du Kremlin",
+                "normalized_source_title": "le mage du kremlin",
+                "jpboxoffice_id": 24871,
+            }
+        ],
+        year=2026,
+        week=21,
+    )
+
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.get("/overview?market=fr")
+    _assert_successful_html(response, "Movie Overview", "Le Mage du Kremlin")
+    soup = BeautifulSoup(response.text, "html.parser")
+    titles = [node.get_text(strip=True) for node in soup.select(".movie-title")]
+    assert titles.count("Le Mage du Kremlin") == 1
+    week_badges = [node.get_text(strip=True) for node in soup.select(".week-badge")]
+    assert "2026W20" in week_badges
+    assert "2026W21" in week_badges
