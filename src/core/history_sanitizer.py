@@ -41,7 +41,7 @@ def _dedupe_key(record: dict, field: str) -> Optional[int]:
         return None
 
 
-def _clear_record(record: dict) -> None:
+def _clear_record(record: dict, *, match_method: str = "unmatched") -> None:
     record["tmdb_id"] = None
     record["radarr_id"] = None
     record["radarr_title"] = None
@@ -61,8 +61,12 @@ def _clear_record(record: dict) -> None:
     record["status_color"] = "#718096"
     record["status_icon"] = "➕"
     record["match_confidence"] = 0.0
-    record["match_method"] = "duplicate_rejected"
-    record["identity_status"] = "Unmatched / needs identity"
+    record["match_method"] = match_method
+    record["identity_status"] = (
+        "Duplicate identity rejected"
+        if match_method == "duplicate_rejected"
+        else "Unmatched / needs identity"
+    )
 
 
 def _best_title_similarity(record: dict) -> float:
@@ -103,7 +107,14 @@ def sanitize_history_movies(movies: List[dict], market: Optional[str] = None) ->
 
     for record in sanitized:
         if _confidence(record) <= 0:
-            _clear_record(record)
+            _clear_record(
+                record,
+                match_method=(
+                    "duplicate_rejected"
+                    if record.get("match_method") == "duplicate_rejected"
+                    else "unmatched"
+                ),
+            )
             continue
         if (
             str(market or "").strip().lower() == "fr"
@@ -133,12 +144,12 @@ def sanitize_history_movies(movies: List[dict], market: Optional[str] = None) ->
             winner = ranked[0]
             if _confidence(sanitized[winner]) <= 0:
                 for idx in indexes:
-                    _clear_record(sanitized[idx])
+                    _clear_record(sanitized[idx], match_method="duplicate_rejected")
                 continue
             for idx in indexes:
                 if idx == winner:
                     continue
-                _clear_record(sanitized[idx])
+                _clear_record(sanitized[idx], match_method="duplicate_rejected")
 
     for index, record in enumerate(sanitized, start=1):
         record["rank"] = index

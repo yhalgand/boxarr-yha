@@ -1772,6 +1772,12 @@
 
                     {% if movie.imdb_id or movie.title %}
                     <div class="external-links">
+                        {% set source_link = boxoffice_source_url(movie) %}
+                        {% if source_link %}
+                        <a href="{{ source_link }}" target="_blank" class="action-btn">
+                            Source
+                        </a>
+                        {% endif %}
                         {% if movie.imdb_id %}
                         <a href="https://www.imdb.com/title/{{ movie.imdb_id }}" target="_blank" class="action-btn">
                             IMDb

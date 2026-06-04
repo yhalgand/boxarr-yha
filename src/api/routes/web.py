@@ -32,6 +32,8 @@ from ...core.market_settings import (
 from ...core.market_policy import get_market_policy
 from ...core.ignore_list import IgnoreList
 from ...core.identity_reuse import (
+    apply_stable_identity_reuse,
+    build_stable_identity_cache,
     identity_priority,
     stable_identity_aliases,
     stable_identity_key,
@@ -83,8 +85,34 @@ def wikipedia_slug(title: Any) -> str:
     return text.replace(" ", "_")
 
 
+def boxoffice_source_url(movie: Any) -> str:
+    """Return an absolute source-provider URL for a stored movie row."""
+    source_href = None
+    source_url = None
+    if isinstance(movie, dict):
+        source_href = movie.get("source_href") or movie.get("release_url")
+        source_url = movie.get("source_url")
+    else:
+        source_href = getattr(movie, "source_href", None) or getattr(
+            movie, "release_url", None
+        )
+        source_url = getattr(movie, "source_url", None)
+
+    href = str(source_href or "").strip()
+    if href.startswith("http://") or href.startswith("https://"):
+        return href
+    if href.startswith("/"):
+        source = str(source_url or "")
+        if "allocine.fr" in source or "fichefilm_gen_cfilm" in href:
+            return f"https://www.allocine.fr{href}"
+        if "jpbox-office.com" in source or "fichfilm.php" in href:
+            return f"https://www.jpbox-office.com{href}"
+    return str(source_url or "").strip()
+
+
 templates.env.globals["format_boxoffice_amount"] = format_boxoffice_amount
 templates.env.globals["wikipedia_slug"] = wikipedia_slug
+templates.env.globals["boxoffice_source_url"] = boxoffice_source_url
 
 
 def _coerce_float(value: Any, default: float = 0.0) -> float:
@@ -510,6 +538,38 @@ async def aggregate_all_movies(market: str = DEFAULT_MARKET) -> List[dict]:
     )
 
     return movies_list
+
+
+def _build_weekly_identity_cache(market: str) -> Dict[str, Dict[str, Any]]:
+    """Build a confirmed identity cache from stored weekly pages for a market."""
+    records: List[dict] = []
+    for json_file in iter_weekly_page_paths(settings.boxarr_data_directory, market):
+        try:
+            with open(json_file) as f:
+                metadata = json.load(f) or {}
+        except Exception as exc:
+            logger.debug("Could not read weekly identity cache file %s: %s", json_file, exc)
+            continue
+        for movie in metadata.get("movies", []) or []:
+            if isinstance(movie, dict):
+                records.append(movie)
+    return build_stable_identity_cache(records, market=market)
+
+
+def _apply_weekly_identity_cache(movies: List[dict], market: str) -> List[dict]:
+    """Return week movies with best known cross-week identity fields applied."""
+    identity_cache = _build_weekly_identity_cache(market)
+    if not identity_cache:
+        return movies
+    hydrated: List[dict] = []
+    for movie in movies:
+        if not isinstance(movie, dict):
+            hydrated.append(movie)
+            continue
+        movie_copy = dict(movie)
+        apply_stable_identity_reuse(movie_copy, identity_cache, market=market)
+        hydrated.append(movie_copy)
+    return hydrated
 
 
 @router.get("/overview", response_class=HTMLResponse)
@@ -988,7 +1048,7 @@ async def serve_weekly_page(request: Request, year: int, week: int):
     with open(json_file) as f:
         metadata = json.load(f)
 
-    movies = metadata.get("movies", [])
+    movies = _apply_weekly_identity_cache(metadata.get("movies", []), market)
 
     # Avoid synchronous full Radarr fetch; client will refresh statuses via AJAX
 

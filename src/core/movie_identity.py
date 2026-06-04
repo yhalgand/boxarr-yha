@@ -109,6 +109,7 @@ def _movie_detail_titles(movie: BoxOfficeMovie) -> List[str]:
     titles = [
         movie.title,
         movie.original_title,
+        metadata.get("detail_title"),
         metadata.get("original_title"),
         metadata.get("international_title"),
         metadata.get("english_title"),
@@ -340,6 +341,7 @@ def resolve_movie_identity(
     override = lookup_identity_override(
         market,
         jpboxoffice_id=getattr(movie, "jpboxoffice_id", None),
+        allocine_movie_id=getattr(movie, "allocine_movie_id", None),
         title=movie.title,
         year=movie.year or _movie_detail_year(movie),
         base_directory=getattr(settings, "boxarr_data_directory", None),
@@ -392,6 +394,62 @@ def resolve_movie_identity(
                 candidates=[],
                 debug=debug,
             )
+
+    metadata = dict(getattr(movie, "identity_metadata", {}) or {})
+    source_tmdb_id = metadata.get("tmdb_id")
+    if isinstance(source_tmdb_id, str) and source_tmdb_id.isdigit():
+        source_tmdb_id = int(source_tmdb_id)
+    if isinstance(source_tmdb_id, int):
+        detail_title = (
+            metadata.get("detail_title")
+            or metadata.get("original_title")
+            or metadata.get("english_title")
+            or movie.original_title
+            or movie.title
+        )
+        resolved_info = {
+            "tmdbId": source_tmdb_id,
+            "title": detail_title,
+            "originalTitle": metadata.get("original_title") or movie.original_title,
+            "year": metadata.get("year") or movie.year or _movie_detail_year(movie),
+            "source": "source_detail",
+        }
+        locale = _search_locale_for_market(market)
+        debug = {
+            "source_title": movie.title,
+            "normalized_source_title": getattr(movie, "normalized_source_title", None)
+            or _normalize_text(movie.title),
+            "cleaned_title": _normalize_text(movie.title),
+            "tmdb_query": None,
+            "tmdb_language": locale["language"],
+            "tmdb_region": locale["region"],
+            "candidates": [],
+            "selected_candidate": {
+                "tmdbId": source_tmdb_id,
+                "title": resolved_info["title"],
+                "candidate_localized_title": resolved_info["title"],
+                "candidate_original_title": resolved_info["originalTitle"],
+                "candidate_english_title": metadata.get("english_title"),
+                "year": resolved_info["year"],
+                "score": 1.0,
+                "search_term": movie.title,
+                "title_similarity": 1.0,
+                "source": "source_detail",
+            },
+            "title_similarity": 1.0,
+            "rejection_reason": None,
+            "source_detail": metadata,
+        }
+        return MovieIdentityResolution(
+            matched=True,
+            confidence=1.0,
+            movie_info=resolved_info,
+            search_term=movie.title,
+            reason="source tmdb id",
+            searched_terms=[movie.title],
+            candidates=[],
+            debug=debug,
+        )
 
     terms = _build_search_terms(movie, market)
     locale = _search_locale_for_market(market)

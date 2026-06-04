@@ -152,3 +152,99 @@ def test_weekly_json_keeps_allocine_movie_id(tmp_path, monkeypatch):
 
     assert payload["movies"][0]["allocine_movie_id"] == 300001
     assert payload["movies"][0]["jpboxoffice_id"] is None
+
+
+def test_unmatched_allocine_rows_are_not_duplicate_rejected_and_keep_source(
+    tmp_path, monkeypatch
+):
+    config_path = _seed_config(tmp_path)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    generator = WeeklyDataGenerator(
+        radarr_service=_FakeRadarrService(),
+        market="fr",
+        provider="france_boxoffice",
+        provider_config={"country": "fr", "primary": "allocine", "fallback": "jpboxoffice"},
+    )
+
+    examples = [
+        ("Le Diable s'habille en Prada 2", 1000006868),
+        ("Super Mario Galaxy Le Film", 327878),
+        ("Vivaldi et moi", 1000018672),
+        ("Le Réveil de la Momie", 1000005009),
+    ]
+    results = [
+        MatchResult(
+            box_office_movie=BoxOfficeMovie(
+                rank=index,
+                title=title,
+                normalized_source_title=title.lower(),
+                source_href=f"/film/fichefilm_gen_cfilm={allocine_id}.html",
+                source_url="https://www.allocine.fr/boxoffice/france/sem-2026-05-20/",
+                source_title=title,
+                allocine_movie_id=allocine_id,
+                market="fr",
+                country="fr",
+            ),
+            confidence=0.0,
+            match_method="none",
+        )
+        for index, (title, allocine_id) in enumerate(examples, start=1)
+    ]
+
+    output = generator.generate_weekly_data(results, year=2026, week=21)
+    payload = json.loads(Path(output).read_text(encoding="utf-8"))
+
+    assert [movie["title"] for movie in payload["movies"]] == [
+        title for title, _ in examples
+    ]
+    for movie, (_title, allocine_id) in zip(payload["movies"], examples):
+        assert movie["allocine_movie_id"] == allocine_id
+        assert movie["source_href"] == f"/film/fichefilm_gen_cfilm={allocine_id}.html"
+        assert movie["source_url"].startswith("https://www.allocine.fr/")
+        assert movie["tmdb_id"] is None
+        assert movie["poster"] is None
+        assert movie["match_method"] == "unmatched"
+        assert movie["identity_status"] == "Unmatched / needs identity"
+
+
+def test_same_allocine_movie_repeated_across_weeks_is_not_duplicate_rejected(
+    tmp_path, monkeypatch
+):
+    config_path = _seed_config(tmp_path)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    generator = WeeklyDataGenerator(
+        radarr_service=_FakeRadarrService(),
+        market="fr",
+        provider="france_boxoffice",
+        provider_config={"country": "fr", "primary": "allocine", "fallback": "jpboxoffice"},
+    )
+
+    def _result(rank: int) -> MatchResult:
+        return MatchResult(
+            box_office_movie=BoxOfficeMovie(
+                rank=rank,
+                title="Super Mario Galaxy Le Film",
+                normalized_source_title="super mario galaxy le film",
+                source_href="/film/fichefilm_gen_cfilm=327878.html",
+                source_url="https://www.allocine.fr/boxoffice/france/sem-2026-05-20/",
+                source_title="Super Mario Galaxy Le Film",
+                allocine_movie_id=327878,
+                market="fr",
+                country="fr",
+            ),
+            confidence=0.0,
+            match_method="none",
+        )
+
+    week_21 = generator.generate_weekly_data([_result(1)], year=2026, week=21)
+    week_22 = generator.generate_weekly_data([_result(1)], year=2026, week=22)
+
+    for output in (week_21, week_22):
+        payload = json.loads(Path(output).read_text(encoding="utf-8"))
+        assert payload["movies"][0]["allocine_movie_id"] == 327878
+        assert payload["movies"][0]["match_method"] == "unmatched"
+        assert payload["movies"][0]["match_method"] != "duplicate_rejected"

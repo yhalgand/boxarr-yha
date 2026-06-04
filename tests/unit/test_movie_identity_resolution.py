@@ -224,3 +224,135 @@ def test_resolve_movie_identity_uses_detail_metadata_and_override(tmp_path, monk
     assert resolution.reason == "manual override"
     assert resolution.debug["selected_candidate"]["source"] == "manual_override"
     assert calls == []
+
+
+def test_resolve_movie_identity_uses_allocine_manual_override(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "boxarr_data_directory", tmp_path)
+
+    overrides_path = tmp_path / "identity_overrides.json"
+    overrides_path.write_text(
+        """
+        {
+          "markets": {
+            "fr": {
+              "allocine_movie_ids": {
+                "318031": {
+                  "tmdb_id": 1152014,
+                  "title": "Un p'tit truc en plus",
+                  "notes": "allocine manual override"
+                }
+              }
+            }
+          }
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    calls = []
+
+    def fake_search(term: str, language=None, region=None):
+        calls.append((term, language, region))
+        return []
+
+    movie = BoxOfficeMovie(
+        rank=1,
+        title="Un p’tit truc en plus",
+        allocine_movie_id=318031,
+        source_href="/film/fichefilm_gen_cfilm=318031.html",
+        identity_metadata={"source_provider": "allocine"},
+    )
+
+    resolution = resolve_movie_identity(movie, fake_search, market="fr")
+
+    assert resolution.matched is True
+    assert resolution.movie_info is not None
+    assert resolution.movie_info["tmdbId"] == 1152014
+    assert resolution.reason == "manual override"
+    assert resolution.debug["override"]["notes"] == "allocine manual override"
+    assert calls == []
+
+
+def test_resolve_allocine_rows_with_original_title_metadata():
+    examples = [
+        (
+            "Le Diable s'habille en Prada 2",
+            "The Devil Wears Prada 2",
+            1000006868,
+            1001,
+        ),
+        (
+            "Super Mario Galaxy Le Film",
+            "The Super Mario Galaxy Movie",
+            327878,
+            1002,
+        ),
+        ("Vivaldi et moi", "Vivaldi and Me", 1000018672, 1003),
+        ("Le Réveil de la Momie", "The Mummy's Awakening", 1000005009, 1004),
+    ]
+
+    for source_title, original_title, allocine_id, tmdb_id in examples:
+        calls = []
+
+        def fake_search(term: str, language=None, region=None):
+            calls.append((term, language, region))
+            if original_title.lower() in term.lower():
+                return [
+                    {
+                        "title": original_title,
+                        "originalTitle": original_title,
+                        "tmdbId": tmdb_id,
+                        "year": 2026,
+                        "remotePoster": f"poster-{tmdb_id}",
+                    }
+                ]
+            return []
+
+        movie = BoxOfficeMovie(
+            rank=1,
+            title=source_title,
+            allocine_movie_id=allocine_id,
+            identity_metadata={
+                "source_provider": "allocine",
+                "original_title": original_title,
+                "year": 2026,
+            },
+        )
+
+        resolution = resolve_movie_identity(movie, fake_search, market="fr")
+
+        assert resolution.matched is True
+        assert resolution.movie_info is not None
+        assert resolution.movie_info["tmdbId"] == tmdb_id
+        assert resolution.confidence >= 0.84
+        assert any(call[0] == original_title for call in calls)
+
+
+def test_resolve_allocine_row_uses_source_detail_tmdb_id_without_search():
+    calls = []
+
+    def fake_search(term: str, language=None, region=None):
+        calls.append((term, language, region))
+        return []
+
+    movie = BoxOfficeMovie(
+        rank=1,
+        title="Vivaldi et moi",
+        allocine_movie_id=1000018672,
+        identity_metadata={
+            "source_provider": "allocine",
+            "detail_title": "Vivaldi et moi",
+            "original_title": "Vivaldi and Me",
+            "tmdb_id": 123456,
+            "year": 2026,
+        },
+    )
+
+    resolution = resolve_movie_identity(movie, fake_search, market="fr")
+
+    assert resolution.matched is True
+    assert resolution.movie_info is not None
+    assert resolution.movie_info["tmdbId"] == 123456
+    assert resolution.reason == "source tmdb id"
+    assert resolution.debug["selected_candidate"]["source"] == "source_detail"
+    assert calls == []

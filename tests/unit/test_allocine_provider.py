@@ -122,6 +122,77 @@ def test_allocine_provider_rejects_wrong_page_date():
     assert "explicit week mismatch" in str(excinfo.value)
 
 
+def test_allocine_provider_extracts_detail_identity_metadata():
+    client = MagicMock()
+    detail_html = """
+    <html>
+      <head>
+        <meta property="og:title" content="Le Diable s'habille en Prada 2 - film 2026 - AlloCiné" />
+        <script type="application/ld+json">
+          {
+            "@type": "Movie",
+            "name": "Le Diable s'habille en Prada 2",
+            "alternateName": "The Devil Wears Prada 2",
+            "datePublished": "2026-05-01",
+            "director": {"@type": "Person", "name": "David Frankel"}
+          }
+        </script>
+      </head>
+      <body>
+        <div>Titre original The Devil Wears Prada 2 Date de sortie 1 mai 2026 Réalisé par David Frankel Nationalité U.S.A.</div>
+        <a href="https://www.imdb.com/title/tt9999999/">IMDb</a>
+      </body>
+    </html>
+    """
+
+    def fake_get(url: str, *_, **__):
+        assert url == "https://www.allocine.fr/film/fichefilm_gen_cfilm=1000006868.html"
+        return _response(url, detail_html)
+
+    client.get.side_effect = fake_get
+    client.close = MagicMock()
+
+    provider = create_provider("allocine", http_client=client)
+    metadata = provider.extract_detail_metadata(
+        "/film/fichefilm_gen_cfilm=1000006868.html"
+    )
+
+    assert metadata["allocine_movie_id"] == 1000006868
+    assert metadata["detail_title"] == "Le Diable s'habille en Prada 2"
+    assert metadata["original_title"] == "The Devil Wears Prada 2"
+    assert metadata["year"] == 2026
+    assert metadata["director"] == "David Frankel"
+    assert metadata["imdb_id"] == "tt9999999"
+
+
+def test_france_provider_delegates_allocine_detail_metadata_to_allocine():
+    client = MagicMock()
+
+    def fake_get(url: str, *_, **__):
+        if "fichefilm_gen_cfilm=327878" in url:
+            return _response(
+                url,
+                """
+                <html><body>
+                  <h1>Super Mario Galaxy Le Film</h1>
+                  <div>Titre original The Super Mario Galaxy Movie Date de sortie 2026</div>
+                </body></html>
+                """,
+            )
+        return _response(url, _allocine_html())
+
+    client.get.side_effect = fake_get
+    client.close = MagicMock()
+
+    provider = create_provider("france_boxoffice", http_client=client)
+    metadata = provider.extract_detail_metadata(
+        "/film/fichefilm_gen_cfilm=327878.html"
+    )
+
+    assert metadata["allocine_movie_id"] == 327878
+    assert metadata["original_title"] == "The Super Mario Galaxy Movie"
+
+
 def test_france_boxoffice_provider_uses_allocine_before_jpboxoffice():
     client = MagicMock()
     requested_urls = []

@@ -16,6 +16,13 @@ def _record_get(record: Any, key: str, default: Any = None) -> Any:
     return getattr(record, key, default)
 
 
+def _metadata_get(record: Any, key: str, default: Any = None) -> Any:
+    metadata = _record_get(record, "identity_metadata")
+    if isinstance(metadata, dict):
+        return metadata.get(key, default)
+    return default
+
+
 def normalized_source_title_key(record: Any) -> str:
     title = (
         _record_get(record, "normalized_source_title")
@@ -34,12 +41,16 @@ def stable_identity_aliases(
 
     aliases: List[str] = []
     jpboxoffice_id = _record_get(record, "jpboxoffice_id")
+    if jpboxoffice_id is None:
+        jpboxoffice_id = _metadata_get(record, "jpboxoffice_id")
     try:
         if jpboxoffice_id is not None:
             aliases.append(f"{market_key}:jpboxoffice_id:{int(jpboxoffice_id)}")
     except (TypeError, ValueError):
         pass
     allocine_movie_id = _record_get(record, "allocine_movie_id")
+    if allocine_movie_id is None:
+        allocine_movie_id = _metadata_get(record, "allocine_movie_id")
     try:
         if allocine_movie_id is not None:
             aliases.append(f"{market_key}:allocine_movie_id:{int(allocine_movie_id)}")

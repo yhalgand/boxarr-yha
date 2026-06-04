@@ -40,6 +40,7 @@ def lookup_identity_override(
     market: str,
     *,
     jpboxoffice_id: Optional[int] = None,
+    allocine_movie_id: Optional[int] = None,
     title: Optional[str] = None,
     year: Optional[int] = None,
     base_directory: Optional[Path] = None,
@@ -53,6 +54,12 @@ def lookup_identity_override(
     if jpboxoffice_id is not None:
         by_id = market_bucket.get("jpboxoffice_ids", {})
         override = by_id.get(str(int(jpboxoffice_id))) if isinstance(by_id, dict) else None
+        if isinstance(override, dict):
+            return dict(override)
+
+    if allocine_movie_id is not None:
+        by_id = market_bucket.get("allocine_movie_ids", {})
+        override = by_id.get(str(int(allocine_movie_id))) if isinstance(by_id, dict) else None
         if isinstance(override, dict):
             return dict(override)
 

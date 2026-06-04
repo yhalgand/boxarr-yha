@@ -46,7 +46,7 @@ def test_sanitize_history_movies_clears_dirty_fr_jpboxoffice_matches():
     assert cleaned["status_color"] == "#718096"
     assert cleaned["status_icon"] == "➕"
     assert cleaned["match_confidence"] == 0.0
-    assert cleaned["match_method"] == "duplicate_rejected"
+    assert cleaned["match_method"] == "unmatched"
     assert cleaned["identity_status"] == "Unmatched / needs identity"
 
 
@@ -72,3 +72,33 @@ def test_sanitize_history_movies_keeps_manual_confirmed_fr_matches():
     assert len(sanitized) == 1
     assert sanitized[0]["tmdb_id"] == 424242
     assert sanitized[0]["match_method"] == "manual_confirmed"
+
+
+def test_sanitize_history_movies_marks_only_real_duplicate_id_conflicts():
+    movies = [
+        {
+            "rank": 1,
+            "title": "Movie A",
+            "provider": "france_boxoffice",
+            "match_method": "tmdb_confirmed",
+            "match_confidence": 1.0,
+            "tmdb_id": 100,
+            "poster": "poster-a",
+        },
+        {
+            "rank": 2,
+            "title": "Movie B",
+            "provider": "france_boxoffice",
+            "match_method": "tmdb_confirmed",
+            "match_confidence": 0.95,
+            "tmdb_id": 100,
+            "poster": "poster-b",
+        },
+    ]
+
+    sanitized = sanitize_history_movies(movies, market="fr")
+
+    assert sanitized[0]["match_method"] == "tmdb_confirmed"
+    assert sanitized[0]["tmdb_id"] == 100
+    assert sanitized[1]["match_method"] == "duplicate_rejected"
+    assert sanitized[1]["tmdb_id"] is None

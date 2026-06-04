@@ -304,6 +304,7 @@ class AllocineFRProvider(BoxOfficeProvider):
         "(KHTML, like Gecko) Chrome/124.0 Safari/537.36 Boxarr/1.7.0"
     )
     REQUEST_TIMEOUT = 20.0
+    DETAIL_REQUEST_TIMEOUT = 8.0
 
     def __init__(
         self,
@@ -327,6 +328,7 @@ class AllocineFRProvider(BoxOfficeProvider):
         self.min_entries = int(self.provider_config.get("min_entries", 10) or 10)
         self.last_parse_diagnostics: Dict[str, Any] = {}
         self.last_resolution_diagnostics: Dict[str, Any] = {}
+        self._detail_metadata_cache: Dict[str, Dict[str, Any]] = {}
 
     def close(self) -> None:
         if self.client:
@@ -380,6 +382,153 @@ class AllocineFRProvider(BoxOfficeProvider):
             return int(match.group(1) or match.group(2))
         except ValueError:
             return None
+
+    def _detail_url(self, release_url: Optional[str]) -> Optional[str]:
+        if not release_url:
+            return None
+        if release_url.startswith("http"):
+            return release_url
+        return f"{self.BASE_URL}/{release_url.lstrip('/')}"
+
+    def _clean_detail_title(self, value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
+        text = self._normalize_space(value)
+        text = re.sub(r"\s*-\s*(?:film|AlloCiné).*$", "", text, flags=re.IGNORECASE)
+        return text.strip() or None
+
+    def extract_detail_metadata(self, release_url: Optional[str]) -> Dict[str, Any]:
+        """Extract title/year hints from an AlloCiné movie detail page.
+
+        AlloCiné weekly rows are localized. The detail page often exposes the
+        original title, release year, director, and occasionally external IDs;
+        those fields materially improve strict TMDB confirmation for FR.
+        """
+        detail_url = self._detail_url(release_url)
+        if not detail_url:
+            return {}
+        if detail_url in self._detail_metadata_cache:
+            return dict(self._detail_metadata_cache[detail_url])
+
+        try:
+            try:
+                response = self.client.get(detail_url, timeout=self.DETAIL_REQUEST_TIMEOUT)
+            except TypeError:
+                response = self.client.get(detail_url)
+            response.raise_for_status()
+        except Exception as exc:
+            logger.debug("Failed to fetch AlloCiné detail page %s: %s", detail_url, exc)
+            self._detail_metadata_cache[detail_url] = {}
+            return {}
+
+        html = response.text or ""
+        soup = BeautifulSoup(html, "html.parser")
+        page_text = self._normalize_space(" ".join(soup.stripped_strings))
+        metadata: Dict[str, Any] = {
+            "source_provider": "allocine",
+            "source_href": release_url,
+            "source_url": detail_url,
+            "allocine_movie_id": self._extract_allocine_id(release_url),
+        }
+
+        title = None
+        for selector in ("meta[property='og:title']", "h1", "title"):
+            node = soup.select_one(selector)
+            if not node:
+                continue
+            value = node.get("content") if node.name == "meta" else node.get_text(" ", strip=True)
+            title = self._clean_detail_title(value)
+            if title:
+                metadata["detail_title"] = title
+                break
+
+        # JSON-LD is the most stable source when present.
+        for script in soup.find_all("script", type="application/ld+json"):
+            raw = script.string or script.get_text("", strip=True)
+            if not raw:
+                continue
+            try:
+                import json as _json
+
+                parsed = _json.loads(raw)
+            except Exception:
+                continue
+            candidates = parsed if isinstance(parsed, list) else [parsed]
+            for item in candidates:
+                if not isinstance(item, dict):
+                    continue
+                name = self._clean_detail_title(item.get("name"))
+                if name and "detail_title" not in metadata:
+                    metadata["detail_title"] = name
+                original = self._clean_detail_title(
+                    item.get("alternateName") or item.get("originalTitle")
+                )
+                if original:
+                    metadata["original_title"] = original
+                date_published = item.get("datePublished") or item.get("releasedEvent")
+                if isinstance(date_published, str):
+                    year_match = re.search(r"(19|20)\d{2}", date_published)
+                    if year_match:
+                        metadata["year"] = int(year_match.group(0))
+                director = item.get("director")
+                if isinstance(director, dict):
+                    name = director.get("name")
+                    if isinstance(name, str) and name.strip():
+                        metadata["director"] = self._normalize_space(name)
+                elif isinstance(director, list):
+                    names = [
+                        self._normalize_space(entry.get("name"))
+                        for entry in director
+                        if isinstance(entry, dict) and entry.get("name")
+                    ]
+                    if names:
+                        metadata["director"] = names[0]
+
+        label_patterns = [
+            (r"Titre\s+original\s+([A-Za-z0-9À-ÿ][^|]+?)(?:\s+Date de sortie|\s+Réalisé par|\s+De\s+|\s+Avec\s+|\s+Nationalité|\s+Presse|\s+Spectateurs|$)", "original_title"),
+            (r"Titre\s+anglais\s+([A-Za-z0-9À-ÿ][^|]+?)(?:\s+Date de sortie|\s+Réalisé par|\s+De\s+|\s+Avec\s+|\s+Nationalité|\s+Presse|\s+Spectateurs|$)", "english_title"),
+            (r"Date\s+de\s+sortie\s+([^|]+?)(?:\s+en salle|\s+Réalisé par|\s+De\s+|\s+Avec\s+|\s+Nationalité|$)", "release_date_text"),
+            (r"(?:Réalisé par|De)\s+([^|]+?)(?:\s+Avec\s+|\s+Nationalité|\s+Presse|\s+Spectateurs|$)", "director"),
+            (r"Nationalité\s+([^|]+?)(?:\s+Presse|\s+Spectateurs|\s+Voir sur|$)", "country_name"),
+        ]
+        for pattern, key in label_patterns:
+            if key in metadata:
+                continue
+            match = re.search(pattern, page_text, flags=re.IGNORECASE)
+            if match:
+                value = self._normalize_space(match.group(1))
+                if value:
+                    metadata[key] = value
+
+        for key, pattern in {
+            "imdb_id": r"imdb\.com/title/(tt\d+)",
+            "tmdb_id": r"themoviedb\.org/movie/(\d+)",
+        }.items():
+            match = re.search(pattern, html, flags=re.IGNORECASE)
+            if match:
+                metadata[key] = int(match.group(1)) if key == "tmdb_id" else match.group(1)
+
+        year_source = (
+            metadata.get("release_date_text")
+            or metadata.get("detail_title")
+            or page_text[:500]
+        )
+        if isinstance(year_source, str) and "year" not in metadata:
+            year_match = re.search(r"(19|20)\d{2}", year_source)
+            if year_match:
+                metadata["year"] = int(year_match.group(0))
+
+        for title_key in ("original_title", "english_title", "detail_title"):
+            value = metadata.get(title_key)
+            if isinstance(value, str):
+                cleaned = self._clean_detail_title(value)
+                if cleaned:
+                    metadata[title_key] = cleaned
+                else:
+                    metadata.pop(title_key, None)
+
+        self._detail_metadata_cache[detail_url] = dict(metadata)
+        return metadata
 
     def _extract_weekly_admissions(self, node, anchor) -> Optional[int]:
         cells = node.find_all(["td", "th"], recursive=False)
@@ -666,6 +815,10 @@ class FranceBoxOfficeProvider(BoxOfficeProvider):
         return history
 
     def extract_detail_metadata(self, release_url: Optional[str]) -> Dict[str, Any]:
+        if isinstance(release_url, str) and (
+            "allocine.fr" in release_url or "fichefilm_gen_cfilm" in release_url
+        ):
+            return self.primary.extract_detail_metadata(release_url)
         return self.fallback.extract_detail_metadata(release_url)
 
 

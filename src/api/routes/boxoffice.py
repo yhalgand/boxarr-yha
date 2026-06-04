@@ -55,6 +55,11 @@ class BoxOfficeMovieResponse(BaseModel):
     jpboxoffice_id: Optional[int] = None
     allocine_movie_id: Optional[int] = None
     identity_status: Optional[str] = None
+    match_method: Optional[str] = None
+    year: Optional[int] = None
+    poster: Optional[str] = None
+    imdb_id: Optional[str] = None
+    genres: Optional[str] = None
 
 
 def _build_history_movie_response(
@@ -175,6 +180,8 @@ async def get_current_box_office(
                     search_movie_tmdb=search_movie_tmdb,
                     detail_fetcher=detail_fetcher,
                 )
+                resolved_movie_info = getattr(match_result, "resolved_movie_info", None) or {}
+                matched_movie = match_result.radarr_movie if match_result.is_matched else None
                 results.append(
                     BoxOfficeMovieResponse(
                         rank=movie.rank,
@@ -214,6 +221,25 @@ async def get_current_box_office(
                         jpboxoffice_id=movie.jpboxoffice_id,
                         allocine_movie_id=movie.allocine_movie_id,
                         identity_status=getattr(match_result, "identity_status", None),
+                        match_method=getattr(match_result, "match_method", None),
+                        year=(
+                            getattr(matched_movie, "year", None)
+                            or resolved_movie_info.get("year")
+                            or movie.year
+                        ),
+                        poster=(
+                            getattr(matched_movie, "poster_url", None)
+                            or resolved_movie_info.get("remotePoster")
+                        ),
+                        imdb_id=(
+                            getattr(matched_movie, "imdbId", None)
+                            or resolved_movie_info.get("imdbId")
+                        ),
+                        genres=(
+                            ", ".join(resolved_movie_info.get("genres", [])[:2])
+                            if resolved_movie_info.get("genres")
+                            else None
+                        ),
                     )
                 )
         else:

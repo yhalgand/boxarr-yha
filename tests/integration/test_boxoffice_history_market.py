@@ -128,6 +128,76 @@ def test_history_boxoffice_route_exposes_allocine_movie_id(tmp_path, monkeypatch
     assert data[0]["jpboxoffice_id"] is None
 
 
+def test_current_boxoffice_route_exposes_resolved_poster(tmp_path, monkeypatch):
+    config_path = _seed_config(tmp_path)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+    monkeypatch.setattr(settings, "radarr_api_key", "test-key")
+
+    class _CurrentService:
+        def __init__(self, *_, **__):
+            pass
+
+        def get_current_week_movies(self, limit=10):
+            return [
+                BoxOfficeMovie(
+                    rank=1,
+                    title="Un p'tit truc en plus",
+                    source_href="/film/fichefilm_gen_cfilm=300001.html",
+                    source_url="https://www.allocine.fr/boxoffice/france/sem-2024-05-01/",
+                    allocine_movie_id=300001,
+                    market="fr",
+                    country="fr",
+                )
+            ]
+
+    class _RadarrService:
+        def get_all_movies(self):
+            return []
+
+        def search_movie_tmdb(self, *_args, **_kwargs):
+            return []
+
+    class _MatchResult:
+        is_matched = False
+        radarr_movie = None
+        confidence = 1.0
+        resolved_tmdb_id = 1152014
+        resolved_movie_info = {
+            "tmdbId": 1152014,
+            "year": 2024,
+            "remotePoster": "https://image.tmdb.org/t/p/original/poster.jpg",
+            "imdbId": "tt30795948",
+            "genres": ["Comedy", "Drama"],
+        }
+        match_method = "tmdb_confirmed"
+        identity_status = "TMDB confirmed / not in Radarr"
+
+    class _Matcher:
+        def build_movie_index(self, _movies):
+            pass
+
+        def match_movie(self, *_args, **_kwargs):
+            return _MatchResult()
+
+    import src.api.routes.boxoffice as boxoffice_routes
+
+    monkeypatch.setattr(boxoffice_routes, "BoxOfficeService", _CurrentService)
+    monkeypatch.setattr(boxoffice_routes, "RadarrService", _RadarrService)
+    monkeypatch.setattr(boxoffice_routes, "MovieMatcher", _Matcher)
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.get("/api/boxoffice/current?market=fr")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["tmdb_id"] == 1152014
+    assert data[0]["poster"] == "https://image.tmdb.org/t/p/original/poster.jpg"
+    assert data[0]["imdb_id"] == "tt30795948"
+    assert data[0]["match_method"] == "tmdb_confirmed"
+
+
 def test_history_boxoffice_route_reads_market_file_and_keeps_radarr_fields(
     tmp_path, monkeypatch
 ):

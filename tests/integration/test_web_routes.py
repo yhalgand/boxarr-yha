@@ -533,3 +533,212 @@ def test_overview_merges_matched_and_unmatched_fr_occurrences(
     week_badges = [node.get_text(strip=True) for node in soup.select(".week-badge")]
     assert "2026W20" in week_badges
     assert "2026W21" in week_badges
+
+
+def test_overview_reuses_allocine_identity_for_missing_poster_occurrence(
+    tmp_path, monkeypatch
+):
+    config_path = _seed_config_without_markets(tmp_path)
+    _seed_weekly_page(
+        tmp_path,
+        "fr",
+        "france_boxoffice",
+        {"country": "fr", "primary": "allocine", "fallback": "jpboxoffice"},
+        [
+            {
+                "rank": 1,
+                "title": "Un p’tit truc en plus",
+                "year": None,
+                "weekend_gross": 1000,
+                "total_gross": 2000,
+                "radarr_id": None,
+                "tmdb_id": None,
+                "match_confidence": 0.0,
+                "match_method": "none",
+                "identity_status": "Unmatched / needs identity",
+                "poster": None,
+                "imdb_id": None,
+                "source_href": "/film/fichefilm_gen_cfilm=318031.html",
+                "source_url": "https://www.allocine.fr/boxoffice/france/sem-2024-05-08/",
+                "source_title": "Un p’tit truc en plus",
+                "normalized_source_title": "un p tit truc en plus",
+                "identity_metadata": {"allocine_movie_id": 318031},
+            }
+        ],
+        year=2024,
+        week=19,
+    )
+    _seed_weekly_page(
+        tmp_path,
+        "fr",
+        "france_boxoffice",
+        {"country": "fr", "primary": "allocine", "fallback": "jpboxoffice"},
+        [
+            {
+                "rank": 1,
+                "title": "Un p’tit truc en plus",
+                "year": 2024,
+                "weekend_gross": 3000,
+                "total_gross": 4000,
+                "radarr_id": None,
+                "tmdb_id": 1152014,
+                "match_confidence": 1.0,
+                "match_method": "tmdb_confirmed",
+                "identity_status": "TMDB confirmed / not in Radarr",
+                "poster": "https://image.tmdb.org/t/p/original/allocine-poster.jpg",
+                "imdb_id": "tt30795948",
+                "source_href": "/film/fichefilm_gen_cfilm=318031.html",
+                "source_url": "https://www.allocine.fr/boxoffice/france/sem-2024-05-01/",
+                "source_title": "Un p’tit truc en plus",
+                "normalized_source_title": "un p tit truc en plus",
+                "allocine_movie_id": 318031,
+            }
+        ],
+        year=2024,
+        week=18,
+    )
+
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.get("/overview?market=fr")
+    _assert_successful_html(response, "Movie Overview", "Un p’tit truc en plus")
+    soup = BeautifulSoup(response.text, "html.parser")
+    titles = [node.get_text(strip=True) for node in soup.select(".movie-title")]
+    assert titles.count("Un p’tit truc en plus") == 1
+    image = soup.select_one('img[alt="Un p’tit truc en plus"]')
+    assert image is not None
+    assert image["src"] == "https://image.tmdb.org/t/p/original/allocine-poster.jpg"
+
+
+def test_weekly_page_reuses_allocine_identity_for_missing_poster_occurrence(
+    tmp_path, monkeypatch
+):
+    config_path = _seed_config_without_markets(tmp_path)
+    _seed_weekly_page(
+        tmp_path,
+        "fr",
+        "france_boxoffice",
+        {"country": "fr", "primary": "allocine", "fallback": "jpboxoffice"},
+        [
+            {
+                "rank": 1,
+                "title": "Un p’tit truc en plus",
+                "year": None,
+                "weekend_gross": 1000,
+                "total_gross": 2000,
+                "radarr_id": None,
+                "tmdb_id": None,
+                "match_confidence": 0.0,
+                "match_method": "none",
+                "identity_status": "Unmatched / needs identity",
+                "poster": None,
+                "imdb_id": None,
+                "source_href": "/film/fichefilm_gen_cfilm=318031.html",
+                "source_url": "https://www.allocine.fr/boxoffice/france/sem-2024-05-08/",
+                "source_title": "Un p’tit truc en plus",
+                "normalized_source_title": "un p tit truc en plus",
+                "identity_metadata": {"allocine_movie_id": 318031},
+            }
+        ],
+        year=2024,
+        week=19,
+    )
+    _seed_weekly_page(
+        tmp_path,
+        "fr",
+        "france_boxoffice",
+        {"country": "fr", "primary": "allocine", "fallback": "jpboxoffice"},
+        [
+            {
+                "rank": 1,
+                "title": "Un p’tit truc en plus",
+                "year": 2024,
+                "weekend_gross": 3000,
+                "total_gross": 4000,
+                "radarr_id": None,
+                "tmdb_id": 1152014,
+                "match_confidence": 1.0,
+                "match_method": "tmdb_confirmed",
+                "identity_status": "TMDB confirmed / not in Radarr",
+                "poster": "https://image.tmdb.org/t/p/original/allocine-poster.jpg",
+                "imdb_id": "tt30795948",
+                "source_href": "/film/fichefilm_gen_cfilm=318031.html",
+                "source_url": "https://www.allocine.fr/boxoffice/france/sem-2024-05-01/",
+                "source_title": "Un p’tit truc en plus",
+                "normalized_source_title": "un p tit truc en plus",
+                "allocine_movie_id": 318031,
+            }
+        ],
+        year=2024,
+        week=18,
+    )
+
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.get("/2024W19?market=fr")
+    _assert_successful_html(response, "Box Office Week 19, 2024", "Un p’tit truc en plus")
+    soup = BeautifulSoup(response.text, "html.parser")
+    image = soup.select_one('img[alt="Un p’tit truc en plus"]')
+    assert image is not None
+    assert image["src"] == "https://image.tmdb.org/t/p/original/allocine-poster.jpg"
+
+
+def test_unmatched_allocine_weekly_rows_render_source_links(tmp_path, monkeypatch):
+    config_path = _seed_config_without_markets(tmp_path)
+    _seed_weekly_page(
+        tmp_path,
+        "fr",
+        "france_boxoffice",
+        {"country": "fr", "primary": "allocine", "fallback": "jpboxoffice"},
+        [
+            {
+                "rank": 1,
+                "title": "Le Diable s'habille en Prada 2",
+                "year": None,
+                "weekend_gross": 1000,
+                "total_gross": 2000,
+                "radarr_id": None,
+                "tmdb_id": None,
+                "match_confidence": 0.0,
+                "match_method": "unmatched",
+                "identity_status": "Unmatched / needs identity",
+                "poster": None,
+                "imdb_id": None,
+                "source_href": "/film/fichefilm_gen_cfilm=1000006868.html",
+                "source_url": "https://www.allocine.fr/boxoffice/france/sem-2026-05-20/",
+                "source_title": "Le Diable s'habille en Prada 2",
+                "normalized_source_title": "le diable s habille en prada 2",
+                "allocine_movie_id": 1000006868,
+            }
+        ],
+        year=2026,
+        week=21,
+    )
+
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.get("/2026W21?market=fr")
+    _assert_successful_html(
+        response,
+        "Box Office Week 21, 2026",
+        "Le Diable s&#39;habille en Prada 2",
+    )
+    soup = BeautifulSoup(response.text, "html.parser")
+    source_link = soup.find(
+        "a",
+        href="https://www.allocine.fr/film/fichefilm_gen_cfilm=1000006868.html",
+    )
+    assert source_link is not None
+    assert source_link.get_text(strip=True) == "Source"
