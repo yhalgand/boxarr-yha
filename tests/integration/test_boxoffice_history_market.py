@@ -44,6 +44,13 @@ def _seed_config(dir_path: Path) -> Path:
 
 
 def _seed_historical_market_config(dir_path: Path, market: str, country: str) -> Path:
+    if market == "fr" and country == "fr":
+        provider = "france_boxoffice"
+        provider_config = {"country": "fr", "primary": "allocine", "min_entries": 10}
+    else:
+        provider = "jpboxoffice"
+        provider_config = {"country": country}
+
     cfg = {
         "radarr": {
             "url": "http://localhost:7878",
@@ -67,8 +74,8 @@ def _seed_historical_market_config(dir_path: Path, market: str, country: str) ->
         "markets": {
             market: {
                 "label": f"{market.upper()} Box Office",
-                "provider": "jpboxoffice",
-                "provider_config": {"country": country},
+                "provider": provider,
+                "provider_config": provider_config,
                 "enabled": True,
             }
         },
@@ -86,6 +93,30 @@ def _response(url: str, html: str) -> httpx.Response:
 
 def _country_fixture_html(html: str, view: int) -> str:
     return html.replace("view=2", f"view={view}")
+
+
+def _allocine_week_html(date_label: str, titles: list[str]) -> str:
+    rows = []
+    for rank, title in enumerate(titles, start=1):
+        rows.append(
+            f"""
+            <tr>
+              <td>{rank}</td>
+              <td><a href="/film/fichefilm_gen_cfilm={400000 + rank}.html">{title}</a></td>
+              <td>{100000 + rank}</td>
+              <td>{200000 + rank}</td>
+            </tr>
+            """
+        )
+    return f"""
+    <html>
+      <head><title>Box Office Cinéma - Semaine du {date_label}</title></head>
+      <body>
+        <h1>Box Office Cinéma - Semaine du {date_label}</h1>
+        <table><tbody>{''.join(rows)}</tbody></table>
+      </body>
+    </html>
+    """
 
 
 def test_history_boxoffice_route_exposes_allocine_movie_id(tmp_path, monkeypatch):
@@ -617,7 +648,6 @@ def test_history_boxoffice_route_clears_dirty_fr_jpboxoffice_matches(
 @pytest.mark.parametrize(
     "market,country,view,min_year",
     [
-        ("fr", "fr", 2, 1993),
         ("de", "de", 4, 1976),
     ],
 )
@@ -786,42 +816,38 @@ def test_history_boxoffice_route_de_returns_500_on_parse_error(tmp_path, monkeyp
     assert "JPBoxOffice parse error" in resp.json()["detail"]
 
 
-def test_history_boxoffice_route_fr_w02_uses_row_order_rank_and_returns_10(
+def test_history_boxoffice_route_fr_w02_uses_allocine_and_returns_10(
     tmp_path, monkeypatch
 ):
     config_path = _seed_historical_market_config(tmp_path, "fr", "fr")
     monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
     Settings.reload_from_file(config_path)
 
-    year_html = (
-        "<html><body><table><tr>"
-        "<td><a href='/v9_tophebdo.php?idsem=2902&view=2'>2</a></td>"
-        "</tr></table></body></html>"
-    )
-    weekly_html = (Path(__file__).resolve().parents[1] / "fixtures" / "jpboxoffice_fr_week_2026w02.html").read_text(encoding="utf-8")
+    expected_titles = [
+        "La Femme de ménage",
+        "Avatar : de feu et de cendres",
+        "Le Mage du Kremlin",
+        "L'Affaire Bojarski",
+        "Zootopie 2",
+        "Primate",
+        "Hamnet",
+        "Le Chant des forêts",
+        "Greenland Migration",
+        "28 Ans Plus Tard : Le Temple Des Morts",
+    ]
+    weekly_html = _allocine_week_html("mercredi 7 janvier 2026", expected_titles)
+    requested_urls = []
 
     client = MagicMock()
 
     def fake_get(url: str):
-        if "v9_hebdomadaire.php?view=2&year=2026" in url:
-            return _response(url, year_html)
-        if "v9_tophebdo.php?idsem=2924&view=2" in url:
+        requested_urls.append(url)
+        if "jpbox-office.com" in url:
+            raise AssertionError("official FR history route must not call JPBoxOffice")
+        if "allocine.fr/boxoffice/france/sem-2026-01-07" in url:
             return _response(url, weekly_html)
-        if "fichfilm.php?id=12345&view=2" in url:
-            return _response(
-                url,
-                "<html><body><a href='https://pro.imdb.com/title/tt1234567/'>IMDb</a></body></html>",
-            )
-        if "fichfilm.php?id=23456&view=2" in url:
-            return _response(
-                url,
-                "<html><body><a href='https://pro.imdb.com/title/tt7654321/'>IMDb</a></body></html>",
-            )
-        if "fichfilm.php?id=34567&view=2" in url:
-            return _response(
-                url,
-                "<html><body><a href='https://pro.imdb.com/title/tt3456789/'>IMDb</a></body></html>",
-            )
+        if "fichefilm_gen_cfilm" in url:
+            return _response(url, "<html><body></body></html>")
         return _response(url, "<html><body></body></html>")
 
     client.get.side_effect = fake_get
@@ -840,26 +866,16 @@ def test_history_boxoffice_route_fr_w02_uses_row_order_rank_and_returns_10(
     data = resp.json()
     assert len(data) == 10
     assert [item["rank"] for item in data] == list(range(1, 11))
-    expected_titles = [
-        "La Femme de ménage",
-        "Avatar : de feu et de cendres",
-        "Le Mage du Kremlin",
-        "L'Affaire Bojarski",
-        "Zootopie 2",
-        "Primate",
-        "Hamnet",
-        "Le Chant des forêts",
-        "Greenland Migration",
-        "28 Ans Plus Tard : Le Temple Des Morts",
-    ]
     assert [item["title"] for item in data] == expected_titles
+    assert all(item["source_url"] == "https://www.allocine.fr/boxoffice/france/sem-2026-01-07/" for item in data)
     assert all(not item["title"].startswith("N°1 ") for item in data)
+    assert not any("jpbox-office.com" in url for url in requested_urls)
 
 
 @pytest.mark.parametrize(
     "market,country,min_year",
     [
-        ("fr", "fr", 1993),
+        ("fr", "fr", 1998),
         ("de", "de", 1976),
         ("br", "br", 1976),
         ("cn", "cn", 2002),
@@ -883,8 +899,12 @@ def test_history_boxoffice_route_uses_market_historical_bounds(
             {
                 "generated_at": "2026-05-25T10:00:00",
                 "market": market,
-                "provider": "jpboxoffice",
-                "provider_config": {"country": country},
+                "provider": "france_boxoffice" if market == "fr" else "jpboxoffice",
+                "provider_config": (
+                    {"country": "fr", "primary": "allocine", "min_entries": 10}
+                    if market == "fr"
+                    else {"country": country}
+                ),
                 "year": min_year,
                 "week": 21,
                 "movies": [

@@ -43,6 +43,8 @@ def test_dashboard_template_contains_cleanup_modal_and_shared_modal_language():
         "this.requestDelayMs = 15000;",
         "function getDashboardMarket()",
         "const renderedMarket = String(window.BOXARR_MARKET || '').trim().toLowerCase();",
+        "id=\"historicalMarketProviderNote\"",
+        "Provider: <code>{{ market_policy.provider }}</code>",
         "Updating Completed Historical Range",
         "completed historical fetches only",
         "const data = await this.readResponseData(response);",

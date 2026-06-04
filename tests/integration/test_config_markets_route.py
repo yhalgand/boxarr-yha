@@ -36,6 +36,8 @@ def _write_config(dir_path: Path) -> Path:
             },
             "fr": {
                 "label": "France Box Office",
+                # Legacy partial/JP config should be upgraded to the canonical
+                # France provider in the effective registry.
                 "provider": "jpboxoffice",
                 "provider_config": {"country": "fr"},
                 "enabled": True,
@@ -67,10 +69,15 @@ def test_get_config_markets_returns_effective_values(tmp_path, monkeypatch):
     assert body["markets"]["fr"]["effective"]["maximum_movies_to_add"] == 10
     assert body["markets"]["fr"]["sources"]["maximum_movies_to_add"] == "global"
     assert body["markets"]["us"]["definition"]["aliases"] == ["mojo_us"]
-    assert body["markets"]["fr"]["definition"]["aliases"] == ["jpboxoffice_fr"]
-    assert body["markets"]["fr"]["capabilities"]["jpboxoffice_view"] == 2
+    assert body["markets"]["fr"]["definition"]["provider"] == "france_boxoffice"
+    assert body["markets"]["fr"]["definition"]["aliases"] == ["allocine_fr", "jpboxoffice_fr"]
+    assert body["markets"]["fr"]["provider"] == "france_boxoffice"
+    assert body["markets"]["fr"]["provider_config"]["primary"] == "allocine"
+    assert "fallback" not in body["markets"]["fr"]["provider_config"]
+    assert body["markets"]["fr"]["capabilities"]["provider"] == "france_boxoffice"
+    assert body["markets"]["fr"]["capabilities"]["jpboxoffice_view"] is None
     assert body["markets"]["fr"]["capabilities"]["historical"]["supports_historical_update"] is True
-    assert body["markets"]["fr"]["capabilities"]["historical"]["min_year"] == 1993
+    assert body["markets"]["fr"]["capabilities"]["historical"]["min_year"] == 1998
     assert body["markets"]["fr"]["capabilities"]["historical"]["max_year"] >= 2026
     assert body["markets"]["us"]["effective"]["cleanup_protect_tag"] == "boxarr-protected"
     assert body["markets"]["us"]["tag_policy"]["added_tag"] == "boxarr-added"

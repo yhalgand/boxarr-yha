@@ -48,6 +48,31 @@ def _jpboxoffice_week_html(idsem: int, title: str, movie_title: str) -> str:
     """
 
 
+def _allocine_week_html(date_label: str, movie_title: str = "Allocine Movie") -> str:
+    rows = []
+    for rank in range(1, 11):
+        allocine_id = 500000 + rank
+        rows.append(
+            f"""
+            <tr>
+              <td>{rank}</td>
+              <td><a href="/film/fichefilm_gen_cfilm={allocine_id}.html">{movie_title} {rank}</a></td>
+              <td>{100000 + rank}</td>
+              <td>{200000 + rank}</td>
+            </tr>
+            """
+        )
+    return f"""
+    <html>
+      <head><title>Box Office Cinéma - Semaine du {date_label}</title></head>
+      <body>
+        <h1>Box Office Cinéma - Semaine du {date_label}</h1>
+        <table><tbody>{''.join(rows)}</tbody></table>
+      </body>
+    </html>
+    """
+
+
 def _http_response(url: str, html: str) -> httpx.Response:
     request = httpx.Request("GET", url)
     return httpx.Response(200, request=request, content=html.encode("utf-8"))
@@ -93,6 +118,13 @@ def _seed_config(dir_path: Path) -> Path:
 
 
 def _seed_historical_market_config(dir_path: Path, market: str, country: str) -> Path:
+    if market == "fr" and country == "fr":
+        provider = "france_boxoffice"
+        provider_config = {"country": "fr", "primary": "allocine", "min_entries": 10}
+    else:
+        provider = "jpboxoffice"
+        provider_config = {"country": country}
+
     cfg = {
         "radarr": {
             "url": "http://localhost:7878",
@@ -116,8 +148,8 @@ def _seed_historical_market_config(dir_path: Path, market: str, country: str) ->
         "markets": {
             market: {
                 "label": f"{market.upper()} Box Office",
-                "provider": "jpboxoffice",
-                "provider_config": {"country": country},
+                "provider": provider,
+                "provider_config": provider_config,
                 "enabled": True,
             }
         },
@@ -275,7 +307,7 @@ class _FakeBoxOfficeService:
 @pytest.mark.parametrize(
     "market,country,min_year",
     [
-        ("fr", "fr", 1993),
+        ("fr", "fr", 1998),
         ("de", "de", 1976),
         ("br", "br", 1976),
         ("cn", "cn", 2002),
@@ -408,7 +440,7 @@ def test_update_week_fr_uses_tmdb_confirmed_matching_and_rejects_false_positives
     data = resp.json()
     assert data["success"] is True
     assert data["market"] == "fr"
-    assert data["provider"] == "jpboxoffice"
+    assert data["provider"] == "france_boxoffice"
     assert data["movies_found"] == 6
     assert data["movies_added"] == 0
     assert refresh_calls == []
@@ -563,7 +595,7 @@ def test_update_week_query_market_wins_over_body_market(tmp_path, monkeypatch):
     assert resp.status_code == 200
     data = resp.json()
     assert data["market"] == "fr"
-    assert data["provider"] == "jpboxoffice"
+    assert data["provider"] == "france_boxoffice"
 
     output_file = tmp_path / "weekly_pages" / "fr" / "2026W02.json"
     assert output_file.exists()
@@ -673,11 +705,11 @@ def test_update_week_failure_does_not_poison_next_week(tmp_path, monkeypatch):
     assert second.status_code == 200
     assert second.json()["success"] is True
     assert second.json()["market"] == "fr"
-    assert second.json()["provider"] == "jpboxoffice"
+    assert second.json()["provider"] == "france_boxoffice"
     assert (tmp_path / "weekly_pages" / "fr" / "2026W22.json").exists()
 
 
-def test_update_week_fr_explicit_weeks_use_direct_idsem_mapping(
+def test_update_week_fr_explicit_weeks_use_allocine_week_urls(
     tmp_path, monkeypatch
 ):
     config_path = _seed_historical_market_config(tmp_path, "fr", "fr")
@@ -687,27 +719,22 @@ def test_update_week_fr_explicit_weeks_use_direct_idsem_mapping(
 
     import src.core.boxoffice as core_boxoffice
 
-    class FixedDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return cls(2026, 6, 20, 12, 0, 0, tzinfo=tz)
-
-    page_by_idsem = {
-        2941: _jpboxoffice_week_html(2941, "DU 06 Mai AU 12 Mai 2026", "Week 19 Movie"),
-        2942: _jpboxoffice_week_html(2942, "DU 13 Mai AU 19 Mai 2026", "Week 20 Movie"),
-        2943: _jpboxoffice_week_html(2943, "DU 20 Mai AU 26 Mai 2026", "Week 21 Movie"),
+    page_by_date = {
+        "2026-05-06": _allocine_week_html("mercredi 6 mai 2026", "Week 19 Movie"),
+        "2026-05-13": _allocine_week_html("mercredi 13 mai 2026", "Week 20 Movie"),
+        "2026-05-20": _allocine_week_html("mercredi 20 mai 2026", "Week 21 Movie"),
     }
     requested_urls = []
 
     class _FakeHttpClient:
         def get(self, url: str):
             requested_urls.append(url)
-            if "v9_hebdomadaire.php" in url:
-                raise AssertionError("explicit FR update must not call annual listing")
-            for idsem, html in page_by_idsem.items():
-                if f"idsem={idsem}&view=2" in url:
+            if "jpbox-office.com" in url:
+                raise AssertionError("official FR update must not call JPBoxOffice")
+            for date_key, html in page_by_date.items():
+                if f"sem-{date_key}" in url:
                     return _http_response(url, html)
-            if "fichfilm.php" in url:
+            if "fichefilm_gen_cfilm" in url:
                 return _http_response(url, "<html><body></body></html>")
             raise AssertionError(f"Unexpected URL: {url}")
 
@@ -721,13 +748,12 @@ def test_update_week_fr_explicit_weeks_use_direct_idsem_mapping(
             kwargs["http_client"] = _FakeHttpClient()
             super().__init__(*args, **kwargs)
 
-    monkeypatch.setattr(core_boxoffice, "datetime", FixedDateTime)
     monkeypatch.setattr(core_boxoffice, "BoxOfficeService", _DirectFrBoxOfficeService)
 
     app = create_app()
     client = TestClient(app)
 
-    for week, expected_idsem in [(19, 2941), (20, 2942), (21, 2943)]:
+    for week, expected_date in [(19, "2026-05-06"), (20, "2026-05-13"), (21, "2026-05-20")]:
         resp = client.post(
             "/api/scheduler/update-week?market=fr",
             json={"year": 2026, "week": week},
@@ -743,14 +769,13 @@ def test_update_week_fr_explicit_weeks_use_direct_idsem_mapping(
         assert payload["source_week"] == week
         assert payload["movies"][0]["source_week"] == week
         source_url = payload["movies"][0]["source_url"]
-        assert f"idsem={expected_idsem}&view=2" in source_url
-        assert "idsem=2944&view=2" not in source_url
-        assert "idsem=2945&view=2" not in source_url
+        assert source_url == f"https://www.allocine.fr/boxoffice/france/sem-{expected_date}/"
+        assert "jpbox-office.com" not in source_url
 
-    assert not any("v9_hebdomadaire.php" in url for url in requested_urls)
+    assert not any("jpbox-office.com" in url for url in requested_urls)
 
 
-def test_update_week_fr_explicit_week_mismatch_fails_without_writing(
+def test_update_week_fr_allocine_week_mismatch_fails_without_writing(
     tmp_path, monkeypatch
 ):
     config_path = _seed_historical_market_config(tmp_path, "fr", "fr")
@@ -760,22 +785,16 @@ def test_update_week_fr_explicit_week_mismatch_fails_without_writing(
 
     import src.core.boxoffice as core_boxoffice
 
-    class FixedDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return cls(2026, 6, 20, 12, 0, 0, tzinfo=tz)
-
-    wrong_page = _jpboxoffice_week_html(
-        2941,
-        "DU 14 Janvier AU 20 Janvier 2026",
+    wrong_page = _allocine_week_html(
+        "mercredi 14 janvier 2026",
         "Wrong Week Movie",
     )
 
     class _FakeHttpClient:
         def get(self, url: str):
-            if "v9_hebdomadaire.php" in url:
-                raise AssertionError("explicit FR update must not call annual listing")
-            if "idsem=2941&view=2" in url:
+            if "jpbox-office.com" in url:
+                raise AssertionError("official FR update must not call JPBoxOffice")
+            if "sem-2026-05-06" in url:
                 return _http_response(url, wrong_page)
             raise AssertionError(f"Unexpected URL: {url}")
 
@@ -789,7 +808,6 @@ def test_update_week_fr_explicit_week_mismatch_fails_without_writing(
             kwargs["http_client"] = _FakeHttpClient()
             super().__init__(*args, **kwargs)
 
-    monkeypatch.setattr(core_boxoffice, "datetime", FixedDateTime)
     monkeypatch.setattr(core_boxoffice, "BoxOfficeService", _DirectFrBoxOfficeService)
 
     app = create_app()
@@ -803,5 +821,5 @@ def test_update_week_fr_explicit_week_mismatch_fails_without_writing(
     data = resp.json()
     assert data["success"] is False
     assert data["message"] == "upstream_failed"
-    assert "explicit week mismatch" in data["detail"]
+    assert "AlloCiné explicit week mismatch" in data["detail"]
     assert not (tmp_path / "weekly_pages" / "fr" / "2026W19.json").exists()

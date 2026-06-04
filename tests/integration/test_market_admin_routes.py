@@ -344,11 +344,56 @@ def test_update_existing_marketconfig_object_does_not_crash(tmp_path, monkeypatc
         "boxarr-fr",
     ]
 
+
+def test_update_fr_provider_normalizes_allocine_and_strips_legacy_fallback(
+    tmp_path, monkeypatch
+):
+    config_path = _seed_config(tmp_path)
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.put(
+        "/api/config/markets/fr",
+        json={
+            "label": "France Box Office",
+            "provider": "france_boxoffice",
+            "provider_config": {
+                "country": "fr",
+                "primary": "allocine",
+                "fallback": "jpboxoffice",
+                "min_entries": 10,
+            },
+            "enabled": True,
+            "auto_add_enabled": False,
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["definition"]["provider"] == "france_boxoffice"
+    assert data["definition"]["provider_config"] == {
+        "country": "fr",
+        "primary": "allocine",
+        "min_entries": 10,
+    }
+    assert data["effective"]["auto_add_enabled"] is False
+
+    saved_yaml = yaml.safe_load(config_path.read_text())
+    assert saved_yaml["markets"]["fr"]["provider"] == "france_boxoffice"
+    assert saved_yaml["markets"]["fr"]["provider_config"] == {
+        "country": "fr",
+        "primary": "allocine",
+        "min_entries": 10,
+    }
+
     markets_resp = client.get("/api/config/markets")
     assert markets_resp.status_code == 200
     markets_body = markets_resp.json()
-    assert markets_body["markets"]["fr"]["effective"]["maximum_movies_to_add"] == 3
-    assert markets_body["markets"]["fr"]["sources"]["maximum_movies_to_add"] == "market"
+    assert markets_body["markets"]["fr"]["provider"] == "france_boxoffice"
+    assert "fallback" not in markets_body["markets"]["fr"]["provider_config"]
 
 
 def test_market_admin_rejects_invalid_or_existing_keys(tmp_path, monkeypatch):

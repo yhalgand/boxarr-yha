@@ -43,6 +43,55 @@ def test_default_markets_fallback_to_us_and_fr():
     assert effective_us["capabilities"]["historical"]["max_year"] >= 2026
 
 
+def test_partial_fr_market_override_inherits_canonical_france_provider():
+    settings = _make_settings()
+    settings.markets = {
+        "fr": {
+            "label": "France Box Office",
+            "enabled": True,
+            "maximum_movies_to_add": 3,
+        }
+    }
+
+    configured = get_configured_markets(settings)
+    assert configured["fr"]["provider"] == "france_boxoffice"
+    assert configured["fr"]["provider_config"]["primary"] == "allocine"
+    assert "fallback" not in configured["fr"]["provider_config"]
+    assert configured["fr"]["capabilities"]["provider"] == "france_boxoffice"
+    assert configured["fr"]["capabilities"]["historical"]["min_year"] == 1998
+
+    effective = get_effective_market_settings(settings, "fr")
+    assert effective["provider"] == "france_boxoffice"
+    assert effective["effective"]["maximum_movies_to_add"] == 3
+    assert effective["sources"]["maximum_movies_to_add"] == "market"
+
+
+def test_legacy_fr_jpboxoffice_override_is_upgraded_to_allocine_provider():
+    settings = _make_settings(
+        markets={
+            "fr": MarketConfig(
+                label="France Box Office",
+                provider="jpboxoffice",
+                provider_config={
+                    "country": "fr",
+                    "fallback": "jpboxoffice",
+                },
+                enabled=True,
+            )
+        }
+    )
+
+    configured = get_configured_markets(settings)
+
+    assert configured["fr"]["provider"] == "france_boxoffice"
+    assert configured["fr"]["provider_config"] == {
+        "country": "fr",
+        "primary": "allocine",
+        "min_entries": 10,
+    }
+    assert configured["fr"]["aliases"] == ["allocine_fr", "jpboxoffice_fr"]
+
+
 def test_canonical_active_tags_filters_legacy_boxarr_inputs():
     tags = canonical_active_tags(
         "us",

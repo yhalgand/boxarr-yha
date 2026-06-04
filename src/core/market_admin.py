@@ -110,6 +110,17 @@ def infer_provider_config(
     return config
 
 
+def _canonical_fr_provider(provider: Any) -> bool:
+    return str(provider or "").strip().lower() in {
+        "",
+        "jpboxoffice",
+        "jpboxoffice_fr",
+        "allocine",
+        "allocine_fr",
+        "france_boxoffice",
+    }
+
+
 def _normalize_tags(tags: Any) -> Optional[list[str]]:
     if tags is None:
         return None
@@ -151,6 +162,8 @@ def build_market_definition(
         raise ValueError("Provider is required")
 
     provider = incoming.get("provider", base.get("provider", DEFAULT_PROVIDER))
+    if normalized_key == "fr" and _canonical_fr_provider(provider):
+        provider = "france_boxoffice"
     provider_config = incoming.get("provider_config", base.get("provider_config"))
     provider_changed = False
     if "provider" in incoming and incoming.get("provider") is not None:

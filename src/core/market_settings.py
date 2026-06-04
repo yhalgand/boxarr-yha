@@ -57,6 +57,14 @@ _EFFECTIVE_FIELD_MAP: Dict[str, str] = {
 }
 
 _LEGACY_ACTIVE_TAGS = {"boxarr", "boxarr-keep"}
+_FR_LEGACY_PROVIDER_VALUES = {
+    "",
+    "jpboxoffice",
+    "jpboxoffice_fr",
+    "allocine",
+    "allocine_fr",
+    "france_boxoffice",
+}
 
 
 def _normalize_key(value: Optional[str]) -> str:
@@ -141,6 +149,36 @@ def _canonicalize_provider_fields(
     return canonicalize_provider_definition(provider_value, provider_config)
 
 
+def _canonicalize_market_provider_fields(
+    market_key: str,
+    provider: Any,
+    provider_config: Optional[Dict[str, Any]] = None,
+    *,
+    base: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Return provider fields for a market override without losing defaults.
+
+    Legacy configs commonly persisted ``markets.fr`` only to override policy
+    values. Those partial overrides must inherit the canonical France provider
+    instead of falling back to the global default provider (Mojo).
+    """
+
+    key = _normalize_key(market_key)
+    provider_value = str(provider or "").strip()
+    raw_provider = provider_value.lower()
+    config = deepcopy(provider_config or {})
+
+    if key == "fr" and raw_provider in _FR_LEGACY_PROVIDER_VALUES:
+        return canonicalize_provider_definition("france_boxoffice", config)
+
+    if not provider_value and base:
+        return canonicalize_provider_definition(
+            base.get("provider"), base.get("provider_config", {})
+        )
+
+    return _canonicalize_provider_fields(provider_value, config)
+
+
 def _market_capabilities(
     provider: Any, provider_config: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
@@ -206,24 +244,25 @@ def _merged_market_registry(settings_obj: Settings) -> Dict[str, Dict[str, Any]]
     }
 
     for key, override in _configured_market_overrides(settings_obj).items():
-        canonical = _canonicalize_provider_fields(
-            override.get("provider"), override.get("provider_config", {})
-        )
         base = registry.get(
             key,
             {
                 "market": key,
                 "label": key.upper(),
-                "provider": canonical["provider"],
+                "provider": "mojo",
                 "provider_config": {},
-                "aliases": list(canonical.get("aliases", [])),
+                "aliases": [],
                 "enabled": True,
                 "configured": False,
                 "overrides": {},
-                "capabilities": _market_capabilities(
-                    canonical["provider"], canonical.get("provider_config", {})
-                ),
+                "capabilities": {},
             },
+        )
+        canonical = _canonicalize_market_provider_fields(
+            key,
+            override.get("provider"),
+            override.get("provider_config", {}),
+            base=base,
         )
         merged = {
             **base,

@@ -120,8 +120,12 @@ def test_build_market_definition_accepts_existing_marketconfig_object():
     )
 
     assert definition["label"] == "France Box Office"
-    assert definition["provider"] == "jpboxoffice"
-    assert definition["provider_config"] == {"country": "fr"}
+    assert definition["provider"] == "france_boxoffice"
+    assert definition["provider_config"] == {
+        "country": "fr",
+        "primary": "allocine",
+        "min_entries": 10,
+    }
     assert definition["box_office_fetch_limit"] == 10
     assert definition["maximum_movies_to_add"] == 5
     assert definition["auto_add_enabled"] is True

@@ -435,6 +435,28 @@ def test_web_route_pages_do_not_return_tracebacks(web_client):
         assert "Internal Server Error" not in response.text
 
 
+def test_dashboard_fr_historical_modal_uses_france_boxoffice_provider(
+    tmp_path, monkeypatch
+):
+    config_path = _seed_config_without_markets(tmp_path)
+    _seed_fixture_data(tmp_path)
+
+    monkeypatch.setenv("BOXARR_DATA_DIRECTORY", str(tmp_path))
+    Settings.reload_from_file(config_path)
+
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.get("/weeks?market=fr")
+    _assert_successful_html(response, "Update Historical Data")
+
+    assert 'window.BOXARR_MARKET = "fr"' in response.text
+    assert 'window.BOXARR_PROVIDER = "france_boxoffice"' in response.text
+    assert 'id="historicalMarketProviderNote"' in response.text
+    assert "Provider: <code>france_boxoffice</code>" in response.text
+    assert "Provider: <code>mojo</code>" not in response.text
+
+
 def test_overview_merges_matched_and_unmatched_fr_occurrences(
     tmp_path, monkeypatch
 ):

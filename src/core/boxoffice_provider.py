@@ -241,6 +241,12 @@ def normalize_provider_config(
     provider_key = normalize_provider(provider)
     normalized_config: Dict[str, Any] = dict(provider_config or {})
 
+    if provider_key == "france_boxoffice":
+        # The canonical France provider is AlloCiné-only. Older local.yaml
+        # files may still contain fallback=jpboxoffice; keep compatibility at
+        # read time by ignoring it instead of surfacing it as active behavior.
+        normalized_config.pop("fallback", None)
+
     alias_default = PROVIDER_ALIAS_MAP.get(str(provider or "").strip().lower())
     if alias_default and provider_key == alias_default[0]:
         for key, value in alias_default[1].items():
