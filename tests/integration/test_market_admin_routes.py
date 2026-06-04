@@ -423,7 +423,7 @@ def test_no_markets_config_keeps_us_fr_defaults(tmp_path, monkeypatch):
     assert body["markets"]["us"]["definition"]["provider"] == "mojo"
     assert body["markets"]["fr"]["definition"]["provider"] == "france_boxoffice"
     assert body["markets"]["fr"]["definition"]["provider_config"]["primary"] == "allocine"
-    assert body["markets"]["fr"]["definition"]["provider_config"]["fallback"] == "jpboxoffice"
+    assert "fallback" not in body["markets"]["fr"]["definition"]["provider_config"]
     assert body["markets"]["fr"]["provider"] == "france_boxoffice"
     assert body["markets"]["fr"]["provider_config"]["primary"] == "allocine"
-    assert body["markets"]["fr"]["provider_config"]["fallback"] == "jpboxoffice"
+    assert "fallback" not in body["markets"]["fr"]["provider_config"]

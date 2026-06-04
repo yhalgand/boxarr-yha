@@ -89,7 +89,7 @@ MARKET_DEFINITIONS: Dict[str, Dict[str, str]] = {
     "fr": {
         "label": "France Box Office",
         "provider": "france_boxoffice",
-        "source": "allocine+jpboxoffice",
+        "source": "allocine",
         "units": "admissions",
     },
 }
@@ -117,7 +117,6 @@ PROVIDER_FAMILY_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "france_boxoffice": {
         "country": "fr",
         "primary": "allocine",
-        "fallback": "jpboxoffice",
         "min_entries": 10,
     },
 }
@@ -214,7 +213,6 @@ def get_boxoffice_provider_capabilities(
             "country": "fr",
             "country_label": "France",
             "primary_provider": normalized_config.get("primary", "allocine"),
-            "fallback_provider": normalized_config.get("fallback", "jpboxoffice"),
             "live": {"supports_live_fetch": True},
             "historical": {
                 "supports_historical_update": True,

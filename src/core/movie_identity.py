@@ -103,6 +103,25 @@ def _candidate_directors(movie_info: Dict[str, Any]) -> List[str]:
     return deduped
 
 
+def _source_years(movie: BoxOfficeMovie) -> set[int]:
+    metadata = dict(getattr(movie, "identity_metadata", {}) or {})
+    years = {
+        year
+        for year in (
+            movie.year,
+            _movie_detail_year(movie),
+        )
+        if isinstance(year, int)
+    }
+    for key in ("source_year", "release_year", "year"):
+        value = metadata.get(key)
+        if isinstance(value, int):
+            years.add(value)
+        elif isinstance(value, str) and value.isdigit():
+            years.add(int(value))
+    return years
+
+
 def _movie_detail_titles(movie: BoxOfficeMovie) -> List[str]:
     """Return all title-like hints we know about for a box-office movie."""
     metadata = dict(getattr(movie, "identity_metadata", {}) or {})
@@ -152,6 +171,25 @@ def _movie_detail_year(movie: BoxOfficeMovie) -> Optional[int]:
     return None
 
 
+def _movie_imdb_id(movie: BoxOfficeMovie) -> Optional[str]:
+    """Return a trusted IMDb ID supplied by the box-office source, if any."""
+    candidates = [movie.imdb_id]
+    metadata = dict(getattr(movie, "identity_metadata", {}) or {})
+    candidates.extend(
+        [
+            metadata.get("imdb_id"),
+            metadata.get("imdbId"),
+            metadata.get("detail_imdb_id"),
+        ]
+    )
+    for value in candidates:
+        if isinstance(value, str):
+            match = re.search(r"(tt\d+)", value)
+            if match:
+                return match.group(1)
+    return None
+
+
 def _best_title_similarity(movie: BoxOfficeMovie, movie_info: Dict[str, Any]) -> float:
     """Return the strongest similarity between box-office and candidate titles."""
     source_titles = _movie_detail_titles(movie)
@@ -190,16 +228,6 @@ def _build_search_terms(movie: BoxOfficeMovie, market: str) -> List[str]:
     if movie.original_title and movie.original_title not in preferred:
         preferred.append(movie.original_title)
 
-    detail_year = _movie_detail_year(movie)
-    year = detail_year or movie.year
-    if year:
-        preferred.extend(
-            [
-                f"{movie.title} ({year})",
-                f"{movie.original_title} ({year})" if movie.original_title else None,
-            ]
-        )
-
     for term in preferred:
         if isinstance(term, str) and term.strip():
             stripped = term.strip()
@@ -208,6 +236,15 @@ def _build_search_terms(movie: BoxOfficeMovie, market: str) -> List[str]:
             normalized = _normalize_text(stripped)
             if normalized and normalized not in terms:
                 terms.append(normalized)
+
+    detail_year = _movie_detail_year(movie)
+    year = detail_year or movie.year
+    if year:
+        base_terms = list(terms)
+        for term in base_terms:
+            year_term = f"{term} ({year})"
+            if year_term not in terms:
+                terms.append(year_term)
 
     return terms
 
@@ -476,6 +513,10 @@ def resolve_movie_identity(
     best_movie_info: Optional[Dict[str, Any]] = None
     best_term: Optional[str] = None
     best_score = 0.0
+    best_raw_movie_info: Optional[Dict[str, Any]] = None
+    best_raw_term: Optional[str] = None
+    best_raw_score = 0.0
+    best_raw_rejection_reason: Optional[str] = None
     candidate_log: List[Dict[str, Any]] = []
 
     logger.debug(
@@ -485,6 +526,99 @@ def resolve_movie_identity(
         market,
         terms,
     )
+
+    source_years = _source_years(movie)
+    source_imdb_id = _movie_imdb_id(movie)
+    if source_imdb_id:
+        imdb_term = f"imdb:{source_imdb_id}"
+        try:
+            imdb_results = _search_with_optional_locale(
+                search_movie,
+                imdb_term,
+                language=locale["language"],
+                region=locale["region"],
+            )
+        except Exception as exc:
+            logger.debug("TMDb IMDb lookup failed for term '%s': %s", imdb_term, exc)
+            imdb_results = []
+
+        for movie_info in imdb_results:
+            if not isinstance(movie_info, dict):
+                continue
+            candidate_imdb_id = movie_info.get("imdbId") or movie_info.get("imdb_id")
+            candidate_year = _candidate_year(movie_info)
+            rejection_reason = None
+            if (
+                market == "fr"
+                and candidate_year is not None
+                and source_years
+                and all(abs(candidate_year - source_year) > 1 for source_year in source_years)
+            ):
+                rejection_reason = "candidate year conflicts with source week"
+            elif candidate_imdb_id and str(candidate_imdb_id) != source_imdb_id:
+                rejection_reason = "source imdb id mismatch"
+
+            candidate_log.append(
+                {
+                    "term": imdb_term,
+                    "candidate": movie_info.get("title") or movie_info.get("originalTitle"),
+                    "candidate_localized_title": movie_info.get("title"),
+                    "candidate_original_title": movie_info.get("originalTitle"),
+                    "candidate_english_title": movie_info.get("englishTitle")
+                    or movie_info.get("english_title"),
+                    "tmdbId": movie_info.get("tmdbId"),
+                    "imdbId": candidate_imdb_id,
+                    "year": movie_info.get("year"),
+                    "score": 1.0 if not rejection_reason else 0.0,
+                    "rejection_reason": rejection_reason,
+                    "source": "source_imdb_id",
+                }
+            )
+
+            if rejection_reason:
+                if best_raw_score < 1.0:
+                    best_raw_movie_info = movie_info
+                    best_raw_term = imdb_term
+                    best_raw_score = 1.0
+                    best_raw_rejection_reason = rejection_reason
+                continue
+
+            debug = {
+                "source_title": source_title,
+                "normalized_source_title": normalized_source_title,
+                "cleaned_title": cleaned_title,
+                "tmdb_query": imdb_term,
+                "tmdb_language": locale["language"],
+                "tmdb_region": locale["region"],
+                "candidates": candidate_log,
+                "selected_candidate": {
+                    "tmdbId": movie_info.get("tmdbId"),
+                    "title": movie_info.get("title") or movie_info.get("originalTitle"),
+                    "candidate_localized_title": movie_info.get("title"),
+                    "candidate_original_title": movie_info.get("originalTitle"),
+                    "candidate_english_title": movie_info.get("englishTitle")
+                    or movie_info.get("english_title"),
+                    "imdbId": candidate_imdb_id,
+                    "year": movie_info.get("year"),
+                    "score": 1.0,
+                    "search_term": imdb_term,
+                    "title_similarity": _best_title_similarity(movie, movie_info),
+                    "source": "source_imdb_id",
+                },
+                "title_similarity": _best_title_similarity(movie, movie_info),
+                "rejection_reason": None,
+                "source_imdb_id": source_imdb_id,
+            }
+            return MovieIdentityResolution(
+                matched=True,
+                confidence=1.0,
+                movie_info=movie_info,
+                search_term=imdb_term,
+                reason="source imdb id",
+                searched_terms=[imdb_term, *terms],
+                candidates=candidate_log,
+                debug=debug,
+            )
 
     for term in terms:
         try:
@@ -520,6 +654,18 @@ def resolve_movie_identity(
             localized_title = movie_info.get("title")
             original_title = movie_info.get("originalTitle")
             english_title = movie_info.get("englishTitle") or movie_info.get("english_title")
+            title_similarity = _best_title_similarity(movie, movie_info)
+            candidate_year = _candidate_year(movie_info)
+            rejection_reason = None
+            if market == "fr" and score >= min_confidence:
+                if (
+                    candidate_year is not None
+                    and source_years
+                    and all(abs(candidate_year - source_year) > 1 for source_year in source_years)
+                ):
+                    rejection_reason = "candidate year conflicts with source week"
+                elif title_similarity < 0.55:
+                    rejection_reason = "no localized/original title confirmation"
             candidate_log.append(
                 {
                     "term": term,
@@ -533,8 +679,17 @@ def resolve_movie_identity(
                     or movie_info.get("directors")
                     or movie_info.get("directorName"),
                     "score": round(score, 3),
+                    "title_similarity": title_similarity,
+                    "rejection_reason": rejection_reason,
                 }
             )
+            if score > best_raw_score:
+                best_raw_score = score
+                best_raw_movie_info = movie_info
+                best_raw_term = term
+                best_raw_rejection_reason = rejection_reason
+            if rejection_reason:
+                continue
             if score > best_score:
                 best_score = score
                 best_movie_info = movie_info
@@ -544,53 +699,6 @@ def resolve_movie_identity(
         _best_title_similarity(movie, best_movie_info) if best_movie_info else 0.0
     )
     if best_movie_info and best_score >= min_confidence:
-        if market_key := str(market or "").strip().lower():
-            if market_key == "fr" and best_title_similarity < 0.55:
-                reason = "no localized/original title confirmation"
-                logger.debug(
-                    "Rejecting FR identity for '%s': score=%.3f title_similarity=%.3f",
-                    movie.title,
-                    best_score,
-                    best_title_similarity,
-                )
-                logger.debug("Movie identity candidate log: %s", candidate_log[:20])
-                return MovieIdentityResolution(
-                    matched=False,
-                    confidence=best_score,
-                    movie_info=best_movie_info,
-                    search_term=best_term,
-                    reason=reason,
-                    searched_terms=terms,
-                    candidates=candidate_log,
-                    debug={
-                        "source_title": source_title,
-                        "normalized_source_title": normalized_source_title,
-                        "cleaned_title": cleaned_title,
-                        "tmdb_query": best_term,
-                        "tmdb_language": locale["language"],
-                        "tmdb_region": locale["region"],
-                        "candidates": candidate_log,
-                        "selected_candidate": {
-                        "tmdbId": best_movie_info.get("tmdbId"),
-                        "title": best_movie_info.get("title")
-                        or best_movie_info.get("originalTitle"),
-                        "candidate_localized_title": best_movie_info.get("title"),
-                        "candidate_original_title": best_movie_info.get("originalTitle"),
-                        "candidate_english_title": best_movie_info.get("englishTitle")
-                        or best_movie_info.get("english_title"),
-                        "year": best_movie_info.get("year"),
-                        "director": best_movie_info.get("director")
-                        or best_movie_info.get("directors")
-                        or best_movie_info.get("directorName"),
-                            "score": round(best_score, 3),
-                            "search_term": best_term,
-                            "title_similarity": best_title_similarity,
-                        },
-                        "title_similarity": best_title_similarity,
-                        "rejection_reason": reason,
-                    },
-                )
-
         selected_candidate = {
             "tmdbId": best_movie_info.get("tmdbId"),
             "title": best_movie_info.get("title") or best_movie_info.get("originalTitle"),
@@ -632,7 +740,17 @@ def resolve_movie_identity(
             },
         )
 
-    reason = "no candidate above confidence threshold" if best_movie_info else "no candidates found"
+    if best_raw_movie_info and not best_movie_info:
+        best_movie_info = best_raw_movie_info
+        best_term = best_raw_term
+        best_score = best_raw_score
+        best_title_similarity = _best_title_similarity(movie, best_raw_movie_info)
+
+    reason = (
+        best_raw_rejection_reason
+        if best_raw_rejection_reason and best_score >= min_confidence
+        else ("no candidate above confidence threshold" if best_movie_info else "no candidates found")
+    )
     logger.debug(
         "Failed to resolve movie identity '%s' (original='%s'): %s; best_score=%.3f",
         movie.title,

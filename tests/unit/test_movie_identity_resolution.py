@@ -356,3 +356,114 @@ def test_resolve_allocine_row_uses_source_detail_tmdb_id_without_search():
     assert resolution.reason == "source tmdb id"
     assert resolution.debug["selected_candidate"]["source"] == "source_detail"
     assert calls == []
+
+
+def test_resolve_allocine_row_uses_source_detail_imdb_id_before_title_search():
+    calls = []
+
+    def fake_search(term: str, language=None, region=None):
+        calls.append((term, language, region))
+        if term == "imdb:tt1234567":
+            return [
+                {
+                    "title": "The Criminals",
+                    "originalTitle": "The Criminals",
+                    "tmdbId": 777777,
+                    "imdbId": "tt1234567",
+                    "year": 2026,
+                    "remotePoster": "poster",
+                }
+            ]
+        return []
+
+    movie = BoxOfficeMovie(
+        rank=10,
+        title="The Criminals",
+        allocine_movie_id=1000099999,
+        identity_metadata={
+            "source_provider": "allocine",
+            "detail_title": "The Criminals",
+            "imdb_id": "tt1234567",
+            "year": 2026,
+        },
+    )
+
+    resolution = resolve_movie_identity(movie, fake_search, market="fr")
+
+    assert resolution.matched is True
+    assert resolution.movie_info is not None
+    assert resolution.movie_info["tmdbId"] == 777777
+    assert resolution.reason == "source imdb id"
+    assert calls[0][0] == "imdb:tt1234567"
+    assert resolution.debug["selected_candidate"]["source"] == "source_imdb_id"
+
+
+def test_resolve_fr_rejects_exact_title_with_conflicting_old_year():
+    def fake_search(term: str, language=None, region=None):
+        if "criminals" in term.lower():
+            return [
+                {
+                    "title": "The Criminals",
+                    "originalTitle": "The Criminals",
+                    "tmdbId": 1976,
+                    "year": 1976,
+                    "remotePoster": "old-poster",
+                }
+            ]
+        return []
+
+    movie = BoxOfficeMovie(
+        rank=10,
+        title="The Criminals",
+        year=2026,
+        allocine_movie_id=999999,
+        identity_metadata={"source_provider": "allocine", "source_year": 2026},
+    )
+
+    resolution = resolve_movie_identity(movie, fake_search, market="fr")
+
+    assert resolution.matched is False
+    assert resolution.movie_info is not None
+    assert resolution.movie_info["tmdbId"] == 1976
+    assert resolution.debug["rejection_reason"] == "candidate year conflicts with source week"
+
+
+def test_resolve_fr_ignores_old_exact_candidate_and_selects_current_year_candidate():
+    def fake_search(term: str, language=None, region=None):
+        if "criminals" in term.lower():
+            return [
+                {
+                    "title": "The Criminals",
+                    "originalTitle": "The Criminals",
+                    "tmdbId": 1976,
+                    "year": 1976,
+                    "remotePoster": "old-poster",
+                },
+                {
+                    "title": "The Criminals",
+                    "originalTitle": "The Criminals",
+                    "tmdbId": 202601,
+                    "year": 2026,
+                    "remotePoster": "current-poster",
+                },
+            ]
+        return []
+
+    movie = BoxOfficeMovie(
+        rank=10,
+        title="The Criminals",
+        year=2026,
+        allocine_movie_id=999999,
+        identity_metadata={"source_provider": "allocine", "source_year": 2026},
+    )
+
+    resolution = resolve_movie_identity(movie, fake_search, market="fr")
+
+    assert resolution.matched is True
+    assert resolution.movie_info is not None
+    assert resolution.movie_info["tmdbId"] == 202601
+    assert any(
+        candidate["tmdbId"] == 1976
+        and candidate["rejection_reason"] == "candidate year conflicts with source week"
+        for candidate in resolution.candidates
+    )

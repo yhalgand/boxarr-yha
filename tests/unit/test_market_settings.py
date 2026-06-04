@@ -29,7 +29,7 @@ def test_default_markets_fallback_to_us_and_fr():
     assert configured["us"]["provider"] == "mojo"
     assert configured["fr"]["provider"] == "france_boxoffice"
     assert configured["fr"]["provider_config"]["primary"] == "allocine"
-    assert configured["fr"]["provider_config"]["fallback"] == "jpboxoffice"
+    assert "fallback" not in configured["fr"]["provider_config"]
     assert configured["us"]["aliases"] == ["mojo_us"]
     assert configured["fr"]["aliases"] == ["allocine_fr", "jpboxoffice_fr"]
 

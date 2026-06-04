@@ -80,6 +80,7 @@ def test_allocine_provider_parses_top10_for_fr_week():
     assert [movie.rank for movie in movies] == list(range(1, 11))
     assert movies[0].title == "Un p'tit truc en plus"
     assert movies[0].weekend_gross == 1_131_341
+    assert movies[0].year == 2024
     assert movies[0].source_url.endswith("/sem-2024-05-01/")
     assert movies[0].identity_metadata["source_provider"] == "allocine"
     assert movies[0].identity_metadata["allocine_movie_id"] == 300001
@@ -219,7 +220,7 @@ def test_france_boxoffice_provider_uses_allocine_before_jpboxoffice():
     assert not any("jpbox-office.com" in url for url in requested_urls)
 
 
-def test_france_boxoffice_provider_falls_back_to_jpboxoffice_on_allocine_failure():
+def test_france_boxoffice_provider_does_not_fallback_to_jpboxoffice_on_allocine_failure():
     client = MagicMock()
     requested_urls = []
 
@@ -227,8 +228,6 @@ def test_france_boxoffice_provider_falls_back_to_jpboxoffice_on_allocine_failure
         requested_urls.append(url)
         if "allocine.fr" in url:
             return _response(url, _allocine_html(count=1))
-        if "jpbox-office.com/v9_tophebdo.php?idsem=2943&view=2" in url:
-            return _response(url, _jpboxoffice_html())
         raise AssertionError(f"Unexpected URL: {url}")
 
     client.get.side_effect = fake_get
@@ -240,12 +239,12 @@ def test_france_boxoffice_provider_falls_back_to_jpboxoffice_on_allocine_failure
         provider="france_boxoffice",
         provider_config={"country": "fr"},
     )
-    movies = service.fetch_weekend_box_office(2026, 21, limit=10)
+    with pytest.raises(BoxOfficeError) as excinfo:
+        service.fetch_weekend_box_office(2026, 21, limit=10)
 
-    assert len(movies) == 10
-    assert movies[0].title == "JP Fallback 1"
+    assert "AlloCiné France provider failed" in str(excinfo.value)
     assert any("allocine.fr" in url for url in requested_urls)
-    assert any("jpbox-office.com" in url for url in requested_urls)
+    assert not any("jpbox-office.com" in url for url in requested_urls)
 
 
 def test_france_boxoffice_current_uses_latest_completed_week_with_allocine_first(monkeypatch):

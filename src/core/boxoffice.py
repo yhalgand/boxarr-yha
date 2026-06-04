@@ -638,6 +638,7 @@ class AllocineFRProvider(BoxOfficeProvider):
             source_url=source_url,
             source_title=title,
             normalized_source_title=normalize_title_key(title),
+            year=week_start.year,
             market="fr",
             country="fr",
             allocine_movie_id=allocine_movie_id,
@@ -727,7 +728,7 @@ class AllocineFRProvider(BoxOfficeProvider):
 
 
 class FranceBoxOfficeProvider(BoxOfficeProvider):
-    """France provider wrapper: AlloCiné primary, JPBoxOffice fallback."""
+    """France provider wrapper using AlloCiné as the sole active source."""
 
     provider_key = "france_boxoffice"
 
@@ -751,10 +752,6 @@ class FranceBoxOfficeProvider(BoxOfficeProvider):
             http_client=self.client,
             provider_config={"country": "fr", "min_entries": self.provider_config.get("min_entries", 10)},
         )
-        self.fallback = JPBoxOfficeProvider(
-            http_client=self.client,
-            provider_config={"country": "fr"},
-        )
         self.last_provider_used: Optional[str] = None
         self.last_provider_errors: List[Dict[str, str]] = []
         self.last_parse_diagnostics: Dict[str, Any] = {}
@@ -770,48 +767,37 @@ class FranceBoxOfficeProvider(BoxOfficeProvider):
         week: Optional[int] = None,
         limit: int = 10,
     ) -> List[BoxOfficeMovie]:
-        errors: List[Dict[str, str]] = []
-        for provider in (self.primary, self.fallback):
-            try:
-                movies = provider.fetch_weekend_box_office(year, week, limit=limit)
-                self.last_provider_used = provider.provider_key
-                self.last_provider_errors = errors
-                self.last_parse_diagnostics = dict(
-                    getattr(provider, "last_parse_diagnostics", {}) or {}
-                )
-                self.last_resolution_diagnostics = dict(
-                    getattr(provider, "last_resolution_diagnostics", {}) or {}
-                )
-                return movies
-            except BoxOfficeError as exc:
-                errors.append({"provider": provider.provider_key, "error": str(exc)})
-                logger.warning(
-                    "France provider %s failed for %sW%s: %s",
-                    provider.provider_key,
-                    year,
-                    week,
-                    exc,
-                )
-                continue
-        self.last_provider_errors = errors
-        detail = "; ".join(f"{item['provider']}: {item['error']}" for item in errors)
-        raise BoxOfficeError(f"France box office providers failed: {detail}")
+        try:
+            movies = self.primary.fetch_weekend_box_office(year, week, limit=limit)
+            self.last_provider_used = self.primary.provider_key
+            self.last_provider_errors = []
+            self.last_parse_diagnostics = dict(
+                getattr(self.primary, "last_parse_diagnostics", {}) or {}
+            )
+            self.last_resolution_diagnostics = dict(
+                getattr(self.primary, "last_resolution_diagnostics", {}) or {}
+            )
+            return movies
+        except BoxOfficeError as exc:
+            self.last_provider_used = None
+            self.last_provider_errors = [{"provider": self.primary.provider_key, "error": str(exc)}]
+            raise BoxOfficeError(f"AlloCiné France provider failed: {exc}") from exc
 
     def get_current_week_movies(self, limit: int = 10) -> List[BoxOfficeMovie]:
-        latest_info = self.fallback._latest_completed_week_info(datetime.now())
-        year = int(latest_info["latest_completed_year"])
-        week = int(latest_info["latest_completed_week_number"])
+        latest_start = self._latest_completed_week_start_date(datetime.now())
+        year, week, _ = latest_start.isocalendar()
         return self.fetch_weekend_box_office(year, week, limit=limit)
 
     def get_historical_movies(self, weeks_back: int = 1):
-        history = self.fallback.get_historical_movies(weeks_back=weeks_back)
-        self.last_provider_used = self.fallback.provider_key
-        self.last_parse_diagnostics = dict(
-            getattr(self.fallback, "last_parse_diagnostics", {}) or {}
-        )
-        self.last_resolution_diagnostics = dict(
-            getattr(self.fallback, "last_resolution_diagnostics", {}) or {}
-        )
+        if weeks_back <= 0:
+            return {}
+        latest_start = self._latest_completed_week_start_date(datetime.now())
+        history: Dict[str, List[BoxOfficeMovie]] = {}
+        for offset in range(weeks_back):
+            week_start = latest_start - timedelta(days=offset * 7)
+            year, week, _ = week_start.isocalendar()
+            key = f"{year}W{week:02d}"
+            history[key] = self.fetch_weekend_box_office(year, week, limit=10)
         return history
 
     def extract_detail_metadata(self, release_url: Optional[str]) -> Dict[str, Any]:
@@ -819,7 +805,18 @@ class FranceBoxOfficeProvider(BoxOfficeProvider):
             "allocine.fr" in release_url or "fichefilm_gen_cfilm" in release_url
         ):
             return self.primary.extract_detail_metadata(release_url)
-        return self.fallback.extract_detail_metadata(release_url)
+        return {}
+
+    def _latest_completed_week_start_date(
+        self, reference_date: Optional[datetime] = None
+    ) -> datetime:
+        """Return latest safely usable Wednesday-start French theatrical week."""
+        reference = reference_date or datetime.now()
+        cutoff = reference.date() - timedelta(days=2)
+        days_since_tuesday = (cutoff.weekday() - 1) % 7
+        latest_end_date = cutoff - timedelta(days=days_since_tuesday)
+        latest_start_date = latest_end_date - timedelta(days=6)
+        return datetime.combine(latest_start_date, datetime.min.time())
 
 
 class JPBoxOfficeProvider(BoxOfficeProvider):

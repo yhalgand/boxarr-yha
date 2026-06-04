@@ -29,7 +29,6 @@ _DEFAULT_MARKET_CONFIGS: Dict[str, Dict[str, Any]] = {
         "provider_config": {
             "country": "fr",
             "primary": "allocine",
-            "fallback": "jpboxoffice",
             "min_entries": 10,
         },
         "enabled": True,
