@@ -1626,7 +1626,7 @@ class RangeProcessor {
             this.updateProgress(i, `Processing ${weekStr}...`);
             
             try {
-                const market = getCurrentMarket ? getCurrentMarket() : (window.BOXARR_MARKET || 'us');
+                const market = getDashboardMarket();
                 const response = await fetch(apiUrlWithMarket('/scheduler/update-week', market), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -1776,6 +1776,17 @@ class RangeProcessor {
 // Global instance
 const rangeProcessor = new RangeProcessor();
 
+function getDashboardMarket() {
+    const renderedMarket = String(window.BOXARR_MARKET || '').trim().toLowerCase();
+    if (renderedMarket) {
+        return renderedMarket;
+    }
+    if (typeof getCurrentMarket === 'function') {
+        return getCurrentMarket();
+    }
+    return 'us';
+}
+
 // Mode switching
 let currentMode = 'single';
 
@@ -1839,7 +1850,7 @@ function updateRangeSummary() {
 
 // Quick presets
 function getHistoricalCapabilities() {
-    const market = getCurrentMarket ? getCurrentMarket() : (window.BOXARR_MARKET || 'us');
+    const market = getDashboardMarket();
     const definition = (typeof getMarketDefinition === 'function') ? getMarketDefinition(market) : null;
     const historical = definition?.capabilities?.historical || {};
     const currentYear = new Date().getFullYear();
@@ -2097,7 +2108,7 @@ function updateCurrentWeek() {
     showProgress('Updating Last Week');
     addToProgressLog('Starting update for last week...');
     
-    const market = getCurrentMarket ? getCurrentMarket() : (window.BOXARR_MARKET || 'us');
+    const market = getDashboardMarket();
     fetch(apiUrlWithMarket('/scheduler/trigger', market), {
         method: 'POST',
         headers: {'Content-Type': 'application/json'}
@@ -2136,7 +2147,7 @@ function updateHistoricalWeek() {
     showProgress(`Updating Week ${week}, ${year}`);
     addToProgressLog(`Starting update for Week ${week}, ${year}...`);
     
-    const market = getCurrentMarket ? getCurrentMarket() : (window.BOXARR_MARKET || 'us');
+    const market = getDashboardMarket();
     fetch(apiUrlWithMarket('/scheduler/update-week', market), {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -2206,7 +2217,7 @@ async function deleteWeek(year, week) {
 // Check for missing metadata
 async function checkMissingMetadata() {
     try {
-        const market = getCurrentMarket ? getCurrentMarket() : (window.BOXARR_MARKET || 'us');
+        const market = getDashboardMarket();
         const response = await fetch(apiUrlWithMarket('/admin/check-missing-metadata', market));
         const data = await response.json();
         
@@ -2236,7 +2247,7 @@ async function fixMissingData() {
     addToProgressLog('Starting metadata repair process...');
     
     try {
-        const market = getCurrentMarket ? getCurrentMarket() : (window.BOXARR_MARKET || 'us');
+        const market = getDashboardMarket();
         const response = await fetch(apiUrlWithMarket('/admin/repair-missing-metadata', market), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -2452,8 +2463,8 @@ function showCleanupModal() {
     const modal = document.getElementById('cleanupModal');
     if (modal) {
         const marketSelect = document.getElementById('cleanupMarket');
-        if (marketSelect && typeof getCurrentMarket === 'function') {
-            marketSelect.value = getCurrentMarket();
+        if (marketSelect) {
+            marketSelect.value = getDashboardMarket();
         }
         const currentLimit = document.getElementById('cleanupCurrentLimit');
         const limitInput = document.getElementById('cleanupLimit');

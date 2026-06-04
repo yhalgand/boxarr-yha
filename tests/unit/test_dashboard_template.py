@@ -41,6 +41,8 @@ def test_dashboard_template_contains_cleanup_modal_and_shared_modal_language():
         "historical_min_year",
         "historical_max_year",
         "this.requestDelayMs = 15000;",
+        "function getDashboardMarket()",
+        "const renderedMarket = String(window.BOXARR_MARKET || '').trim().toLowerCase();",
         "Updating Completed Historical Range",
         "completed historical fetches only",
         "const data = await this.readResponseData(response);",
@@ -52,6 +54,7 @@ def test_dashboard_template_contains_cleanup_modal_and_shared_modal_language():
         assert snippet in content, f"missing dashboard template snippet: {snippet}"
 
     assert "Cleanup Boxarr-added movies" not in content
+    assert "getCurrentMarket ? getCurrentMarket()" not in content
 
     modal_start = content.index('<div id="cleanupModal"')
     modal_end = content.index('{% endblock %}', modal_start)
